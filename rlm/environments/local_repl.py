@@ -1,7 +1,8 @@
 from rlm.environments.base_env import NonIsolatedEnv, REPLResult
 from rlm.core.comms_utils import send_lm_request, LMRequest
+from rlm.core.types import RLMChatCompletion
 
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, List
 from contextlib import contextmanager
 import tempfile
 import threading
@@ -151,6 +152,9 @@ class LocalREPL(NonIsolatedEnv):
         }
         self.locals: dict[str, Any] = {}
 
+        # Track LLM calls made during code execution
+        self._pending_llm_calls: List[RLMChatCompletion] = []
+
         # Add helper functions
         self.globals["FINAL_VAR"] = self._final_var
         self.globals["llm_query"] = self._llm_query
@@ -173,11 +177,25 @@ class LocalREPL(NonIsolatedEnv):
             return "Error: No LM handler configured"
 
         try:
+            start_time = time.perf_counter()
             request = LMRequest(prompt=prompt, model=model)
             response = send_lm_request(self.lm_handler_address, request)
+            execution_time = time.perf_counter() - start_time
 
             if not response.success:
                 return f"Error: {response.error}"
+
+            # Track this LLM call
+            self._pending_llm_calls.append(
+                RLMChatCompletion(
+                    prompt=prompt,
+                    response=response.content or "",
+                    prompt_tokens=response.prompt_tokens,
+                    completion_tokens=response.completion_tokens,
+                    execution_time=execution_time,
+                )
+            )
+
             return response.content or ""
         except Exception as e:
             return f"Error: LM query failed - {e}"
@@ -225,6 +243,9 @@ class LocalREPL(NonIsolatedEnv):
         """Execute code in the persistent namespace and return result."""
         start_time = time.perf_counter()
 
+        # Clear pending LLM calls from previous execution
+        self._pending_llm_calls = []
+
         with self._capture_output() as (stdout_buf, stderr_buf):
             with self._temp_cwd():
                 try:
@@ -247,6 +268,7 @@ class LocalREPL(NonIsolatedEnv):
             stderr=stderr,
             locals=self.locals.copy(),
             execution_time=time.perf_counter() - start_time,
+            rlm_calls=self._pending_llm_calls.copy(),
         )
 
     def __enter__(self):

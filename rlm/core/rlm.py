@@ -78,7 +78,7 @@ class RLM:
         self.logger = logger
 
     @contextmanager
-    def _spawn_completion_context(self):
+    def _spawn_completion_context(self, prompt: str | Dict[str, Any]):
         """
         Spawn an LM handler and environment for a single completion call.
         Cleans up both when the context exits.
@@ -98,6 +98,7 @@ class RLM:
         # Pass handler address to environment so it can make llm_query() calls
         env_kwargs = self.environment_kwargs.copy()
         env_kwargs["lm_handler_address"] = (lm_handler.host, lm_handler.port)
+        env_kwargs["context_payload"] = prompt
 
         # Initialize the environment
         environment: BaseEnv = get_environment(self.environment_type, env_kwargs)
@@ -122,7 +123,9 @@ class RLM:
 
         return message_history
 
-    def completion(self, prompt: str | Dict[str, Any]) -> str:
+    def completion(
+        self, prompt: str | Dict[str, Any], root_prompt: Optional[str] = None
+    ) -> str:
         """
         Recursive Language Model completion call. This is the main entry point for querying an RLM, and
         can replace a regular LM completion call.
@@ -130,16 +133,18 @@ class RLM:
         Spawns its own environment and LM handler for the duration of this call.
 
         Args:
-            prompt: A single string or dictionary of messages to pass to the model.
+            prompt: A single string or dictionary of messages to pass as context to the model.
+            root_prompt: We allow the RLM's root LM to see a (small) prompt that the user specifies. A common example of this
+            is if the user is asking the RLM to answer a question, we can pass the question as the root prompt.
         Returns:
             A final answer as a string.
         """
-        with self._spawn_completion_context() as (lm_handler, environment):
+        with self._spawn_completion_context(prompt) as (lm_handler, environment):
             message_history = self._setup_prompt(prompt)
 
             for i in range(self.max_iterations):
                 # Current prompt = message history + additional prompt suffix
-                current_prompt = message_history + [build_user_prompt(prompt, i)]
+                current_prompt = message_history + [build_user_prompt(root_prompt, i)]
 
                 iteration: RLMIteration = self._completion_turn(
                     prompt=current_prompt,

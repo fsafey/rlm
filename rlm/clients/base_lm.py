@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 from dataclasses import dataclass
 
@@ -33,4 +33,9 @@ class BaseLM(ABC):
     @abstractmethod
     def get_cost_summary(self) -> CostSummary:
         """Get cost summary for all calls."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_last_usage(self) -> Tuple[int, int]:
+        """Get the last usage of the model."""
         raise NotImplementedError

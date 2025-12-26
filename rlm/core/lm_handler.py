@@ -35,7 +35,10 @@ class LMRequestHandler(StreamRequestHandler):
             client = handler.get_client(request.model)
 
             content = client.completion(request.prompt)
-            response = LMResponse.success_response(content)
+            prompt_tokens, completion_tokens = client.get_last_usage()
+            response = LMResponse.success_response(
+                content, prompt_tokens, completion_tokens
+            )
             socket_send(self.connection, response.to_dict())
 
         except Exception as e:

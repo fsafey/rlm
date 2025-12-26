@@ -1,6 +1,6 @@
 from rlm.clients.base_lm import BaseLM, CostSummary
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from portkey_ai import Portkey
 from portkey_ai.api_resources.types.chat_complete_type import ChatCompletions
 
@@ -76,6 +76,10 @@ class PortkeyClient(BaseLM):
         self.total_input_tokens += response.usage.prompt_tokens
         self.total_output_tokens += response.usage.completion_tokens
 
+        # Track last call for handler to read
+        self.last_prompt_tokens = response.usage.prompt_tokens
+        self.last_completion_tokens = response.usage.completion_tokens
+
     def get_cost_summary(self) -> CostSummary:
         return CostSummary(
             total_calls=self.call_count,
@@ -83,3 +87,6 @@ class PortkeyClient(BaseLM):
             total_input_tokens=self.total_input_tokens,
             total_output_tokens=self.total_output_tokens,
         )
+
+    def get_last_usage(self) -> Tuple[int, int]:
+        return self.last_prompt_tokens, self.last_completion_tokens

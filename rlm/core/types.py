@@ -30,22 +30,20 @@ def _serialize_value(value: Any) -> Any:
 ########################################################
 @dataclass
 class RLMChatCompletion:
-    # TODO: add cost calculations
-    messages: List[Dict[str, Any]]
-    response: str
-    execution_time: float
+    """Record of a single LLM call made from within the environment."""
 
-    def __init__(
-        self, messages: List[Dict[str, Any]], response: str, execution_time: float
-    ):
-        self.messages = messages
-        self.response = response
-        self.execution_time = execution_time
+    prompt: str | Dict[str, Any]
+    response: str
+    prompt_tokens: int
+    completion_tokens: int
+    execution_time: float
 
     def to_dict(self):
         return {
-            "messages": self.messages,
+            "prompt": self.prompt,
             "response": self.response,
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
             "execution_time": self.execution_time,
         }
 
@@ -56,17 +54,24 @@ class REPLResult:
     stderr: str
     locals: dict
     execution_time: float
+    llm_calls: List["RLMChatCompletion"]
 
     def __init__(
-        self, stdout: str, stderr: str, locals: dict, execution_time: float = None
+        self,
+        stdout: str,
+        stderr: str,
+        locals: dict,
+        execution_time: float = None,
+        rlm_calls: List["RLMChatCompletion"] = None,
     ):
         self.stdout = stdout
         self.stderr = stderr
         self.locals = locals
         self.execution_time = execution_time
+        self.rlm_calls = rlm_calls or []
 
     def __str__(self):
-        return f"REPLResult(stdout={self.stdout}, stderr={self.stderr}, locals={self.locals}, execution_time={self.execution_time})"
+        return f"REPLResult(stdout={self.stdout}, stderr={self.stderr}, locals={self.locals}, execution_time={self.execution_time}, rlm_calls={len(self.rlm_calls)})"
 
     def to_dict(self):
         return {
@@ -74,6 +79,7 @@ class REPLResult:
             "stderr": self.stderr,
             "locals": {k: _serialize_value(v) for k, v in self.locals.items()},
             "execution_time": self.execution_time,
+            "rlm_calls": [call.to_dict() for call in self.rlm_calls],
         }
 
 

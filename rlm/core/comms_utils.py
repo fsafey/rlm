@@ -46,6 +46,8 @@ class LMResponse:
 
     content: Optional[str] = None
     error: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
     @property
     def success(self) -> bool:
@@ -56,7 +58,11 @@ class LMResponse:
         """Convert to dict, excluding None values."""
         if self.error is not None:
             return {"error": self.error}
-        return {"content": self.content or ""}
+        return {
+            "content": self.content or "",
+            "prompt_tokens": self.prompt_tokens,
+            "completion_tokens": self.completion_tokens,
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "LMResponse":
@@ -64,12 +70,20 @@ class LMResponse:
         return cls(
             content=data.get("content"),
             error=data.get("error"),
+            prompt_tokens=data.get("prompt_tokens", 0),
+            completion_tokens=data.get("completion_tokens", 0),
         )
 
     @classmethod
-    def success_response(cls, content: str) -> "LMResponse":
+    def success_response(
+        cls, content: str, prompt_tokens: int = 0, completion_tokens: int = 0
+    ) -> "LMResponse":
         """Create a successful response."""
-        return cls(content=content)
+        return cls(
+            content=content,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
     @classmethod
     def error_response(cls, error: str) -> "LMResponse":

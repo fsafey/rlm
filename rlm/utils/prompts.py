@@ -1,6 +1,6 @@
 from rlm.core.types import QueryMetadata
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # System prompt for the REPL environment with explicit final answer checking
 RLM_SYSTEM_PROMPT = """You are tasked with answering a query with associated context. You can access, transform, and analyze this context interactively in a REPL environment that can recursively query sub-LLMs, which you are strongly encouraged to use as much as possible. You will be queried iteratively until you provide a final answer.
@@ -108,17 +108,28 @@ def build_rlm_system_prompt(
     ]
 
 
-USER_PROMPT = """Think step-by-step on what to do using the REPL environment (which contains the context) to answer the original query: \"{query}\".\n\nContinue using the REPL environment, which has the `context` variable, and querying sub-LLMs by writing to ```repl``` tags, and determine your answer. Your next action:"""
+USER_PROMPT = """Think step-by-step on what to do using the REPL environment (which contains the context) to answer the prompt.\n\nContinue using the REPL environment, which has the `context` variable, and querying sub-LLMs by writing to ```repl``` tags, and determine your answer. Your next action:"""
+USER_PROMPT_WITH_ROOT = """Think step-by-step on what to do using the REPL environment (which contains the context) to answer the original prompt: \"{root_prompt}\".\n\nContinue using the REPL environment, which has the `context` variable, and querying sub-LLMs by writing to ```repl``` tags, and determine your answer. Your next action:"""
 
 
-def build_user_prompt(query: str, iteration: int = 0) -> Dict[str, str]:
+def build_user_prompt(
+    root_prompt: Optional[str] = None, iteration: int = 0
+) -> Dict[str, str]:
     if iteration == 0:
-        safeguard = "You have not interacted with the REPL environment or seen your context yet. Your next action should be to look through, don't just provide a final answer yet.\n\n"
-        prompt = safeguard + USER_PROMPT.format(query=query)
+        safeguard = "You have not interacted with the REPL environment or seen your prompt / context yet. Your next action should be to look through and figure out how to answer the prompt, so don't just provide a final answer yet.\n\n"
+        prompt = safeguard + (
+            USER_PROMPT_WITH_ROOT.format(root_prompt=root_prompt)
+            if root_prompt
+            else USER_PROMPT
+        )
         return {"role": "user", "content": prompt}
     else:
         prompt = (
             "The history before is your previous interactions with the REPL environment. "
-            + USER_PROMPT.format(query=query)
+            + (
+                USER_PROMPT_WITH_ROOT.format(root_prompt=root_prompt)
+                if root_prompt
+                else USER_PROMPT
+            )
         )
         return {"role": "user", "content": prompt}

@@ -10,8 +10,9 @@ class BaseEnv(ABC):
     where isolated environments are on a separate machine from the LM.
     """
 
-    def __init__(self, persistent: bool = False, **kwargs):
+    def __init__(self, persistent: bool = False, depth: int = 1, **kwargs):
         self.persistent = persistent
+        self.depth = depth
         self.kwargs = kwargs
 
     @abstractmethod

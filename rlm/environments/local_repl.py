@@ -124,9 +124,10 @@ class LocalREPL(NonIsolatedEnv):
         context_payload: dict | list | str | None = None,
         setup_code: str | None = None,
         persistent: bool = False,
+        depth: int = 1,
         **kwargs,
     ):
-        super().__init__(persistent=persistent, **kwargs)
+        super().__init__(persistent=persistent, depth=depth, **kwargs)
 
         self.lm_handler_address = lm_handler_address
         self.original_cwd = os.getcwd()
@@ -181,7 +182,7 @@ class LocalREPL(NonIsolatedEnv):
             return "Error: No LM handler configured"
 
         try:
-            request = LMRequest(prompt=prompt, model=model)
+            request = LMRequest(prompt=prompt, model=model, depth=self.depth)
             response = send_lm_request(self.lm_handler_address, request)
 
             if not response.success:
@@ -210,7 +211,9 @@ class LocalREPL(NonIsolatedEnv):
             return ["Error: No LM handler configured"] * len(prompts)
 
         try:
-            responses = send_lm_request_batched(self.lm_handler_address, prompts, model=model)
+            responses = send_lm_request_batched(
+                self.lm_handler_address, prompts, model=model, depth=self.depth
+            )
 
             results = []
             for response in responses:

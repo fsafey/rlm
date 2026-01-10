@@ -76,6 +76,14 @@ class RLM:
         self.environment_kwargs = (
             environment_kwargs.copy() if environment_kwargs is not None else {}
         )
+        # Validate other_backends: currently only support one additional backend
+        if other_backends is not None:
+            if len(other_backends) != 1:
+                raise ValueError(
+                    "We currently only support one additional backend for the recursive sub-calls! "
+                    "This model will be the model used for recursive sub-calls, but this will change in the future"
+                )
+
         self.other_backends = other_backends
         self.other_backend_kwargs = other_backend_kwargs
 
@@ -124,9 +132,15 @@ class RLM:
         """
         # Create client and wrap in handler
         client: BaseLM = get_client(self.backend, self.backend_kwargs)
-        lm_handler = LMHandler(client)
 
-        # Register other clients to be available as sub-call options
+        # Create other_backend_client if provided (for depth=1 routing)
+        other_backend_client: BaseLM | None = None
+        if self.other_backends and self.other_backend_kwargs:
+            other_backend_client = get_client(self.other_backends[0], self.other_backend_kwargs[0])
+
+        lm_handler = LMHandler(client, other_backend_client=other_backend_client)
+
+        # Register other clients to be available as sub-call options (by model name)
         if self.other_backends and self.other_backend_kwargs:
             for backend, kwargs in zip(self.other_backends, self.other_backend_kwargs, strict=True):
                 other_client: BaseLM = get_client(backend, kwargs)
@@ -150,6 +164,7 @@ class RLM:
             env_kwargs = self.environment_kwargs.copy()
             env_kwargs["lm_handler_address"] = (lm_handler.host, lm_handler.port)
             env_kwargs["context_payload"] = prompt
+            env_kwargs["depth"] = self.depth + 1  # Environment depth is RLM depth + 1
             environment: BaseEnv = get_environment(self.environment_type, env_kwargs)
 
             if self.persistent:

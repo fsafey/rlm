@@ -28,6 +28,7 @@ class LLMProxyHandler(BaseHTTPRequestHandler):
     lm_handler_address: tuple[str, int] | None = None
     pending_calls: list[RLMChatCompletion] = []
     lock: threading.Lock = threading.Lock()
+    depth: int = 1
 
     def log_message(self, *args):
         pass
@@ -55,7 +56,7 @@ class LLMProxyHandler(BaseHTTPRequestHandler):
         if not self.lm_handler_address:
             return {"error": "No LM handler configured"}
 
-        request = LMRequest(prompt=body.get("prompt"), model=body.get("model"))
+        request = LMRequest(prompt=body.get("prompt"), model=body.get("model"), depth=self.depth)
         response = send_lm_request(self.lm_handler_address, request)
 
         if not response.success:
@@ -72,7 +73,7 @@ class LLMProxyHandler(BaseHTTPRequestHandler):
 
         prompts = body.get("prompts", [])
         responses = send_lm_request_batched(
-            self.lm_handler_address, prompts, model=body.get("model")
+            self.lm_handler_address, prompts, model=body.get("model"), depth=self.depth
         )
 
         results = []
@@ -87,7 +88,7 @@ class LLMProxyHandler(BaseHTTPRequestHandler):
         return {"responses": results}
 
 
-def _build_exec_script(code: str, proxy_port: int) -> str:
+def _build_exec_script(code: str, proxy_port: int, depth: int = 1) -> str:
     """Build execution script for the container."""
     code_b64 = base64.b64encode(code.encode()).decode()
 
@@ -104,7 +105,7 @@ STATE = "/workspace/state.dill"
 
 def llm_query(prompt, model=None):
     try:
-        r = requests.post(f"{{PROXY}}/llm_query", json={{"prompt": prompt, "model": model}}, timeout=300)
+        r = requests.post(f"{{PROXY}}/llm_query", json={{"prompt": prompt, "model": model, "depth": {depth}}}, timeout=300)
         d = r.json()
         return d.get("response") or f"Error: {{d.get('error')}}"
     except Exception as e:
@@ -112,7 +113,7 @@ def llm_query(prompt, model=None):
 
 def llm_query_batched(prompts, model=None):
     try:
-        r = requests.post(f"{{PROXY}}/llm_query_batched", json={{"prompts": prompts, "model": model}}, timeout=300)
+        r = requests.post(f"{{PROXY}}/llm_query_batched", json={{"prompts": prompts, "model": model, "depth": {depth}}}, timeout=300)
         d = r.json()
         return d.get("responses") or [f"Error: {{d.get('error')}}"] * len(prompts)
     except Exception as e:
@@ -181,13 +182,14 @@ class DockerREPL(NonIsolatedEnv):
         context_payload: dict | list | str | None = None,
         setup_code: str | None = None,
         persistent: bool = False,
+        depth: int = 1,
         **kwargs,
     ):
         if persistent:
             raise NotImplementedError(
                 "Persistent REPLs are currently not supported for environment: DockerREPL"
             )
-        super().__init__(persistent=persistent, **kwargs)
+        super().__init__(persistent=persistent, depth=depth, **kwargs)
 
         self.image = image
         self.lm_handler_address = lm_handler_address
@@ -216,6 +218,7 @@ class DockerREPL(NonIsolatedEnv):
                 "lm_handler_address": self.lm_handler_address,
                 "pending_calls": self.pending_calls,
                 "lock": self._calls_lock,
+                "depth": self.depth,
             },
         )
         self.proxy_server = HTTPServer(("127.0.0.1", 0), handler)
@@ -266,7 +269,7 @@ class DockerREPL(NonIsolatedEnv):
         with self._calls_lock:
             self.pending_calls.clear()
 
-        script = _build_exec_script(code, self.proxy_port)
+        script = _build_exec_script(code, self.proxy_port, self.depth)
         result = subprocess.run(
             ["docker", "exec", self.container_id, "python", "-c", script],
             capture_output=True,

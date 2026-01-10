@@ -111,7 +111,7 @@ if __name__ == "__main__":
 # =============================================================================
 
 
-def _build_exec_script(code: str, broker_port: int = 8888) -> str:
+def _build_exec_script(code: str, broker_port: int = 8888, depth: int = 1) -> str:
     """
     Build a script that executes code with state persistence.
     LLM queries go through the local broker server.
@@ -144,7 +144,7 @@ def llm_query(prompt, model=None):
     try:
         response = requests.post(
             f"{{BROKER_URL}}/enqueue",
-            json={{"type": "single", "prompt": prompt, "model": model}},
+            json={{"type": "single", "prompt": prompt, "model": model, "depth": {depth}}},
             timeout=300,
         )
         data = response.json()
@@ -160,7 +160,7 @@ def llm_query_batched(prompts, model=None):
     try:
         response = requests.post(
             f"{{BROKER_URL}}/enqueue",
-            json={{"type": "batched", "prompts": prompts, "model": model}},
+            json={{"type": "batched", "prompts": prompts, "model": model, "depth": {depth}}},
             timeout=300,
         )
         data = response.json()
@@ -284,9 +284,10 @@ class PrimeREPL(IsolatedEnv):
         setup_code: str | None = None,
         network_access: bool = True,
         persistent: bool = False,
+        depth: int = 1,
         **kwargs: Any,
     ):
-        super().__init__(persistent=persistent, **kwargs)
+        super().__init__(persistent=persistent, depth=depth, **kwargs)
 
         if persistent:
             raise NotImplementedError(
@@ -454,7 +455,7 @@ class PrimeREPL(IsolatedEnv):
 
         if req_type == "single":
             prompt = req_data.get("prompt")
-            request = LMRequest(prompt=prompt, model=model)
+            request = LMRequest(prompt=prompt, model=model, depth=self.depth)
             response = send_lm_request(self.lm_handler_address, request)
 
             if not response.success:
@@ -468,7 +469,9 @@ class PrimeREPL(IsolatedEnv):
 
         elif req_type == "batched":
             prompts = req_data.get("prompts", [])
-            responses = send_lm_request_batched(self.lm_handler_address, prompts, model=model)
+            responses = send_lm_request_batched(
+                self.lm_handler_address, prompts, model=model, depth=self.depth
+            )
 
             results = []
             for resp in responses:
@@ -504,7 +507,7 @@ class PrimeREPL(IsolatedEnv):
             self.pending_llm_calls.clear()
 
         # Build and write the script
-        script = _build_exec_script(code, self.BROKER_PORT)
+        script = _build_exec_script(code, self.BROKER_PORT, self.depth)
         script_b64 = base64.b64encode(script.encode()).decode()
         self.client.execute_command(
             self.sandbox_id,

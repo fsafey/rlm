@@ -39,7 +39,7 @@ class LMRequestHandler(StreamRequestHandler):
 
             self._safe_send(response)
 
-        except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError) as e:
+        except (BrokenPipeError, ConnectionError, ConnectionResetError, OSError):
             # Client disconnected - this is expected during parallel execution
             # when workers complete and close their sockets. Silently ignore.
             pass

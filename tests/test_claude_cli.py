@@ -41,8 +41,7 @@ def test_default_cmd(mock_run: MagicMock) -> None:
     assert "--output-format" in cmd
     assert cmd[cmd.index("--output-format") + 1] == "text"
     assert "--no-session-persistence" in cmd
-    assert "--tools" in cmd
-    assert cmd[cmd.index("--tools") + 1] == ""
+    assert "--tools" not in cmd  # empty tools string omitted
 
 
 # -- Per-flag tests --

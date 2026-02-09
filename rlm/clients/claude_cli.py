@@ -68,9 +68,9 @@ class ClaudeCLI(BaseLM):
             "--output-format",
             "text",
             "--no-session-persistence",
-            "--tools",
-            self.tools,
         ]
+        if self.tools:
+            cmd.extend(["--tools", self.tools])
         effective_model = model_override or self.model
         if effective_model:
             cmd.extend(["--model", effective_model])

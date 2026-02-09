@@ -15,6 +15,8 @@ Recursive Language Models (RLMs) — task-agnostic inference paradigm enabling L
 | `rlm/logger/`        | Trajectory logging (.jsonl)                            |
 | `tests/`             | pytest test suite                                      |
 | `visualizer/`        | Next.js trajectory viewer (shadcn/ui)                  |
+| `rlm_search/`        | FastAPI agentic search backend (port 8092)             |
+| `search-app/`        | Vite + React search UI (port 3002, proxies to 8092)   |
 | `examples/`          | Usage examples                                         |
 | `docs/`              | Documentation site (Next.js)                           |
 
@@ -46,6 +48,15 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 uv run python -c "from rlm import RLM"  # Verify import
 uv sync --group dev --group test        # Install dev deps
 cd visualizer && npm run dev            # Trajectory viewer (localhost:3001)
+cd search-app && npm run dev            # Search UI (localhost:3002)
+```
+
+### Agentic Search
+
+```bash
+uv pip install fastapi uvicorn httpx    # Search deps (NOT in pyproject.toml)
+cd rlm_search && uvicorn api:app --port 8092  # Search backend
+cd search-app && npm install && npm run dev    # Search frontend (port 3002)
 ```
 
 ### Optional Dependency Groups
@@ -133,6 +144,34 @@ All types in `rlm/core/types.py`. Dataclasses with `to_dict()`/`from_dict()` rou
 | `IsolatedEnv`        | `rlm/environments/base_env.py` | Cloud sandbox REPLs |
 | `SupportsPersistence`| `rlm/environments/base_env.py` | Multi-turn envs     |
 
+### Agentic Search (`rlm_search/`)
+
+Application layer built on RLM's injection pattern — zero core changes.
+
+```
+POST /api/search → search_id → GET /api/search/{id}/stream (SSE)
+
+SSE events: metadata → iteration* → done|error
+
+_run_search():
+  build_search_setup_code()      # injects search(), browse(), search_log
+  RLM(
+    custom_system_prompt=...,    # tool docs + domain taxonomy
+    environment_kwargs={"setup_code": setup_code},
+    logger=StreamingLogger       # sync thread → async SSE bridge
+  ).completion(query)
+```
+
+**REPL tools** (injected via `setup_code`):
+- `search(query, collection, filters, top_k)` → Cascade API (`CASCADE_API_URL`, default port 8091)
+- `browse(collection, filters, offset, limit)` → Cascade API (filter-based, no query)
+
+**Env vars** (`rlm_search/config.py`, loaded via `python-dotenv`):
+- `CASCADE_API_URL` (default `http://localhost:8091`), `CASCADE_API_KEY`
+- `ANTHROPIC_API_KEY`, `RLM_BACKEND`, `RLM_MODEL`, `RLM_MAX_ITERATIONS`, `RLM_MAX_DEPTH`
+
+**Frontend** (`search-app/`): Vite + React 19 + Tailwind + shadcn/ui. Proxies `/api/*` → `localhost:8092`.
+
 ### Registration Pattern
 
 Both `rlm/clients/__init__.py` and `rlm/environments/__init__.py` use the same pattern:
@@ -152,3 +191,5 @@ uv run pytest -k "test_parsing" -v                # By pattern
 - `tests/mock_lm.py` provides a mock BaseLM for tests that don't need real API calls
 - Persistence tests: `tests/test_local_repl_persistent.py`, `tests/test_multi_turn_integration.py`
 - No real API calls in CI — mock or skip
+- Search tests: `tests/test_repl_tools.py` (19 tests), `tests/test_search_api.py` (10 tests)
+- Search API tests use `starlette.testclient.TestClient` (sync, no httpx needed)

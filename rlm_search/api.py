@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse
 
 from rlm.core.rlm import RLM
 from rlm_search.config import (
+    ANTHROPIC_API_KEY,
     CASCADE_API_KEY,
     CASCADE_API_URL,
     RLM_BACKEND,
@@ -77,9 +78,16 @@ def _run_search(search_id: str, query: str, collection: str, settings: dict[str,
             api_key=CASCADE_API_KEY,
         )
 
+        if backend == "claude_cli":
+            backend_kwargs: dict[str, Any] = {"model": model}
+        else:
+            backend_kwargs: dict[str, Any] = {"model_name": model}
+            if ANTHROPIC_API_KEY:
+                backend_kwargs["api_key"] = ANTHROPIC_API_KEY
+
         rlm = RLM(
             backend=backend,
-            backend_kwargs={"model_name": model},
+            backend_kwargs=backend_kwargs,
             environment="local",
             environment_kwargs={"setup_code": setup_code},
             max_iterations=max_iterations,

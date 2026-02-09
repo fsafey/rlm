@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { CodeBlock as CodeBlockType } from '@/lib/types';
+import { CodeBlock as CodeBlockType, extractTokens } from '@/lib/types';
 import { CodeWithLineNumbers } from './CodeWithLineNumbers';
 
 interface CodeBlockProps {
@@ -147,33 +147,43 @@ export function CodeBlock({ block, index }: CodeBlockProps) {
                   </span>
                 </div>
                 <div className="p-4 space-y-3">
-                  {block.result.rlm_calls.map((call, i) => (
-                    <div 
-                      key={i}
-                      className="border border-fuchsia-500/30 dark:border-fuchsia-400/30 rounded-lg p-3 bg-background"
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge className="bg-fuchsia-500 text-white dark:bg-fuchsia-400 dark:text-fuchsia-950 text-xs">
-                          llm_query #{i + 1}
-                        </Badge>
-                        <div className="flex gap-2 text-xs text-muted-foreground">
-                          <span>{call.prompt_tokens} prompt</span>
-                          <span>•</span>
-                          <span>{call.completion_tokens} completion</span>
-                        </div>
+                  {block.result.rlm_calls.map((call, i) => {
+                    const tokens = extractTokens(call);
+                    return (
+                    <Collapsible key={i}>
+                      <div className="border border-fuchsia-500/30 dark:border-fuchsia-400/30 rounded-lg bg-background overflow-hidden">
+                        <CollapsibleTrigger asChild>
+                          <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-fuchsia-500/10 dark:hover:bg-fuchsia-400/10 transition-colors">
+                            <Badge className="bg-fuchsia-500 text-white dark:bg-fuchsia-400 dark:text-fuchsia-950 text-xs">
+                              llm_query #{i + 1}{call.root_model ? ` (${call.root_model})` : ''}
+                            </Badge>
+                            <div className="flex gap-2 text-xs text-muted-foreground">
+                              <span>{tokens.input.toLocaleString()} in</span>
+                              <span>•</span>
+                              <span>{tokens.output.toLocaleString()} out</span>
+                              <span>•</span>
+                              <span>{(call.execution_time ?? 0).toFixed(2)}s</span>
+                            </div>
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="px-3 pb-3 space-y-2 border-t border-fuchsia-500/20 dark:border-fuchsia-400/20">
+                            <div className="text-xs text-muted-foreground mt-2">Prompt:</div>
+                            <div className="text-sm bg-muted rounded p-2 max-h-40 overflow-y-auto border border-border">
+                              {typeof call.prompt === 'string'
+                                ? call.prompt
+                                : JSON.stringify(call.prompt, null, 2)}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Response:</div>
+                            <div className="text-sm bg-muted rounded p-2 max-h-40 overflow-y-auto border border-border">
+                              {call.response}
+                            </div>
+                          </div>
+                        </CollapsibleContent>
                       </div>
-                      <div className="text-xs text-muted-foreground mb-1">Prompt:</div>
-                      <div className="text-sm bg-muted rounded p-2 mb-2 max-h-24 overflow-y-auto border border-border">
-                        {typeof call.prompt === 'string' 
-                          ? call.prompt.slice(0, 500) + (call.prompt.length > 500 ? '...' : '')
-                          : JSON.stringify(call.prompt).slice(0, 500)}
-                      </div>
-                      <div className="text-xs text-muted-foreground mb-1">Response:</div>
-                      <div className="text-sm bg-muted rounded p-2 max-h-24 overflow-y-auto border border-border">
-                        {call.response.slice(0, 500) + (call.response.length > 500 ? '...' : '')}
-                      </div>
-                    </div>
-                  ))}
+                    </Collapsible>
+                    );
+                  })}
                 </div>
               </div>
             )}

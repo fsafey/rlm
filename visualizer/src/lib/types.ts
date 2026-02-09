@@ -1,11 +1,21 @@
 // Types matching the RLM log format
 
+export interface ModelUsageSummary {
+  total_calls: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+}
+
+export interface UsageSummary {
+  model_usage_summaries: Record<string, ModelUsageSummary>;
+}
+
 export interface RLMChatCompletion {
+  root_model?: string;
   prompt: string | Record<string, unknown>;
   response: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  execution_time: number;
+  usage_summary?: UsageSummary;
+  execution_time?: number;
 }
 
 export interface REPLResult {
@@ -68,5 +78,18 @@ export function extractFinalAnswer(answer: string | [string, string] | null): st
     return answer[1];
   }
   return answer;
+}
+
+/** Extract total input/output tokens from a sub-LM call's usage summary. */
+export function extractTokens(call: RLMChatCompletion): { input: number; output: number } {
+  const summaries = call.usage_summary?.model_usage_summaries;
+  if (!summaries) return { input: 0, output: 0 };
+  let input = 0;
+  let output = 0;
+  for (const usage of Object.values(summaries)) {
+    input += usage.total_input_tokens ?? 0;
+    output += usage.total_output_tokens ?? 0;
+  }
+  return { input, output };
 }
 

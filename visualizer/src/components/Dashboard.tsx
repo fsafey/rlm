@@ -40,7 +40,7 @@ export function Dashboard() {
         
         for (const fileName of files) {
           try {
-            const response = await fetch(`/logs/${fileName}`);
+            const response = await fetch(`/api/logs/${fileName}`);
             if (!response.ok) continue;
             const content = await response.text();
             const parsed = parseLogFile(fileName, content);
@@ -81,13 +81,13 @@ export function Dashboard() {
 
   const loadDemoLog = useCallback(async (fileName: string) => {
     try {
-      const response = await fetch(`/logs/${fileName}`);
+      const response = await fetch(`/api/logs/${fileName}`);
       if (!response.ok) throw new Error('Failed to load demo log');
       const content = await response.text();
       handleFileLoaded(fileName, content);
     } catch (error) {
       console.error('Error loading demo log:', error);
-      alert('Failed to load demo log. Make sure the log files are in the public/logs folder.');
+      alert('Failed to load demo log. Make sure log files exist in rlm_logs/ at the project root.');
     }
   }, [handleFileLoaded]);
 
@@ -181,7 +181,7 @@ export function Dashboard() {
                 ) : demoLogs.length === 0 ? (
                   <Card className="border-dashed">
                     <CardContent className="p-6 text-center text-muted-foreground text-sm">
-                      No log files found in /public/logs/
+                      No log files found in rlm_logs/
                     </CardContent>
                   </Card>
                 ) : (

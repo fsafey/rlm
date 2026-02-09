@@ -68,6 +68,7 @@ export function LogViewer({ logFile, onBack }: LogViewerProps) {
                 </h1>
                 <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
                   {config.root_model ?? 'Unknown model'} • {config.backend ?? 'Unknown backend'} • {config.environment_type ?? 'Unknown env'}
+                  {config.max_depth != null && ` • depth ${config.max_depth}`}
                 </p>
               </div>
             </div>
@@ -139,6 +140,14 @@ export function LogViewer({ logFile, onBack }: LogViewerProps) {
               icon="⏱"
               variant="yellow"
             />
+            {config.max_depth != null && (
+              <StatsCard
+                label="Max Depth"
+                value={config.max_depth}
+                icon="⥁"
+                variant="magenta"
+              />
+            )}
           </div>
         </div>
       </div>
@@ -148,6 +157,7 @@ export function LogViewer({ logFile, onBack }: LogViewerProps) {
         iterations={iterations}
         selectedIteration={selectedIteration}
         onSelectIteration={setSelectedIteration}
+        maxDepth={config.max_depth}
       />
 
       {/* Main Content - Resizable Split View */}

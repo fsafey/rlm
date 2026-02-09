@@ -10,6 +10,7 @@ interface IterationTimelineProps {
   iterations: RLMIteration[];
   selectedIteration: number;
   onSelectIteration: (index: number) => void;
+  maxDepth?: number | null;
 }
 
 function getIterationStats(iteration: RLMIteration) {
@@ -46,10 +47,11 @@ function getIterationStats(iteration: RLMIteration) {
   };
 }
 
-export function IterationTimeline({ 
-  iterations, 
-  selectedIteration, 
-  onSelectIteration 
+export function IterationTimeline({
+  iterations,
+  selectedIteration,
+  onSelectIteration,
+  maxDepth
 }: IterationTimelineProps) {
   const selectedRef = useRef<HTMLDivElement>(null);
   
@@ -77,6 +79,11 @@ export function IterationTimeline({
         <span className="text-[10px] text-muted-foreground">
           ({iterations.length} total)
         </span>
+        {maxDepth != null && (
+          <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 ml-1 border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400">
+            {maxDepth > 0 ? `depth 0 → ${maxDepth}` : 'depth 0'}
+          </Badge>
+        )}
         <div className="flex-1" />
         <span className="text-[10px] text-muted-foreground">
           ← scroll →
@@ -144,7 +151,7 @@ export function IterationTimeline({
                       )}
                       {stats.subCalls > 0 && (
                         <span className="text-[10px] text-fuchsia-600 dark:text-fuchsia-400">
-                          {stats.subCalls} sub
+                          ⥁ {stats.subCalls} sub
                         </span>
                       )}
                       <span className="text-[10px] text-muted-foreground ml-auto">

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "SubagentStop": [],
+    "Stop": [],
+    "Notification": [],
+    "UserPromptSubmit": [],
+    "SessionEnd": []
+  },
+  "model": "opus",
+  "alwaysThinkingEnabled": true,
+  "disableAllHooks": false,
+  "enableAllProjectMcpServers": true
+}

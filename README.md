@@ -41,14 +41,35 @@ You can try out RLMs quickly by installing from PyPi:
 pip install rlms
 ```
 
-The default RLM client uses a REPL environment that runs on the host process through Python `exec` calls. It uses the same virtual environment as the host process (i.e. it will have access to the same dependencies), but with some limitations in its available global modules. As an example, we can call RLM completions using GPT-5-nano:
+The default RLM client uses a REPL environment that runs on the host process through Python `exec` calls. It uses the same virtual environment as the host process (i.e. it will have access to the same dependencies), but with some limitations in its available global modules.
+
+### Zero-Config: Claude CLI Backend
+
+If you have [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated, you can run RLMs with **no API keys or environment variables** — the `claude_cli` backend shells out to `claude -p`, inheriting your existing session:
+
+```python
+from rlm import RLM
+
+rlm = RLM(
+    backend="claude_cli",
+    backend_kwargs={"model_name": "claude-cli"},
+    verbose=True,
+)
+
+print(rlm.completion("Print me the first 100 powers of two, each on a newline.").response)
+```
+
+### API-Based Backends
+
+Alternatively, use any supported API backend by setting the appropriate environment variable:
+
 ```python
 from rlm import RLM
 
 rlm = RLM(
     backend="openai",
     backend_kwargs={"model_name": "gpt-5-nano"},
-    verbose=True,  # For printing to console with rich, disabled by default.
+    verbose=True,
 )
 
 print(rlm.completion("Print me the first 100 powers of two, each on a newline.").response)
@@ -69,7 +90,7 @@ This project includes a `Makefile` to simplify common tasks.
 - `make install`: Install base dependencies.
 - `make check`: Run linter, formatter, and tests.
 
-To run a quick test, the following will run an RLM query with the OpenAI client using your environment variable `OPENAI_API_KEY` (feel free to change this). This will generate console output as well as a log which you can use with the visualizer to explore the trajectories.
+To run a quick test:
 ```bash
 make quickstart
 ```
@@ -115,7 +136,20 @@ export PRIME_API_KEY=...
 
 
 ### Model Providers
-We currently support most major clients (OpenAI, Anthropic), as well as the router platforms (OpenRouter, Portkey, LiteLLM). For local models, we recommend using vLLM (which interfaces with the [OpenAI client](https://github.com/alexzhang13/rlm/blob/main/rlm/clients/openai.py)). To view or add support for more clients, start by looking at [`rlm/clients/`](https://github.com/alexzhang13/rlm/tree/main/rlm/clients).
+
+| Backend | Key | Notes |
+|---------|-----|-------|
+| `claude_cli` | None | Shells out to `claude -p`. Zero config if Claude Code is authenticated. |
+| `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-5, etc. |
+| `anthropic` | `ANTHROPIC_API_KEY` | Claude via API. |
+| `gemini` | `GOOGLE_API_KEY` | Gemini models. |
+| `portkey` | `PORTKEY_API_KEY` | Gateway to any provider. |
+| `openrouter` | `OPENROUTER_API_KEY` | Multi-provider router. |
+| `litellm` | varies | Unified interface to 100+ models. |
+| `vllm` | None | Local models via OpenAI-compatible server (`base_url` required). |
+| `azure_openai` | `AZURE_OPENAI_API_KEY` | Azure-hosted OpenAI models. |
+
+To view or add support for more clients, start by looking at [`rlm/clients/`](https://github.com/alexzhang13/rlm/tree/main/rlm/clients).
 
 ## Relevant Reading
 * **[Dec '25]** [Recursive Language Models arXiv](https://arxiv.org/abs/2512.24601)

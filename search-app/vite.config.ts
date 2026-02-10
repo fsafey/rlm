@@ -3,6 +3,9 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
+const frontendPort = parseInt(process.env.SEARCH_FRONTEND_PORT || '3002', 10)
+const backendPort = parseInt(process.env.SEARCH_BACKEND_PORT || '8092', 10)
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -11,10 +14,10 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3002,
+    port: frontendPort,
     proxy: {
       '/api': {
-        target: 'http://localhost:8092',
+        target: `http://localhost:${backendPort}`,
         changeOrigin: true,
       },
     },

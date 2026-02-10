@@ -22,8 +22,8 @@ help:
 	@echo "  make format         - Run ruff formatter"
 	@echo "  make test           - Run tests"
 	@echo "  make check          - Run lint + format + tests"
-	@echo "  make backend        - Start rlm_search API server (port 8092)"
-	@echo "  make frontend       - Start search frontend (port 3002)"
+	@echo "  make backend        - Start rlm_search API server (SEARCH_BACKEND_PORT, default 8092)"
+	@echo "  make frontend       - Start search frontend (SEARCH_FRONTEND_PORT, default 3002)"
 
 install:
 	uv sync
@@ -60,7 +60,7 @@ test: install-dev
 check: lint format test
 
 backend:
-	uv run uvicorn rlm_search.api:app --port 8092 --app-dir /Users/farieds/projects/rlm 2>&1 | tee /tmp/rlm_search
+	uv run uvicorn rlm_search.api:app --port $${SEARCH_BACKEND_PORT:-8092} --app-dir $(CURDIR) 2>&1 | tee /tmp/rlm_search
 
 frontend:
-	cd search-app && npm run dev
+	cd search-app && SEARCH_FRONTEND_PORT=$${SEARCH_FRONTEND_PORT:-3002} SEARCH_BACKEND_PORT=$${SEARCH_BACKEND_PORT:-8092} npm run dev

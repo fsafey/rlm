@@ -53,6 +53,7 @@ export interface MetadataEvent {
   max_depth: number;
   max_iterations: number;
   backend: string;
+  log_file?: string;
 }
 
 export interface DoneEvent {

@@ -2,6 +2,9 @@
 
 import os
 
+import pytest
+
+from rlm.environments.base_env import SetupCodeError
 from rlm.environments.local_repl import LocalREPL
 
 
@@ -243,3 +246,48 @@ class TestLocalREPLSimulatingRLMNoPersistence:
         assert "NameError" in result.stderr
         assert "my_helper" in result.stderr
         completion_2_env.cleanup()
+
+
+class TestSetupCodeErrorHandling:
+    """Tests that setup_code errors surface immediately instead of failing silently."""
+
+    def test_syntax_error_in_setup_code_raises(self):
+        """SyntaxError in setup_code must raise SetupCodeError at init time."""
+        with pytest.raises(SetupCodeError, match="SyntaxError"):
+            LocalREPL(setup_code="def broken(")
+
+    def test_runtime_error_in_setup_code_raises(self):
+        """Runtime error in setup_code must raise SetupCodeError at init time."""
+        with pytest.raises(SetupCodeError, match="ZeroDivisionError"):
+            LocalREPL(setup_code="x = 1 / 0")
+
+    def test_name_error_in_setup_code_raises(self):
+        """NameError in setup_code must raise SetupCodeError at init time."""
+        with pytest.raises(SetupCodeError, match="NameError"):
+            LocalREPL(setup_code="x = undefined_variable")
+
+    def test_setup_code_error_contains_stderr(self):
+        """SetupCodeError should carry the stderr content for diagnostics."""
+        with pytest.raises(SetupCodeError) as exc_info:
+            LocalREPL(setup_code="raise ValueError('bad config')")
+        assert "bad config" in exc_info.value.stderr
+
+    def test_valid_setup_code_still_works(self):
+        """Valid setup_code should inject tools as before."""
+        repl = LocalREPL(setup_code="def greet(name): return f'hi {name}'")
+        assert "greet" in repl.locals
+        assert repl.locals["greet"]("world") == "hi world"
+        repl.cleanup()
+
+    def test_valid_setup_code_with_state(self):
+        """Setup code can define mutable state that persists across iterations."""
+        repl = LocalREPL(setup_code="log = []\ndef add(x): log.append(x)")
+        repl.execute_code("add(1); add(2)")
+        assert repl.locals["log"] == [1, 2]
+        repl.cleanup()
+
+    def test_partial_setup_code_failure_raises(self):
+        """If setup_code defines some tools then errors, it should still raise."""
+        code = "def good_fn(): return 1\nraise RuntimeError('halfway')"
+        with pytest.raises(SetupCodeError, match="halfway"):
+            LocalREPL(setup_code=code)

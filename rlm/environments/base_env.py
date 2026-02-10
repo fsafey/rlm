@@ -1,7 +1,19 @@
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 from rlm.core.types import REPLResult
+
+logger = logging.getLogger(__name__)
+
+
+class SetupCodeError(RuntimeError):
+    """Raised when setup_code fails during environment initialization."""
+
+    def __init__(self, stderr: str, stdout: str = ""):
+        self.stderr = stderr
+        self.stdout = stdout
+        super().__init__(f"setup_code failed:\n{stderr}")
 
 
 class BaseEnv(ABC):
@@ -26,6 +38,18 @@ class BaseEnv(ABC):
     @abstractmethod
     def execute_code(self, code: str) -> REPLResult:
         raise NotImplementedError
+
+    def run_setup_code(self, setup_code: str) -> REPLResult:
+        """Execute setup_code and raise SetupCodeError if it fails.
+
+        All environments should call this instead of bare execute_code(setup_code)
+        during __init__ to ensure injection errors surface immediately.
+        """
+        result = self.execute_code(setup_code)
+        if result.stderr:
+            logger.error("setup_code failed: %s", result.stderr)
+            raise SetupCodeError(stderr=result.stderr, stdout=result.stdout)
+        return result
 
 
 class IsolatedEnv(BaseEnv, ABC):

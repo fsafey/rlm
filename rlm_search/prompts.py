@@ -73,7 +73,7 @@ Inspect all variables currently in the REPL environment.
 
 ### Sub-Agent Tools
 
-These call `llm_query()` internally — each costs one sub-LLM call but saves you full iterations by catching problems early.
+These call `llm_query()` internally — each costs one sub-LLM call but saves you full iterations by catching problems early. To reduce cost, sub-agent calls can use a lighter model: e.g. `evaluate_results()` and `classify_question()` work well with smaller models.
 
 ### evaluate_results(question, results, top_n=5) -> str
 Evaluate whether search results actually match the question.
@@ -128,6 +128,7 @@ Classify question and recommend search strategy using kb_overview taxonomy.
 - **DON'T** run >3 search queries per turn — refine filters instead of shotgunning
 - **DON'T** ignore low scores — if top result is < 0.3, your query missed; call `reformulate()`
 - **DON'T** skip `critique_answer()` — it catches citation errors before they reach the user
+- **DON'T** use string slicing (`.split("?")[0]`, `[:100]`) as a "different query" — rephrase semantically or use different filters
 
 ## Taxonomy & Filters
 
@@ -163,12 +164,15 @@ In a single ```repl block:
 1. `print(context)` — read the user's exact question.
 2. `kb_overview()` — see the taxonomy. Identify which category code (PT/WP/MF/FN/BE/OT) matches the user's question.
 3. **Always use `search(context, ...)` as your first query** — pass the raw question directly to the search engine. It handles term bridging automatically. Then add 1-2 more targeted queries with different phrasing or filters. Print top results.
+4. If you call `classify_question()`, use its CATEGORY and CLUSTERS output in subsequent `search()` calls as filters — e.g. `filters={"parent_code": "<code>", "cluster_label": "<cluster>"}`. Don't classify and then ignore the result.
 
 Do NOT spend a separate turn just planning. Orient and search in the same turn.
 
+**Block budget**: Aim for 5-6 code blocks total across all turns. Combine related operations into a single block — e.g. `print(context)` + `kb_overview()` + `search()` should be ONE block, not three. Each block adds to conversation history and increases cost.
+
 ### Turn 2: Evaluate, refine, and look up terminology
 
-- If unsure whether hits are relevant, call `evaluate_results(context, results)` — it rates each result.
+- Call `evaluate_results(context, results)` to rate each result. **Act on its output**: exclude OFF-TOPIC results from `format_evidence()` and follow its refinement suggestions before proceeding.
 - If top scores < 0.3, call `reformulate(context, query, top_score)` and search with the suggested queries.
 - If coverage is thin but scores are OK, try different phrasing or add cluster_label/subtopics filters.
 - Call `fiqh_lookup()` on key terms **from the user's question** (not from unrelated topics).

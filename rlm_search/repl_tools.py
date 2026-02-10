@@ -293,7 +293,7 @@ def kb_overview():
     # \\" → \" (escaped double quote).
     code += '''
 
-def evaluate_results(question, results, top_n=5):
+def evaluate_results(question, results, top_n=5, model=None):
     """Sub-agent: evaluate search result relevance and suggest next steps.
 
     Call after search() to check whether results match the question
@@ -326,12 +326,12 @@ def evaluate_results(question, results, top_n=5):
         f"Then state: should I refine the query, change filters, or proceed to synthesis?\\n"
         f"Under 200 words."
     )
-    assessment = llm_query(prompt)
+    assessment = llm_query(prompt, model=model)
     print(f"[evaluate_results] {min(top_n, len(results))} results assessed")
     return assessment
 
 
-def reformulate(question, failed_query, top_score=0.0):
+def reformulate(question, failed_query, top_score=0.0, model=None):
     """Sub-agent: generate alternative search queries when results are poor.
 
     Call when search() top score is below 0.3.
@@ -351,14 +351,14 @@ def reformulate(question, failed_query, top_score=0.0):
         f"Generate exactly 3 alternative search queries that might find better results.\\n"
         f"One query per line, no numbering, no quotes, no explanation."
     )
-    response = llm_query(prompt)
+    response = llm_query(prompt, model=model)
     queries = [line.strip() for line in response.strip().split("\\n") if line.strip()]
     queries = queries[:3]
     print(f"[reformulate] generated {len(queries)} queries")
     return queries
 
 
-def critique_answer(question, draft):
+def critique_answer(question, draft, model=None):
     """Sub-agent: review draft answer before finalizing.
 
     Call before FINAL/FINAL_VAR to catch citation errors, topic drift,
@@ -384,13 +384,13 @@ def critique_answer(question, draft):
         f"4. Is anything important missing?\\n\\n"
         f"Respond: PASS or FAIL, then brief feedback (under 150 words)."
     )
-    verdict = llm_query(prompt)
-    status = "PASS" if verdict.strip().upper().startswith("PASS") else "FAIL"
+    verdict = llm_query(prompt, model=model)
+    status = "PASS" if verdict.strip().strip("*").upper().startswith("PASS") else "FAIL"
     print(f"[critique_answer] verdict={status}")
     return verdict
 
 
-def classify_question(question):
+def classify_question(question, model=None):
     """Sub-agent: classify question and recommend search strategy.
 
     Optional — use if unsure which category fits after reviewing kb_overview().
@@ -418,7 +418,7 @@ def classify_question(question):
         f"CLUSTERS: <comma-separated relevant cluster labels>\\n"
         f"STRATEGY: <1-2 sentence search plan>"
     )
-    classification = llm_query(prompt)
+    classification = llm_query(prompt, model=model)
     print(f"[classify_question] done")
     return classification
 '''

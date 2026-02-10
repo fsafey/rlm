@@ -148,7 +148,7 @@ class LocalREPL(NonIsolatedEnv):
 
         # Run setup code if provided
         if setup_code:
-            self.execute_code(setup_code)
+            self.run_setup_code(setup_code)
 
     def setup(self):
         """Setup the environment."""

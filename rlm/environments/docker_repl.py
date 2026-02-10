@@ -221,7 +221,7 @@ class DockerREPL(NonIsolatedEnv):
         if context_payload:
             self.load_context(context_payload)
         if setup_code:
-            self.execute_code(setup_code)
+            self.run_setup_code(setup_code)
 
     def setup(self):
         """Start the proxy server and Docker container."""

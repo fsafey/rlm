@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Terminal, ChevronDown, ChevronRight } from "lucide-react";
+import { useState, useEffect, useMemo } from "react";
+import { Terminal, ChevronDown, ChevronRight, FileText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { IterationTimeline } from "./IterationTimeline";
@@ -22,6 +22,12 @@ export function TracePanel({ iterations, metadata, isLive }: TracePanelProps) {
       setSelectedIteration(iterations.length - 1);
     }
   }, [isLive, iterations.length]);
+
+  const logLabel = useMemo(() => {
+    if (!metadata?.log_file) return null;
+    const basename = metadata.log_file.split("/").pop() ?? "";
+    return basename.replace(/\.jsonl$/, "");
+  }, [metadata?.log_file]);
 
   if (iterations.length === 0) return null;
 
@@ -53,6 +59,17 @@ export function TracePanel({ iterations, metadata, isLive }: TracePanelProps) {
                   <Badge variant="secondary" className="text-[10px] font-mono">
                     max {metadata.max_iterations} iter
                   </Badge>
+                  {logLabel && (
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-mono flex items-center gap-1 select-text cursor-text"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <FileText className="h-3 w-3 shrink-0" />
+                      {logLabel}
+                    </Badge>
+                  )}
                 </div>
               )}
             </div>

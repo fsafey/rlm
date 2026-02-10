@@ -461,7 +461,7 @@ class TestKbOverviewFunction:
         assert callable(ns["kb_overview"])
 
     def test_kb_overview_returns_data(self):
-        """kb_overview() must return the pre-computed dict."""
+        """kb_overview() must return a flat list of category summaries."""
         overview_data = {
             "collection": "enriched_gemini",
             "total_documents": 18835,
@@ -469,7 +469,7 @@ class TestKbOverviewFunction:
                 "PT": {
                     "name": "Prayer & Tahara",
                     "document_count": 5200,
-                    "clusters": {"Ghusl": {"sample": {"id": "1", "question": "How to do ghusl?"}}},
+                    "clusters": {"Ghusl": "How to do ghusl?"},
                     "facets": {},
                 }
             },
@@ -480,9 +480,11 @@ class TestKbOverviewFunction:
         exec(code, ns)  # noqa: S102
         result = ns["kb_overview"]()
         assert result is not None
-        assert result["total_documents"] == 18835
-        assert "PT" in result["categories"]
-        assert result["categories"]["PT"]["clusters"]["Ghusl"]["sample"]["id"] == "1"
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["code"] == "PT"
+        assert result[0]["document_count"] == 5200
+        assert "Ghusl" in result[0]["cluster_labels"]
 
     def test_kb_overview_returns_none_without_data(self):
         """kb_overview() must return None gracefully when no data provided."""

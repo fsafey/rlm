@@ -212,27 +212,23 @@ def fiqh_lookup(query: str) -> dict:
     code += '''
 
 def kb_overview():
-    """Get a pre-computed overview of the knowledge base taxonomy.
+    """Print and return a knowledge base taxonomy overview.
 
-    This function PRINTS a formatted summary automatically. The returned
-    dict is for programmatic access only — you rarely need to iterate it.
+    PRINTS a formatted summary (collection, categories, sample clusters).
+    You usually only need the printed output — the return value is for
+    programmatic filtering only.
 
     Returns:
-        None if unavailable, otherwise a dict with structure:
-        {
-            "collection": str,
-            "total_documents": int,
-            "categories": {
-                "<parent_code>": {
-                    "name": str,
-                    "document_count": int,
-                    "clusters": {"<cluster_label>": "<sample_question_str>", ...},
-                    "facets": dict,
-                }
+        None if unavailable, otherwise a list of category dicts:
+        [
+            {
+                "code": "PT",
+                "name": "Prayer & Tahara (Purification)",
+                "document_count": 5200,
+                "cluster_labels": ["Ghusl", "Wudu", ...],
             },
-            "global_facets": dict,
-        }
-        Note: clusters map label → sample question STRING (not a dict).
+            ...
+        ]
     """
     if _KB_OVERVIEW is None:
         print("WARNING: Knowledge base overview unavailable — use search() directly.")
@@ -240,6 +236,7 @@ def kb_overview():
     ov = _KB_OVERVIEW
     total = ov.get("total_documents", 0)
     print(f"=== Knowledge Base: {ov.get(\'collection\', \'?\')} ({total:,} documents) ===\\n")
+    summary = []
     for code, cat in ov.get("categories", {}).items():
         name = cat.get("name", code)
         count = cat.get("document_count", 0)
@@ -259,9 +256,15 @@ def kb_overview():
                 print(f"  · {label}")
             shown += 1
         print()
+        summary.append({
+            "code": code,
+            "name": name,
+            "document_count": count,
+            "cluster_labels": list(clusters.keys()),
+        })
     print("Filter keys: parent_code, cluster_label, subtopics, primary_topic")
     print("Tip: Use cluster_label for precise targeting after identifying relevant clusters")
-    return ov
+    return summary
 '''
 
     return code

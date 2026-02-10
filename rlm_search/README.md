@@ -72,6 +72,44 @@ This starts backend + frontend + Cloudflare Tunnel. Look for the `*.trycloudflar
 
 **Note:** The URL changes on each restart. For a persistent URL, configure a named Cloudflare Tunnel.
 
+### Managing the Tunnel
+
+**Stop everything:**
+
+```bash
+pkill -f "cloudflared tunnel"
+lsof -ti :8092 :3002 | xargs kill
+```
+
+Ctrl+C on `make tunnel` only kills cloudflared — the backgrounded backend and frontend become orphan processes. Always clean up both ports.
+
+**Restart just the backend** (e.g., after code changes to `rlm_search/`):
+
+```bash
+lsof -ti :8092 | xargs kill
+make backend
+```
+
+The tunnel and frontend stay up — the Vite proxy reconnects automatically.
+
+**Restart just the frontend:**
+
+```bash
+lsof -ti :3002 | xargs kill
+make frontend
+```
+
+**Full restart:**
+
+```bash
+lsof -ti :8092 :3002 | xargs kill; pkill -f "cloudflared tunnel"
+make tunnel
+```
+
+`make tunnel` kills any existing processes on the target ports before starting, so this is safe even if something is still running.
+
+**Port conflicts:** If you see `[Errno 48] address already in use` or Vite falls back to another port, stale processes are occupying the ports. Kill them with `lsof -ti :8092 :3002 | xargs kill` and retry.
+
 ## Configuration
 
 All via environment variables (or `.env` file):

@@ -182,13 +182,18 @@ async def stream_search(search_id: str) -> StreamingResponse:
 
     async def event_generator():
         deadline = time.monotonic() + 600  # 10 minute max
+        last_sent = time.monotonic()
         while time.monotonic() < deadline:
             events = logger.drain()
             for event in events:
                 yield f"data: {json.dumps(event)}\n\n"
+                last_sent = time.monotonic()
                 if event.get("type") in ("done", "error"):
                     _searches.pop(search_id, None)
                     return
+            if time.monotonic() - last_sent >= 15:
+                yield ": keepalive\n\n"
+                last_sent = time.monotonic()
             await asyncio.sleep(0.2)
         # Timed out — clean up
         _searches.pop(search_id, None)

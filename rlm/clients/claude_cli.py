@@ -96,7 +96,13 @@ class ClaudeCLI(BaseLM):
 
     def _parse_response(self, raw_output: str) -> str:
         """Parse JSON output from claude CLI, accumulate usage, return result text."""
-        data = json.loads(raw_output)
+        try:
+            data = json.loads(raw_output)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"claude CLI returned non-JSON output (parse error: {e}). "
+                f"Raw output: {raw_output[:500]}"
+            ) from e
         result_text = data.get("result", "")
 
         # Accumulate per-model usage from modelUsage field

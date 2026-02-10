@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse
 
 from rlm.core.rlm import RLM
 from rlm_search.config import (
+    _PROJECT_ROOT,
     ANTHROPIC_API_KEY,
     CASCADE_API_KEY,
     CASCADE_API_URL,
@@ -190,7 +191,7 @@ async def start_search(req: SearchRequest) -> SearchResponse:
     search_id = str(uuid.uuid4())[:12]
     print(f"[API] POST /api/search | id={search_id} query={req.query!r}")
     logger = StreamingLogger(
-        log_dir="/Users/farieds/projects/rlm/rlm_logs",
+        log_dir=str(_PROJECT_ROOT / "rlm_logs"),
         file_name=f"search_{search_id}",
         search_id=search_id,
         query=req.query,

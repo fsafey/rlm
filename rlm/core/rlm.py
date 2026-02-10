@@ -311,9 +311,26 @@ class RLM:
         code_block_strs = find_code_blocks(response)
         code_blocks = []
 
+        syntax_error_seen = False
         for code_block_str in code_block_strs:
+            if syntax_error_seen:
+                code_blocks.append(
+                    CodeBlock(
+                        code=code_block_str,
+                        result=REPLResult(
+                            stdout="",
+                            stderr="[Skipped: prior code block had a SyntaxError]",
+                            locals={},
+                            execution_time=0.0,
+                            rlm_calls=[],
+                        ),
+                    )
+                )
+                continue
             code_result: REPLResult = environment.execute_code(code_block_str)
             code_blocks.append(CodeBlock(code=code_block_str, result=code_result))
+            if code_result.stderr and code_result.stderr.lstrip().startswith("SyntaxError:"):
+                syntax_error_seen = True
 
         iteration_time = time.perf_counter() - iter_start
         return RLMIteration(

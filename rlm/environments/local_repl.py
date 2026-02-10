@@ -386,9 +386,34 @@ class LocalREPL(NonIsolatedEnv):
         finally:
             os.chdir(old_cwd)
 
+    @staticmethod
+    def _syntax_error_hint(e: SyntaxError) -> str:
+        """Return a contextual hint for common SyntaxError patterns."""
+        text = e.text or ""
+        msg = str(e.msg) if e.msg else ""
+        if "unterminated string literal" in msg and "'" in text:
+            return (
+                "\nHint: Python variable names cannot contain apostrophes. "
+                "Use underscores instead (e.g., 'mutah_results' not 'mut\\'ah_results')."
+            )
+        return ""
+
     def execute_code(self, code: str) -> REPLResult:
         """Execute code in the persistent namespace and return result."""
         start_time = time.perf_counter()
+
+        # Pre-validate syntax before execution
+        try:
+            compile(code, "<repl>", "exec")
+        except SyntaxError as e:
+            hint = self._syntax_error_hint(e)
+            return REPLResult(
+                stdout="",
+                stderr=f"SyntaxError: {e.msg} (line {e.lineno}){hint}",
+                locals=self.locals.copy(),
+                execution_time=time.perf_counter() - start_time,
+                rlm_calls=[],
+            )
 
         # Clear pending LLM calls from previous execution
         self._pending_llm_calls = []

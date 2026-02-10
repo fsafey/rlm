@@ -44,7 +44,7 @@ class StreamingLogger(RLMLogger):
             self.queue.append(event)
 
     def log_metadata(self, metadata: RLMMetadata) -> None:
-        super().log_metadata(metadata)
+        # Build the enriched event with search-level identifying info
         event = {
             "type": "metadata",
             "search_id": self.search_id,
@@ -53,6 +53,13 @@ class StreamingLogger(RLMLogger):
             "timestamp": datetime.now().isoformat(),
             **metadata.to_dict(),
         }
+        # Write enriched event to disk (skip parent's stripped version)
+        if not self._metadata_logged:
+            with open(self.log_file_path, "a") as f:
+                json.dump(event, f)
+                f.write("\n")
+            self._metadata_logged = True
+        # Push to SSE queue
         with self._lock:
             self.queue.append(event)
             print(f"[STREAM] metadata event queued | queue_size={len(self.queue)}")

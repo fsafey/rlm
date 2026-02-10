@@ -193,9 +193,4 @@ my_answer = "the synthesized result..."
 ``` then in the NEXT response call FINAL_VAR(my_answer)
 
 If unsure what variables exist, call SHOW_VARS() in a repl block first.
-
-- When scholars disagree, present all major views fairly.
-- Write code to search and analyze. Use FINAL() or FINAL_VAR() to return your answer.
-- You may use multiple code blocks across multiple turns to iteratively search and refine.
-- When ready to answer, prefer FINAL(your answer text) for simplicity.
 """

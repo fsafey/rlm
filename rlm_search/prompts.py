@@ -79,7 +79,7 @@ In a single ```repl block:
 
 1. `print(context)` — read the user's exact question.
 2. `kb_overview()` — see the taxonomy. Identify which category code (PT/WP/MF/FN/BE/OT) matches the user's question.
-3. **Immediately execute 2-3 search queries** based on the user's question with targeted filters. Print top results.
+3. **Always use `search(context, ...)` as your first query** — pass the raw question directly to the search engine. It handles term bridging automatically. Then add 1-2 more targeted queries with different phrasing or filters. Print top results.
 
 Do NOT spend a separate turn just planning. Orient and search in the same turn.
 
@@ -102,7 +102,9 @@ Each ```repl block below is a separate turn.
 print("Question:", context)
 overview = kb_overview()
 # Question is about shortening/combining prayers while traveling → PT category
-results = search("shortening prayer while traveling", filters={"parent_code": "PT"}, top_k=15)
+# ALWAYS pass context directly as the first search query
+results = search(context, filters={"parent_code": "PT"}, top_k=15)
+# Then add targeted refinement queries
 combining = search("combining prayers during travel", filters={"parent_code": "PT"}, top_k=10)
 for r in results["results"][:5]:
     print(f"[{r['id']}] score={r['score']:.2f} Q: {r['question'][:120]}")

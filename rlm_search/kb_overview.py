@@ -99,8 +99,13 @@ async def build_kb_overview(
 
         data = resp.json()
         clusters: dict[str, Any] = {}
-        for group in data.get("grouped_results", []):
-            label = group.get("group_key", "Unknown")
+        raw_groups = data.get("grouped_results", {})
+        # Cascade returns {"clusters": [{"label": ..., "hits": [...]}, ...]}
+        group_list = (
+            raw_groups.get("clusters", []) if isinstance(raw_groups, dict) else raw_groups
+        )
+        for group in group_list:
+            label = group.get("label", group.get("group_key", "Unknown"))
             hits = group.get("hits", [])
             sample: dict[str, Any] = {}
             if hits:

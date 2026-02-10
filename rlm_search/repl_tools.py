@@ -118,8 +118,12 @@ def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_
     resp.raise_for_status()
     data = resp.json()
     results = [_normalize_hit(h) for h in data.get("hits", [])]
-    grouped = data.get("grouped_results", [])
-    for group in grouped:
+    raw_grouped = data.get("grouped_results", {{}})
+    # Cascade returns {{"clusters": [...], ...}} — normalize to list
+    group_list = (
+        raw_grouped.get("clusters", []) if isinstance(raw_grouped, dict) else raw_grouped
+    )
+    for group in group_list:
         group["hits"] = [_normalize_hit(h) for h in group.get("hits", [])]
     log_entry = {{"type": "browse", "filters": filters, "offset": offset, "limit": limit}}
     if group_by:
@@ -131,7 +135,7 @@ def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_
         "total": data.get("total", 0),
         "has_more": data.get("has_more", False),
         "facets": data.get("facets", {{}}),
-        "grouped_results": grouped,
+        "grouped_results": group_list,
     }}
 
 

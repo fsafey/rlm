@@ -212,6 +212,16 @@ class TestFormatEvidence:
         lines = ns["format_evidence"](results, max_per_source=2)
         assert len(lines) == 2
 
+    def test_format_evidence_accepts_search_result_dict(self):
+        """format_evidence should unwrap {"results": [...]} from search() return value."""
+        ns = self._exec_ns()
+        results = [
+            {"id": "doc1", "question": "What is wudu?", "answer": "Wudu is ablution."},
+        ]
+        lines = ns["format_evidence"]({"results": results})
+        assert len(lines) == 1
+        assert lines[0].startswith("[Source: doc1]")
+
 
 class TestFiqhLookup:
     """Test fiqh_lookup() function generation and behavior."""

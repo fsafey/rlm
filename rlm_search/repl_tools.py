@@ -135,16 +135,21 @@ def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_
     }}
 
 
-def format_evidence(results: list[dict], max_per_source: int = 3) -> list[str]:
+def format_evidence(results, max_per_source: int = 3) -> list[str]:
     """Format search results as citation strings for synthesis.
 
+    Accepts either a list of result dicts or a dict with a 'results' key
+    (i.e. the return value of search() can be passed directly).
+
     Args:
-        results: List of result dicts from search().
+        results: List of result dicts, or a dict with a 'results' key.
         max_per_source: Max results to include per unique source ID.
 
     Returns:
         List of formatted strings: "[Source: <id>] Q: ... A: ..."
     """
+    if isinstance(results, dict):
+        results = results.get("results", [])
     seen = {{}}
     lines = []
     for r in results[:50]:

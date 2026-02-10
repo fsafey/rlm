@@ -10,8 +10,8 @@ def build_search_setup_code(
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
-    Defines search(), browse(), search_qa(), format_evidence(), fiqh_lookup(),
-    and a search_log list in the REPL namespace.
+    Defines search(), fiqh_lookup(), format_evidence(), and a search_log list
+    in the REPL namespace.
 
     The Cascade API returns hits with flat fields (id, question, answer,
     parent_code, cluster_label, etc.). These functions normalize the response
@@ -33,8 +33,7 @@ search_log = []
 # Metadata fields to nest under 'metadata' key for cleaner LLM consumption
 _META_FIELDS = {{
     "parent_code", "parent_category", "cluster_label", "primary_topic",
-    "subtopics", "source_collection", "chapter", "heading", "section",
-    "islamic_terms", "layers_executed",
+    "subtopics",
 }}
 
 
@@ -55,22 +54,22 @@ def _normalize_hit(hit: dict) -> dict:
     return result
 
 
-def search(query: str, collection: str | None = None, filters: dict | None = None, top_k: int = 10) -> dict:
-    """Search the Islamic jurisprudence knowledge base.
+def search(query: str, filters: dict | None = None, top_k: int = 10) -> dict:
+    """Search the Islamic Q&A knowledge base (18,835 scholar-answered questions).
+
+    The search engine automatically handles Arabic/English term bridging,
+    so you can query in either language without manual translation.
 
     Args:
         query: Natural language search query.
-        collection: Optional collection name (e.g. "enriched_gemini").
         filters: Optional filter dict, e.g. {{"parent_code": "PT"}}.
-        top_k: Number of results to return (default: 10).
+        top_k: Number of results to return (default 10).
 
     Returns:
         Dict with 'results' list, each containing 'id', 'score', 'question',
         'answer', 'metadata' (parent_code, cluster_label, etc.).
     """
-    payload = {{"query": query, "top_k": top_k}}
-    if collection is not None:
-        payload["collection"] = collection
+    payload = {{"query": query, "collection": "enriched_gemini", "top_k": top_k}}
     if filters:
         payload["filters"] = filters
     resp = _requests.post(f"{{_API_URL}}/search", json=payload, headers=_HEADERS, timeout=_TIMEOUT)
@@ -78,52 +77,16 @@ def search(query: str, collection: str | None = None, filters: dict | None = Non
     data = resp.json()
     hits = data.get("hits", [])
     results = [_normalize_hit(h) for h in hits]
-    print(f"[REPL:search] query={{query!r}} collection={{collection}} top_k={{top_k}} results={{len(results)}}")
-    search_log.append({{"type": "search", "query": query, "collection": collection, "filters": filters, "top_k": top_k, "num_results": len(results)}})
+    print(f"[search] query={{query!r}} top_k={{top_k}} results={{len(results)}}")
+    search_log.append({{"type": "search", "query": query, "filters": filters, "top_k": top_k, "num_results": len(results)}})
     return {{"results": results, "total": data.get("total", len(results))}}
 
 
-def browse(collection: str | None = None, filters: dict | None = None, offset: int = 0, limit: int = 20) -> dict:
-    """Browse documents by filter criteria without a search query.
-
-    Args:
-        collection: Optional collection name (e.g. "enriched_gemini").
-        filters: Filter dict, e.g. {{"parent_code": "PT"}} for Prayer/Tahara.
-        offset: Pagination offset.
-        limit: Number of documents to return.
-
-    Returns:
-        Dict with 'results' list of matching documents.
-    """
-    payload = {{"offset": offset, "limit": limit}}
-    if collection is not None:
-        payload["collection"] = collection
-    if filters:
-        payload["filters"] = filters
-    resp = _requests.post(f"{{_API_URL}}/browse", json=payload, headers=_HEADERS, timeout=_TIMEOUT)
-    resp.raise_for_status()
-    data = resp.json()
-    hits = data.get("hits", [])
-    results = [_normalize_hit(h) for h in hits]
-    print(f"[REPL:browse] collection={{collection}} filters={{filters}} offset={{offset}} results={{len(results)}}")
-    search_log.append({{"type": "browse", "collection": collection, "filters": filters, "offset": offset, "limit": limit, "num_results": len(results)}})
-    return {{"results": results, "total": data.get("total", len(results)), "has_more": data.get("has_more", False)}}
-
-
-def search_qa(query: str, **kwargs) -> dict:
-    """Search the Q&A collection (practical fatwas and rulings)."""
-    kwargs.pop("collection", None)
-    return search(query, collection="enriched_gemini", **kwargs)
-
-
-sources_cited = set()
-
-
 def format_evidence(results: list[dict], max_per_source: int = 3) -> list[str]:
-    """Format search results as citation strings and track source IDs.
+    """Format search results as citation strings for synthesis.
 
     Args:
-        results: List of result dicts from search() or browse().
+        results: List of result dicts from search().
         max_per_source: Max results to include per unique source ID.
 
     Returns:
@@ -137,22 +100,22 @@ def format_evidence(results: list[dict], max_per_source: int = 3) -> list[str]:
         if seen[rid] >= max_per_source:
             continue
         seen[rid] += 1
-        sources_cited.add(rid)
         q = (r.get("question", "") or "")[:200]
-        a = (r.get("answer", "") or "")[:500]
+        a = (r.get("answer", "") or "")[:1500]
         lines.append(f"[Source: {{rid}}] Q: {{q}} A: {{a}}")
     return lines
 
 
 def fiqh_lookup(query: str) -> dict:
-    """Look up Islamic jurisprudence terminology.
+    """Look up Islamic jurisprudence terminology for use in your answer.
 
     Consults a dictionary of 453 canonical terms with 3,783 variants.
-    Supports English, Arabic, and transliterated input with stemming
-    and compound phrase matching.
+    Supports English, Arabic, and transliterated input.
 
-    Use to discover canonical Arabic/English term pairs before searching,
-    and to use proper terminology in your answers.
+    Use this to find the proper Arabic/English term pairs so your written
+    answer uses correct scholarly terminology. You do NOT need to use
+    these terms in search queries -- the search engine bridges terms
+    automatically.
 
     Args:
         query: Term or phrase to look up (any language).
@@ -172,6 +135,6 @@ def fiqh_lookup(query: str) -> dict:
     data = resp.json()
     bridges = data.get("bridges", [])
     related = data.get("related", [])
-    print(f"[REPL:fiqh_lookup] query={{query!r}} bridges={{len(bridges)}} related={{len(related)}}")
+    print(f"[fiqh_lookup] query={{query!r}} bridges={{len(bridges)}} related={{len(related)}}")
     return {{"bridges": bridges, "related": related}}
 '''

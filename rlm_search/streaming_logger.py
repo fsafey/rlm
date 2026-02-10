@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import datetime
 
@@ -53,12 +54,18 @@ class StreamingLogger(RLMLogger):
             "execution_time": execution_time,
             "usage": usage,
         }
+        with open(self.log_file_path, "a") as f:
+            json.dump(event, f)
+            f.write("\n")
         with self._lock:
             self.queue.append(event)
             self._done = True
 
     def mark_error(self, message: str) -> None:
         event = {"type": "error", "message": message}
+        with open(self.log_file_path, "a") as f:
+            json.dump(event, f)
+            f.write("\n")
         with self._lock:
             self.queue.append(event)
             self._done = True

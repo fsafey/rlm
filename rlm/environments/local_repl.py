@@ -1,4 +1,5 @@
 import copy
+import inspect
 import io
 import json
 import os
@@ -102,13 +103,15 @@ _SAFE_BUILTINS = {
     "ArithmeticError": ArithmeticError,
     "LookupError": LookupError,
     "Warning": Warning,
-    # Blocked
+    # Blocked — set to None so calling them raises a clear TypeError
     "input": None,
     "eval": None,
     "exec": None,
     "compile": None,
-    "globals": None,
-    "locals": None,
+    # globals/locals are safe to expose — the exec namespace is already sandboxed,
+    # and dir()/vars() (which are allowed) provide the same information.
+    "globals": globals,
+    "locals": locals,
 }
 
 
@@ -187,10 +190,40 @@ class LocalREPL(NonIsolatedEnv):
 
     def _show_vars(self) -> str:
         """Show all available variables in the REPL environment."""
-        available = {k: type(v).__name__ for k, v in self.locals.items() if not k.startswith("_")}
-        if not available:
+        public_items = {k: v for k, v in self.locals.items() if not k.startswith("_")}
+        if not public_items:
             return "No variables created yet. Use ```repl``` blocks to create variables."
-        return f"Available variables: {available}"
+
+        functions: list[str] = []
+        variables: list[str] = []
+
+        for name, value in sorted(public_items.items()):
+            if callable(value):
+                try:
+                    sig = inspect.signature(value)
+                    functions.append(f"  {name}{sig}")
+                except (ValueError, TypeError):
+                    functions.append(f"  {name}(...)")
+            else:
+                variables.append(f"  {name}: {self._describe_value(value)}")
+
+        parts: list[str] = []
+        if functions:
+            parts.append("Functions:\n" + "\n".join(functions))
+        if variables:
+            parts.append("Variables:\n" + "\n".join(variables))
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _describe_value(value: object) -> str:
+        """Return a concise description of a value: type + size hint."""
+        if isinstance(value, str):
+            return f"str ({len(value)} chars)"
+        if isinstance(value, list):
+            return f"list ({len(value)} items)"
+        if isinstance(value, dict):
+            return f"dict ({len(value)} items)"
+        return type(value).__name__
 
     def _llm_query(self, prompt: str, model: str | None = None) -> str:
         """Query the LM via socket connection to the handler.

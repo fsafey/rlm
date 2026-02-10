@@ -23,14 +23,6 @@ class TestBuildSearchSetupCodeValidity:
         assert "search" in ns
         assert callable(ns["search"])
 
-    def test_defines_browse_function(self):
-        """browse() must be defined in the generated namespace."""
-        code = build_search_setup_code(api_url="http://localhost:8091")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        assert "browse" in ns
-        assert callable(ns["browse"])
-
     def test_defines_search_log(self):
         """search_log list must be defined in the generated namespace."""
         code = build_search_setup_code(api_url="http://localhost:8091")
@@ -87,7 +79,7 @@ class TestBuildSearchSetupCodeEmbedding:
 
 
 class TestSearchFunctionSignature:
-    """Test that search() and browse() have the correct signatures."""
+    """Test that search() has the correct signature (no collection param)."""
 
     def test_search_signature(self):
         code = build_search_setup_code(api_url="http://localhost")
@@ -98,6 +90,7 @@ class TestSearchFunctionSignature:
         assert "query" in params
         assert "filters" in params
         assert "top_k" in params
+        assert "collection" not in params
 
     def test_search_defaults(self):
         code = build_search_setup_code(api_url="http://localhost")
@@ -107,28 +100,9 @@ class TestSearchFunctionSignature:
         assert sig.parameters["filters"].default is None
         assert sig.parameters["top_k"].default == 10
 
-    def test_browse_signature(self):
-        code = build_search_setup_code(api_url="http://localhost")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        sig = inspect.signature(ns["browse"])
-        params = list(sig.parameters.keys())
-        assert "filters" in params
-        assert "offset" in params
-        assert "limit" in params
-
-    def test_browse_defaults(self):
-        code = build_search_setup_code(api_url="http://localhost")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        sig = inspect.signature(ns["browse"])
-        assert sig.parameters["filters"].default is None
-        assert sig.parameters["offset"].default == 0
-        assert sig.parameters["limit"].default == 20
-
 
 class TestSearchFunctionBehavior:
-    """Test that search() and browse() call requests.post correctly (mocked)."""
+    """Test that search() calls requests.post correctly (mocked)."""
 
     def test_search_calls_api(self):
         code = build_search_setup_code(api_url="http://api.test", api_key="k")
@@ -155,75 +129,8 @@ class TestSearchFunctionBehavior:
         assert ns["search_log"][0]["type"] == "search"
         assert ns["search_log"][0]["query"] == "test query"
 
-    def test_browse_calls_api(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {
-            "hits": [{"id": "2", "question": "q", "answer": "a"}],
-            "total": 1,
-        }
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            result = ns["browse"](filters={"parent_code": "PT"})
-
-        mock_post.assert_called_once()
-        assert len(result["results"]) == 1
-        assert result["results"][0]["id"] == "2"
-        assert len(ns["search_log"]) == 1
-        assert ns["search_log"][0]["type"] == "browse"
-
-    def test_search_log_accumulates(self):
-        code = build_search_setup_code(api_url="http://api.test")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": []}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
-            ns["search"]("q1")
-            ns["search"]("q2")
-            ns["browse"]()
-
-        assert len(ns["search_log"]) == 3
-        assert ns["search_log"][0]["query"] == "q1"
-        assert ns["search_log"][1]["query"] == "q2"
-        assert ns["search_log"][2]["type"] == "browse"
-
-
-class TestSearchCollectionParameter:
-    """Test that search() accepts and handles the collection parameter."""
-
-    def test_search_signature_includes_collection(self):
-        code = build_search_setup_code(api_url="http://localhost")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        sig = inspect.signature(ns["search"])
-        assert "collection" in sig.parameters
-        assert sig.parameters["collection"].default is None
-
-    def test_search_sends_collection_in_payload(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [], "total": 0}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            ns["search"]("test", collection="risala_gemini")
-
-        call_kwargs = mock_post.call_args
-        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs.kwargs["json"]
-        assert payload["collection"] == "risala_gemini"
-
-    def test_search_omits_collection_when_none(self):
+    def test_search_always_sends_enriched_collection(self):
+        """search() must always include collection=enriched_gemini in payload."""
         code = build_search_setup_code(api_url="http://api.test", api_key="k")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
@@ -235,12 +142,11 @@ class TestSearchCollectionParameter:
         with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
             ns["search"]("test")
 
-        call_kwargs = mock_post.call_args
-        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs.kwargs["json"]
-        assert "collection" not in payload
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collection"] == "enriched_gemini"
 
-    def test_search_log_includes_collection(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+    def test_search_log_accumulates(self):
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
 
@@ -249,55 +155,16 @@ class TestSearchCollectionParameter:
         mock_resp.raise_for_status = MagicMock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp):
-            ns["search"]("test", collection="enriched_gemini")
+            ns["search"]("q1")
+            ns["search"]("q2")
 
-        assert ns["search_log"][0]["collection"] == "enriched_gemini"
-
-
-class TestBrowseCollectionParameter:
-    """Test that browse() accepts and handles the collection parameter."""
-
-    def test_browse_signature_includes_collection(self):
-        code = build_search_setup_code(api_url="http://localhost")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        sig = inspect.signature(ns["browse"])
-        assert "collection" in sig.parameters
-        assert sig.parameters["collection"].default is None
-
-    def test_browse_sends_collection_in_payload(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [], "total": 0}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            ns["browse"](collection="risala_gemini", filters={"parent_code": "PT"})
-
-        payload = mock_post.call_args[1]["json"]
-        assert payload["collection"] == "risala_gemini"
-
-    def test_browse_omits_collection_when_none(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [], "total": 0}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            ns["browse"]()
-
-        payload = mock_post.call_args[1]["json"]
-        assert "collection" not in payload
+        assert len(ns["search_log"]) == 2
+        assert ns["search_log"][0]["query"] == "q1"
+        assert ns["search_log"][1]["query"] == "q2"
 
 
-class TestConvenienceWrappers:
-    """Test search_qa, format_evidence, and sources_cited."""
+class TestFormatEvidence:
+    """Test format_evidence() output formatting and limits."""
 
     def _exec_ns(self):
         code = build_search_setup_code(api_url="http://api.test", api_key="k")
@@ -305,35 +172,10 @@ class TestConvenienceWrappers:
         exec(code, ns)  # noqa: S102
         return ns
 
-    def test_defines_search_qa(self):
-        ns = self._exec_ns()
-        assert "search_qa" in ns
-        assert callable(ns["search_qa"])
-
     def test_defines_format_evidence(self):
         ns = self._exec_ns()
         assert "format_evidence" in ns
         assert callable(ns["format_evidence"])
-
-    def test_defines_sources_cited(self):
-        ns = self._exec_ns()
-        assert "sources_cited" in ns
-        assert isinstance(ns["sources_cited"], set)
-        assert len(ns["sources_cited"]) == 0
-
-    def test_search_qa_delegates_to_search(self):
-        ns = self._exec_ns()
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [], "total": 0}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            ns["search_qa"]("test query")
-
-        payload = mock_post.call_args[1]["json"]
-        assert payload["collection"] == "enriched_gemini"
-        assert payload["query"] == "test query"
 
     def test_format_evidence_output(self):
         ns = self._exec_ns()
@@ -347,49 +189,28 @@ class TestConvenienceWrappers:
         assert "Q: What is wudu?" in lines[0]
         assert "A: Wudu is ablution." in lines[0]
 
-    def test_format_evidence_populates_sources_cited(self):
-        ns = self._exec_ns()
-        # Reset sources_cited before test
-        ns["sources_cited"].clear()
-        results = [
-            {"id": "doc1", "question": "q", "answer": "a"},
-            {"id": "doc2", "question": "q", "answer": "a"},
-        ]
-        ns["format_evidence"](results)
-        assert ns["sources_cited"] == {"doc1", "doc2"}
-
     def test_format_evidence_truncates_long_text(self):
         ns = self._exec_ns()
-        ns["sources_cited"].clear()
-        results = [{"id": "d1", "question": "x" * 300, "answer": "y" * 600}]
+        results = [{"id": "d1", "question": "x" * 300, "answer": "y" * 2000}]
         lines = ns["format_evidence"](results)
         assert len(lines) == 1
-        # Question truncated to 200, answer to 500
+        # Question truncated to 200, answer to 1500
         assert "x" * 200 in lines[0]
         assert "x" * 201 not in lines[0]
-        assert "y" * 500 in lines[0]
-        assert "y" * 501 not in lines[0]
+        assert "y" * 1500 in lines[0]
+        assert "y" * 1501 not in lines[0]
 
     def test_format_evidence_caps_at_50_results(self):
         ns = self._exec_ns()
-        ns["sources_cited"].clear()
         results = [{"id": f"d{i}", "question": "q", "answer": "a"} for i in range(60)]
         lines = ns["format_evidence"](results)
         assert len(lines) == 50
 
     def test_format_evidence_respects_max_per_source(self):
         ns = self._exec_ns()
-        ns["sources_cited"].clear()
         results = [{"id": "same", "question": f"q{i}", "answer": "a"} for i in range(5)]
         lines = ns["format_evidence"](results, max_per_source=2)
         assert len(lines) == 2
-
-    def test_sources_cited_accumulates_across_calls(self):
-        ns = self._exec_ns()
-        ns["sources_cited"].clear()
-        ns["format_evidence"]([{"id": "a", "question": "q", "answer": "a"}])
-        ns["format_evidence"]([{"id": "b", "question": "q", "answer": "a"}])
-        assert ns["sources_cited"] == {"a", "b"}
 
 
 class TestFiqhLookup:
@@ -432,7 +253,9 @@ class TestFiqhLookup:
 
         mock_resp = MagicMock()
         mock_resp.json.return_value = {
-            "bridges": [{"canonical": "salah", "arabic": "صلاة", "english": "prayer"}],
+            "bridges": [
+                {"canonical": "salah", "arabic": "\u0635\u0644\u0627\u0629", "english": "prayer"}
+            ],
             "related": [{"term": "qasr"}],
         }
         mock_resp.raise_for_status = MagicMock()
@@ -463,18 +286,12 @@ class TestSetupCodeInLocalREPL:
         repl = LocalREPL(setup_code=code)
         try:
             assert "search" in repl.locals
-            assert "browse" in repl.locals
             assert "search_log" in repl.locals
-            assert "search_qa" in repl.locals
             assert "format_evidence" in repl.locals
-            assert "sources_cited" in repl.locals
             assert "fiqh_lookup" in repl.locals
             assert callable(repl.locals["search"])
-            assert callable(repl.locals["browse"])
-            assert callable(repl.locals["search_qa"])
             assert callable(repl.locals["format_evidence"])
             assert callable(repl.locals["fiqh_lookup"])
             assert isinstance(repl.locals["search_log"], list)
-            assert isinstance(repl.locals["sources_cited"], set)
         finally:
             repl.cleanup()

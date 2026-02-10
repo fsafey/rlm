@@ -5,6 +5,7 @@ import { defaultSettings, initialSearchState } from "./types";
 export function useSearch() {
   const [state, setState] = useState<SearchState>(initialSearchState);
   const abortRef = useRef<AbortController | null>(null);
+  const searchIdRef = useRef<string | null>(null);
 
   const search = useCallback(async (query: string, settings?: SearchSettings) => {
     // Abort any in-flight search
@@ -33,6 +34,7 @@ export function useSearch() {
 
       const { search_id } = (await res.json()) as { search_id: string };
       console.log("[SEARCH] started:", search_id);
+      searchIdRef.current = search_id;
 
       setState((s) => ({ ...s, searchId: search_id }));
 
@@ -125,6 +127,11 @@ export function useSearch() {
   }, []);
 
   const reset = useCallback(() => {
+    // Signal the backend to cancel the running RLM completion
+    if (searchIdRef.current) {
+      fetch(`/api/search/${searchIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
+      searchIdRef.current = null;
+    }
     abortRef.current?.abort();
     setState(initialSearchState);
   }, []);

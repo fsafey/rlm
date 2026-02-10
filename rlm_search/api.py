@@ -32,7 +32,7 @@ from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
 from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
 from rlm_search.repl_tools import build_search_setup_code
-from rlm_search.streaming_logger import StreamingLogger
+from rlm_search.streaming_logger import SearchCancelled, StreamingLogger
 
 _log = logging.getLogger("rlm_search")
 
@@ -169,6 +169,10 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
             usage=usage,
         )
 
+    except SearchCancelled:
+        print(f"[SEARCH:{search_id}] Cancelled by client")
+        logger.mark_done(answer=None, sources=[], execution_time=0.0, usage={})
+
     except Exception as e:
         print(f"[SEARCH:{search_id}] ERROR | {type(e).__name__}: {e}")
         logger.mark_error(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
@@ -187,6 +191,16 @@ async def start_search(req: SearchRequest) -> SearchResponse:
     _executor.submit(_run_search, search_id, req.query, settings)
 
     return SearchResponse(search_id=search_id)
+
+
+@app.post("/api/search/{search_id}/cancel")
+async def cancel_search(search_id: str) -> dict:
+    print(f"[API] POST /api/search/{search_id}/cancel | found={search_id in _searches}")
+    logger = _searches.get(search_id)
+    if not logger:
+        raise HTTPException(status_code=404, detail="Search not found")
+    logger.cancel()
+    return {"status": "cancelled"}
 
 
 @app.get("/api/search/{search_id}/stream")

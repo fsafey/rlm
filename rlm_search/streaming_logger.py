@@ -10,6 +10,10 @@ from rlm.core.types import RLMIteration, RLMMetadata
 from rlm.logger.rlm_logger import RLMLogger
 
 
+class SearchCancelled(Exception):
+    """Raised inside the RLM loop when a search is cancelled by the client."""
+
+
 class StreamingLogger(RLMLogger):
     """RLMLogger subclass that pushes events to a thread-safe queue for SSE streaming."""
 
@@ -18,6 +22,7 @@ class StreamingLogger(RLMLogger):
         self.queue: list[dict] = []
         self._lock = threading.Lock()
         self._done = False
+        self._cancelled = False
 
     def emit_progress(self, phase: str, detail: str = "") -> None:
         """Emit a lightweight progress event for frontend initialization display."""
@@ -41,7 +46,20 @@ class StreamingLogger(RLMLogger):
             self.queue.append(event)
             print(f"[STREAM] metadata event queued | queue_size={len(self.queue)}")
 
+    def cancel(self) -> None:
+        """Signal cancellation. The next log() call will raise SearchCancelled."""
+        with self._lock:
+            self._cancelled = True
+
+    @property
+    def is_cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
+
     def log(self, iteration: RLMIteration) -> None:
+        with self._lock:
+            if self._cancelled:
+                raise SearchCancelled("Search cancelled by client")
         super().log(iteration)
         event = {
             "type": "iteration",

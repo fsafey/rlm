@@ -97,7 +97,7 @@ class TestBuildKbOverview:
             # Check cluster samples extracted
             cluster_key = f"Cluster1_{code}"
             assert cluster_key in cat["clusters"]
-            assert cat["clusters"][cluster_key]["sample"]["id"] == f"{code}_1"
+            assert cat["clusters"][cluster_key] == f"Sample question for {code}"
 
         assert "global_facets" in result
         assert "parent_code" in result["global_facets"]

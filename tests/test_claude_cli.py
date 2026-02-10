@@ -1,5 +1,6 @@
 """Tests for ClaudeCLI client."""
 
+import json
 import subprocess
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -7,12 +8,35 @@ import pytest
 
 from rlm.clients.claude_cli import ClaudeCLI
 
+# Standard mock JSON response matching `claude -p --output-format json`
+_MOCK_JSON_RESPONSE = json.dumps(
+    {
+        "type": "result",
+        "subtype": "success",
+        "is_error": False,
+        "result": "test response",
+        "usage": {
+            "input_tokens": 100,
+            "cache_read_input_tokens": 500,
+            "output_tokens": 25,
+        },
+        "modelUsage": {
+            "claude-opus-4-6": {
+                "inputTokens": 100,
+                "outputTokens": 25,
+                "cacheReadInputTokens": 500,
+                "cacheCreationInputTokens": 0,
+            }
+        },
+    }
+)
+
 
 def _successful_run(*args, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(
         args=args[0] if args else [],
         returncode=0,
-        stdout="test response",
+        stdout=_MOCK_JSON_RESPONSE,
         stderr="",
     )
 
@@ -26,12 +50,17 @@ def _failed_run(*args, **kwargs) -> subprocess.CompletedProcess:
     )
 
 
+def _make_mock_json(result_text: str = "test response") -> str:
+    """Build a mock JSON response with custom result text."""
+    return json.dumps({"result": result_text, "usage": {}, "modelUsage": {}})
+
+
 # -- Base command flags --
 
 
 @patch("subprocess.run", side_effect=_successful_run)
 def test_default_cmd(mock_run: MagicMock) -> None:
-    """Default params produce correct cmd: tools disabled, no-session-persistence, text output."""
+    """Default params produce correct cmd: no-session-persistence, json output."""
     client = ClaudeCLI()
     client.completion("hello")
 
@@ -39,7 +68,7 @@ def test_default_cmd(mock_run: MagicMock) -> None:
     assert cmd[0] == "claude"
     assert cmd[1:3] == ["-p", "hello"]
     assert "--output-format" in cmd
-    assert cmd[cmd.index("--output-format") + 1] == "text"
+    assert cmd[cmd.index("--output-format") + 1] == "json"
     assert "--no-session-persistence" in cmd
     assert "--tools" not in cmd  # empty tools string omitted
 
@@ -161,22 +190,63 @@ def test_completion_error_handling(mock_run: MagicMock) -> None:
         client.completion("hello")
 
 
-# -- Usage summary key --
+# -- Usage tracking --
 
 
-def test_usage_summary_uses_model_name() -> None:
-    """Default usage summary key is model_name."""
+def test_usage_summary_no_calls() -> None:
+    """Before any calls, usage summary uses model key with zero counts."""
     client = ClaudeCLI()
     summary = client.get_usage_summary()
     assert "claude-cli" in summary.model_usage_summaries
+    assert summary.model_usage_summaries["claude-cli"].total_calls == 0
 
 
-def test_usage_summary_uses_model_when_set() -> None:
-    """When model is set, usage summary key uses model instead of model_name."""
+def test_usage_summary_no_calls_with_model() -> None:
+    """Before any calls with model set, uses model as key."""
     client = ClaudeCLI(model="opus")
     summary = client.get_usage_summary()
     assert "opus" in summary.model_usage_summaries
-    assert "claude-cli" not in summary.model_usage_summaries
+
+
+@patch("subprocess.run", side_effect=_successful_run)
+def test_usage_accumulates_from_json(mock_run: MagicMock) -> None:
+    """Usage tokens are extracted from JSON response and accumulated."""
+    client = ClaudeCLI()
+    client.completion("hello")
+
+    summary = client.get_usage_summary()
+    model_summary = summary.model_usage_summaries["claude-opus-4-6"]
+    assert model_summary.total_calls == 1
+    assert model_summary.total_input_tokens == 600  # 100 input + 500 cache_read
+    assert model_summary.total_output_tokens == 25
+
+    # Second call should accumulate
+    client.completion("world")
+    summary = client.get_usage_summary()
+    model_summary = summary.model_usage_summaries["claude-opus-4-6"]
+    assert model_summary.total_calls == 2
+    assert model_summary.total_input_tokens == 1200
+    assert model_summary.total_output_tokens == 50
+
+
+@patch("subprocess.run", side_effect=_successful_run)
+def test_last_usage(mock_run: MagicMock) -> None:
+    """get_last_usage returns tokens from the most recent call."""
+    client = ClaudeCLI()
+    client.completion("hello")
+
+    last = client.get_last_usage()
+    assert last.total_calls == 1
+    assert last.total_input_tokens == 600
+    assert last.total_output_tokens == 25
+
+
+@patch("subprocess.run", side_effect=_successful_run)
+def test_completion_returns_result_text(mock_run: MagicMock) -> None:
+    """completion() returns the 'result' field from JSON, not raw JSON."""
+    client = ClaudeCLI()
+    result = client.completion("hello")
+    assert result == "test response"
 
 
 # -- _build_cmd unit tests --
@@ -207,17 +277,17 @@ async def _async_passthrough(coro, timeout):
 
 @pytest.mark.asyncio
 async def test_acompletion_success() -> None:
-    """acompletion returns decoded stdout on success."""
+    """acompletion returns result text from JSON on success."""
     mock_proc = AsyncMock()
     mock_proc.returncode = 0
-    mock_proc.communicate.return_value = (b"async response", b"")
+    mock_proc.communicate.return_value = (_MOCK_JSON_RESPONSE.encode(), b"")
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
         with patch("asyncio.wait_for", side_effect=_async_passthrough):
             client = ClaudeCLI(model="opus", timeout=120)
             result = await client.acompletion("hello")
 
-    assert result == "async response"
+    assert result == "test response"
     cmd = mock_exec.call_args[0]
     assert cmd[0] == "claude"
     assert "--model" in cmd
@@ -241,14 +311,16 @@ async def test_acompletion_error() -> None:
 @pytest.mark.asyncio
 async def test_acompletion_model_override() -> None:
     """acompletion per-call model override works."""
+    mock_json = _make_mock_json("ok")
     mock_proc = AsyncMock()
     mock_proc.returncode = 0
-    mock_proc.communicate.return_value = (b"ok", b"")
+    mock_proc.communicate.return_value = (mock_json.encode(), b"")
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
         with patch("asyncio.wait_for", side_effect=_async_passthrough):
             client = ClaudeCLI(model="sonnet")
-            await client.acompletion("hello", model="opus")
+            result = await client.acompletion("hello", model="opus")
 
+    assert result == "ok"
     cmd = mock_exec.call_args[0]
     assert cmd[cmd.index("--model") + 1] == "opus"

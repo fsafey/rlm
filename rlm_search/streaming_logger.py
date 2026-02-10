@@ -17,8 +17,16 @@ class SearchCancelled(Exception):
 class StreamingLogger(RLMLogger):
     """RLMLogger subclass that pushes events to a thread-safe queue for SSE streaming."""
 
-    def __init__(self, log_dir: str, file_name: str = "rlm"):
+    def __init__(
+        self,
+        log_dir: str,
+        file_name: str = "rlm",
+        search_id: str = "",
+        query: str = "",
+    ):
         super().__init__(log_dir, file_name)
+        self.search_id = search_id
+        self.query = query
         self.queue: list[dict] = []
         self._lock = threading.Lock()
         self._done = False
@@ -39,6 +47,9 @@ class StreamingLogger(RLMLogger):
         super().log_metadata(metadata)
         event = {
             "type": "metadata",
+            "search_id": self.search_id,
+            "query": self.query,
+            "log_file": self.log_file_path,
             "timestamp": datetime.now().isoformat(),
             **metadata.to_dict(),
         }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import traceback
 import uuid
@@ -110,6 +111,14 @@ app.add_middleware(
 _searches: dict[str, StreamingLogger] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
 
+_SOURCE_PATTERN = re.compile(r"\[Source:\s*(\d+)\]")
+
+
+def _extract_sources(answer: str) -> list[dict]:
+    """Extract unique source IDs from [Source: XXXX] references in the answer text."""
+    ids = list(dict.fromkeys(_SOURCE_PATTERN.findall(answer)))
+    return [{"id": int(sid)} for sid in ids]
+
 
 def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     """Run an RLM completion in a thread. Pushes events to the StreamingLogger."""
@@ -157,9 +166,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
             f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s"
         )
 
-        # TODO: REPL environment is cleaned up before we can access search_log.
-        # Source info is visible in iteration SSE events via [search] print lines.
-        sources: list[dict] = []
+        sources = _extract_sources(result.response or "")
         usage = result.usage_summary.to_dict() if result.usage_summary else {}
 
         logger.mark_done(
@@ -183,7 +190,10 @@ async def start_search(req: SearchRequest) -> SearchResponse:
     search_id = str(uuid.uuid4())[:12]
     print(f"[API] POST /api/search | id={search_id} query={req.query!r}")
     logger = StreamingLogger(
-        log_dir="/Users/farieds/projects/rlm/rlm_logs", file_name=f"search_{search_id}"
+        log_dir="/Users/farieds/projects/rlm/rlm_logs",
+        file_name=f"search_{search_id}",
+        search_id=search_id,
+        query=req.query,
     )
     _searches[search_id] = logger
 

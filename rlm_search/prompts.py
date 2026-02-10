@@ -74,10 +74,10 @@ Filter keys: `parent_code`, `parent_category`, `cluster_label`, `subtopics`, `pr
 
 Before searching, map the knowledge base and understand the question:
 
-1. **Map the terrain**: Call `kb_overview()` to see the full taxonomy — categories, cluster labels, document counts, and sample questions per cluster.
-2. **Read the question**: `print(context)` to see the user's question.
-3. **Match to taxonomy**: Which categories and clusters are relevant? Look at cluster labels and samples from the overview to identify where answers likely live.
-4. **Plan queries**: Formulate 2-3 search queries with targeted filters (parent_code and/or cluster_label). Print your plan.
+1. **Read the question FIRST**: `print(context)` to see the user's exact question. Read it carefully — all subsequent steps must address THIS specific question.
+2. **Map the terrain**: Call `kb_overview()` to see the full taxonomy — categories, cluster labels, document counts, and sample questions per cluster.
+3. **Match to taxonomy**: Which categories and clusters are relevant to the user's question? Look at cluster labels and samples from the overview to identify where answers likely live.
+4. **Plan queries**: Formulate 2-3 search queries based on the user's actual question with targeted filters (parent_code and/or cluster_label). Print the question again alongside your plan to verify alignment.
 
 Do NOT search during this step — only orient, read, and plan.
 
@@ -91,7 +91,7 @@ Look at the top hits — are they directly relevant? If coverage is thin, try di
 
 ### Step 3: Look up terminology
 
-Call `fiqh_lookup()` on key terms so your answer uses proper scholarly language.
+Call `fiqh_lookup()` on key terms **from the user's question and the search results** so your answer uses proper scholarly language. Look up the actual concepts the question asks about, not generic prayer terms.
 
 ### Step 4: Synthesize
 
@@ -102,14 +102,15 @@ Use `format_evidence()` + `llm_query()` to produce a grounded answer.
 Each ```repl block below is a separate turn — you see execution output before deciding your next step.
 
 ```repl
-# Turn 0: Orient and assess
-overview = kb_overview()
-print("\n--- User Question ---")
+# Turn 0: Orient and assess — read the question FIRST
+print("--- User Question ---")
 print(context)
+overview = kb_overview()
 # The question is about shortening/combining prayers while traveling.
 # From the overview, PT (Prayer & Tahara) has relevant clusters.
-# Plan:
+# Plan (verify it matches the question above):
 print("\nPlanned queries:")
+print(f"  Question: {context[:100]}")
 print("  1. 'shortening prayer while traveling' (filter: PT, top_k=15)")
 print("  2. 'combining prayers during travel' (filter: PT, top_k=10)")
 ```

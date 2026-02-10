@@ -219,24 +219,29 @@ def kb_overview():
     programmatic filtering only.
 
     Returns:
-        None if unavailable, otherwise a list of category dicts:
-        [
-            {
-                "code": "PT",
-                "name": "Prayer & Tahara (Purification)",
-                "document_count": 5200,
-                "cluster_labels": ["Ghusl", "Wudu", ...],
-            },
-            ...
-        ]
+        None if unavailable, otherwise a dict:
+        {
+            "collection": "enriched_gemini",
+            "total_documents": 18835,
+            "categories": [
+                {
+                    "code": "PT",
+                    "name": "Prayer & Tahara (Purification)",
+                    "document_count": 5200,
+                    "cluster_labels": ["Ghusl", "Wudu", ...],
+                },
+                ...
+            ],
+        }
     """
     if _KB_OVERVIEW is None:
         print("WARNING: Knowledge base overview unavailable — use search() directly.")
         return None
     ov = _KB_OVERVIEW
+    collection = ov.get("collection", "?")
     total = ov.get("total_documents", 0)
-    print(f"=== Knowledge Base: {ov.get(\'collection\', \'?\')} ({total:,} documents) ===\\n")
-    summary = []
+    print(f"=== Knowledge Base: {collection} ({total:,} documents) ===\\n")
+    categories = []
     for code, cat in ov.get("categories", {}).items():
         name = cat.get("name", code)
         count = cat.get("document_count", 0)
@@ -256,7 +261,7 @@ def kb_overview():
                 print(f"  · {label}")
             shown += 1
         print()
-        summary.append({
+        categories.append({
             "code": code,
             "name": name,
             "document_count": count,
@@ -264,7 +269,7 @@ def kb_overview():
         })
     print("Filter keys: parent_code, cluster_label, subtopics, primary_topic")
     print("Tip: Use cluster_label for precise targeting after identifying relevant clusters")
-    return summary
+    return {"collection": collection, "total_documents": total, "categories": categories}
 '''
 
     return code

@@ -1,5 +1,7 @@
 import asyncio
+import json
 import subprocess
+from collections import defaultdict
 from typing import Any
 
 from rlm.clients.base_lm import BaseLM
@@ -10,6 +12,7 @@ class ClaudeCLI(BaseLM):
     """BaseLM client that shells out to `claude -p` (Claude Code CLI).
 
     Uses the user's authenticated Claude Code session -- no API key needed.
+    Uses JSON output format to capture token usage and cost data.
     """
 
     def __init__(
@@ -32,7 +35,11 @@ class ClaudeCLI(BaseLM):
         self.allowed_tools = allowed_tools
         self.tools = tools
         self.extra_flags = extra_flags
-        self._call_count: int = 0
+        self._model_call_counts: dict[str, int] = defaultdict(int)
+        self._model_input_tokens: dict[str, int] = defaultdict(int)
+        self._model_output_tokens: dict[str, int] = defaultdict(int)
+        self._last_input_tokens: int = 0
+        self._last_output_tokens: int = 0
 
     def _build_prompt(
         self, prompt: str | list[dict[str, Any]] | dict[str, Any]
@@ -66,7 +73,7 @@ class ClaudeCLI(BaseLM):
             "-p",
             prompt_text,
             "--output-format",
-            "text",
+            "json",
             "--no-session-persistence",
         ]
         if self.tools:
@@ -87,6 +94,29 @@ class ClaudeCLI(BaseLM):
             cmd.extend(self.extra_flags)
         return cmd
 
+    def _parse_response(self, raw_output: str) -> str:
+        """Parse JSON output from claude CLI, accumulate usage, return result text."""
+        data = json.loads(raw_output)
+        result_text = data.get("result", "")
+
+        # Accumulate per-model usage from modelUsage field
+        model_usage = data.get("modelUsage", {})
+        for model_key, usage in model_usage.items():
+            input_tokens = usage.get("inputTokens", 0) + usage.get("cacheReadInputTokens", 0)
+            output_tokens = usage.get("outputTokens", 0)
+            self._model_call_counts[model_key] += 1
+            self._model_input_tokens[model_key] += input_tokens
+            self._model_output_tokens[model_key] += output_tokens
+
+        # Track last-call usage from top-level usage field
+        top_usage = data.get("usage", {})
+        self._last_input_tokens = top_usage.get("input_tokens", 0) + top_usage.get(
+            "cache_read_input_tokens", 0
+        )
+        self._last_output_tokens = top_usage.get("output_tokens", 0)
+
+        return result_text
+
     def completion(
         self, prompt: str | list[dict[str, Any]] | dict[str, Any], model: str | None = None
     ) -> str:
@@ -97,8 +127,7 @@ class ClaudeCLI(BaseLM):
         if result.returncode != 0:
             raise RuntimeError(f"claude CLI failed (rc={result.returncode}): {result.stderr}")
 
-        self._call_count += 1
-        return result.stdout.strip()
+        return self._parse_response(result.stdout)
 
     async def acompletion(
         self, prompt: str | list[dict[str, Any]] | dict[str, Any], model: str | None = None
@@ -116,27 +145,26 @@ class ClaudeCLI(BaseLM):
         if proc.returncode != 0:
             raise RuntimeError(f"claude CLI failed (rc={proc.returncode}): {stderr.decode()}")
 
-        self._call_count += 1
-        return stdout.decode().strip()
-
-    def _usage_summary(self) -> UsageSummary:
-        key = self.model or self.model_name
-        return UsageSummary(
-            model_usage_summaries={
-                key: ModelUsageSummary(
-                    total_calls=self._call_count,
-                    total_input_tokens=0,
-                    total_output_tokens=0,
-                ),
-            }
-        )
+        return self._parse_response(stdout.decode())
 
     def get_usage_summary(self) -> UsageSummary:
-        return self._usage_summary()
+        model_summaries = {}
+        for model_key in self._model_call_counts:
+            model_summaries[model_key] = ModelUsageSummary(
+                total_calls=self._model_call_counts[model_key],
+                total_input_tokens=self._model_input_tokens[model_key],
+                total_output_tokens=self._model_output_tokens[model_key],
+            )
+        if not model_summaries:
+            key = self.model or self.model_name
+            model_summaries[key] = ModelUsageSummary(
+                total_calls=0, total_input_tokens=0, total_output_tokens=0
+            )
+        return UsageSummary(model_usage_summaries=model_summaries)
 
     def get_last_usage(self) -> ModelUsageSummary:
         return ModelUsageSummary(
-            total_calls=self._call_count,
-            total_input_tokens=0,
-            total_output_tokens=0,
+            total_calls=1,
+            total_input_tokens=self._last_input_tokens,
+            total_output_tokens=self._last_output_tokens,
         )

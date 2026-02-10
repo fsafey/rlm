@@ -10,7 +10,8 @@ def build_search_setup_code(
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
-    Defines search(), browse(), and a search_log list in the REPL namespace.
+    Defines search(), browse(), search_qa(), format_evidence(), fiqh_lookup(),
+    and a search_log list in the REPL namespace.
 
     The Cascade API returns hits with flat fields (id, question, answer,
     parent_code, cluster_label, etc.). These functions normalize the response
@@ -59,7 +60,7 @@ def search(query: str, collection: str | None = None, filters: dict | None = Non
 
     Args:
         query: Natural language search query.
-        collection: Optional collection name (e.g. "risala_gemini", "enriched_gemini").
+        collection: Optional collection name (e.g. "enriched_gemini").
         filters: Optional filter dict, e.g. {{"parent_code": "PT"}}.
         top_k: Number of results to return (default: 10).
 
@@ -86,7 +87,7 @@ def browse(collection: str | None = None, filters: dict | None = None, offset: i
     """Browse documents by filter criteria without a search query.
 
     Args:
-        collection: Optional collection name (e.g. "risala_gemini", "enriched_gemini").
+        collection: Optional collection name (e.g. "enriched_gemini").
         filters: Filter dict, e.g. {{"parent_code": "PT"}} for Prayer/Tahara.
         offset: Pagination offset.
         limit: Number of documents to return.
@@ -107,12 +108,6 @@ def browse(collection: str | None = None, filters: dict | None = None, offset: i
     print(f"[REPL:browse] collection={{collection}} filters={{filters}} offset={{offset}} results={{len(results)}}")
     search_log.append({{"type": "browse", "collection": collection, "filters": filters, "offset": offset, "limit": limit, "num_results": len(results)}})
     return {{"results": results, "total": data.get("total", len(results)), "has_more": data.get("has_more", False)}}
-
-
-def search_risala(query: str, **kwargs) -> dict:
-    """Search the Risala collection (authoritative rulings with ruling numbers)."""
-    kwargs.pop("collection", None)
-    return search(query, collection="risala_gemini", **kwargs)
 
 
 def search_qa(query: str, **kwargs) -> dict:

@@ -297,18 +297,13 @@ class TestBrowseCollectionParameter:
 
 
 class TestConvenienceWrappers:
-    """Test search_risala, search_qa, format_evidence, and sources_cited."""
+    """Test search_qa, format_evidence, and sources_cited."""
 
     def _exec_ns(self):
         code = build_search_setup_code(api_url="http://api.test", api_key="k")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         return ns
-
-    def test_defines_search_risala(self):
-        ns = self._exec_ns()
-        assert "search_risala" in ns
-        assert callable(ns["search_risala"])
 
     def test_defines_search_qa(self):
         ns = self._exec_ns()
@@ -325,20 +320,6 @@ class TestConvenienceWrappers:
         assert "sources_cited" in ns
         assert isinstance(ns["sources_cited"], set)
         assert len(ns["sources_cited"]) == 0
-
-    def test_search_risala_delegates_to_search(self):
-        ns = self._exec_ns()
-
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [], "total": 0}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            ns["search_risala"]("test query")
-
-        payload = mock_post.call_args[1]["json"]
-        assert payload["collection"] == "risala_gemini"
-        assert payload["query"] == "test query"
 
     def test_search_qa_delegates_to_search(self):
         ns = self._exec_ns()
@@ -402,19 +383,6 @@ class TestConvenienceWrappers:
         results = [{"id": "same", "question": f"q{i}", "answer": "a"} for i in range(5)]
         lines = ns["format_evidence"](results, max_per_source=2)
         assert len(lines) == 2
-
-    def test_search_risala_ignores_collection_kwarg(self):
-        """Passing collection= to search_risala should not cause TypeError."""
-        ns = self._exec_ns()
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [], "total": 0}
-        mock_resp.raise_for_status = MagicMock()
-
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
-            ns["search_risala"]("test", collection="other")
-
-        payload = mock_post.call_args[1]["json"]
-        assert payload["collection"] == "risala_gemini"
 
     def test_sources_cited_accumulates_across_calls(self):
         ns = self._exec_ns()
@@ -497,14 +465,12 @@ class TestSetupCodeInLocalREPL:
             assert "search" in repl.locals
             assert "browse" in repl.locals
             assert "search_log" in repl.locals
-            assert "search_risala" in repl.locals
             assert "search_qa" in repl.locals
             assert "format_evidence" in repl.locals
             assert "sources_cited" in repl.locals
             assert "fiqh_lookup" in repl.locals
             assert callable(repl.locals["search"])
             assert callable(repl.locals["browse"])
-            assert callable(repl.locals["search_risala"])
             assert callable(repl.locals["search_qa"])
             assert callable(repl.locals["format_evidence"])
             assert callable(repl.locals["fiqh_lookup"])

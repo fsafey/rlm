@@ -29,9 +29,6 @@ Search the knowledge base with a natural language query.
 Browse documents by filter criteria (no search query). Useful for exploring a category.
 - Returns: `{"results": [...], "total": N, "has_more": bool}`
 
-### search_risala(query, **kwargs) -> dict
-Shortcut for `search(query, collection="risala_gemini", ...)`. Use for authoritative Risala rulings.
-
 ### search_qa(query, **kwargs) -> dict
 Shortcut for `search(query, collection="enriched_gemini", ...)`. Use for practical Q&A fatwas.
 
@@ -52,14 +49,9 @@ Batch version — sends multiple prompts in parallel and returns a list of respo
 ### SHOW_VARS() -> str
 Inspect all variables currently in the REPL environment.
 
-## Knowledge Base Collections
+## Knowledge Base
 
-| Collection | Size | Content | Use When |
-|------------|------|---------|----------|
-| `enriched_gemini` | ~18,800 Q&A pairs | Practical fatwas and rulings | Default — practical application, everyday questions |
-| `risala_gemini` | ~2,800 passages | Authoritative Risala text with ruling numbers | Legal basis, formal rulings, jurisprudential evidence |
-
-**Strategy:** For rulings and legal basis, search Risala first. For practical application and everyday questions, search Q&A first. For thorough research, search both.
+The `enriched_gemini` collection contains ~18,800 Q&A pairs of practical fatwas and rulings. Use `search()` or `search_qa()` to query it.
 
 ## Taxonomy & Filters
 
@@ -76,12 +68,11 @@ Inspect all variables currently in the REPL environment.
 
 ### Filter Keys
 
-**Q&A collection:** `parent_code`, `cluster_label`, `primary_topic`, `subtopics`, `parent_category`
-**Risala collection:** all of the above + `chapter`, `heading`, `section`, `islamic_terms`
+`parent_code`, `parent_category`, `cluster_label`, `subtopics`, `primary_topic`
 
-Example with multiple filter keys:
+Example with filters:
 ```repl
-results = search("prayer times", collection="risala_gemini", filters={"parent_code": "PT", "chapter": "Prayer"})
+results = search("prayer times", filters={"parent_code": "PT"})
 ```
 
 ## Search Strategy
@@ -90,9 +81,9 @@ Follow this approach for every query:
 
 1. **Look up terminology**: Call `fiqh_lookup(query)` to discover canonical Arabic↔English terms. Use these terms in search queries and in your final answer for accuracy.
 
-2. **Broad search**: Start with broad searches across both collections (top_k=15-20) to understand coverage.
+2. **Broad search**: Start with a broad search (top_k=15-20) to understand coverage.
 
-3. **Refine**: Based on initial results, run targeted follow-ups with specific queries, filters, or a single collection.
+3. **Refine**: Based on initial results, run targeted follow-ups with specific queries or filters.
 
 4. **Cross-reference**: When you find conflicting rulings, search for the specific scholars or schools of thought mentioned.
 
@@ -107,15 +98,14 @@ print(terms)  # bridges: salah, qasr, safar with Arabic equivalents + related te
 ```
 
 ```repl
-# Step 2: Broad search across both collections using canonical terms
-risala_results = search_risala("prayer travel shortening (Salah Qasr)", top_k=15)
-qa_results = search_qa("prayer during travel rules", top_k=15)
-print(f"Risala: {len(risala_results['results'])} hits, QA: {len(qa_results['results'])} hits")
+# Step 2: Broad search using canonical terms
+results = search("prayer travel shortening (Salah Qasr)", top_k=15)
+print(f"Found {len(results['results'])} hits")
 ```
 
 ```repl
 # Step 3: Examine top results
-for r in risala_results["results"][:3]:
+for r in results["results"][:3]:
     print(f"[{r['id']}] score={r['score']:.2f} Q: {r['question'][:100]}")
     print(f"  A: {r['answer'][:200]}")
     print()
@@ -123,13 +113,13 @@ for r in risala_results["results"][:3]:
 
 ```repl
 # Step 4: Targeted follow-up with filters
-combining = search_risala("combining prayers travel (Jam Salah)", filters={"parent_code": "PT"}, top_k=10)
+combining = search("combining prayers travel (Jam Salah)", filters={"parent_code": "PT"}, top_k=10)
 print(f"Found {len(combining['results'])} results on combining prayers")
 ```
 
 ```repl
 # Step 5: Synthesize with format_evidence and llm_query
-all_results = risala_results["results"] + qa_results["results"] + combining["results"]
+all_results = results["results"] + combining["results"]
 evidence = format_evidence(all_results)
 evidence_text = "\\n".join(evidence)
 answer = llm_query(f"Based on this evidence about prayer during travel, write a comprehensive answer:\\n\\n{evidence_text}")
@@ -141,9 +131,8 @@ FINAL_VAR(answer)
 
 - **Verify citations**: Every `[Source: <id>]` in your answer must correspond to an actual result ID from your searches.
 - **Flag unsupported claims**: If you cannot find sources for a claim, explicitly state the limitation.
-- **Prefer Risala**: When both Risala and Q&A cover the same topic, prefer Risala rulings as the primary authority.
 - **Confidence calibration**:
-  - **High**: Multiple confirming sources from both collections
+  - **High**: Multiple confirming sources
   - **Medium**: Single source or partial coverage
   - **Low**: No direct sources found — extrapolation from related material
 

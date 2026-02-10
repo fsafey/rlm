@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { Iteration, MetadataEvent, SearchSettings, SearchState, SSEEvent } from "./types";
+import type { Iteration, MetadataEvent, ProgressEvent, SearchSettings, SearchState, SSEEvent } from "./types";
 import { defaultSettings, initialSearchState } from "./types";
 
 export function useSearch() {
@@ -94,6 +94,14 @@ export function useSearch() {
                   error: event.message,
                 }));
                 return;
+
+              case "progress":
+                console.log("[SSE] progress:", (event as ProgressEvent).phase, (event as ProgressEvent).detail);
+                setState((s) => ({
+                  ...s,
+                  progressSteps: [...s.progressSteps, event as ProgressEvent],
+                }));
+                break;
 
               case "metadata":
                 console.log("[SSE] metadata received", event);

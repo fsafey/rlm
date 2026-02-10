@@ -63,18 +63,26 @@ export interface DoneEvent {
   usage: Record<string, unknown>;
 }
 
+export interface ProgressEvent {
+  type: "progress";
+  phase: string;
+  detail: string;
+  timestamp: string;
+}
+
 export interface ErrorEvent {
   type: "error";
   message: string;
 }
 
-export type SSEEvent = MetadataEvent | Iteration | DoneEvent | ErrorEvent;
+export type SSEEvent = MetadataEvent | ProgressEvent | Iteration | DoneEvent | ErrorEvent;
 
 export interface SearchState {
   status: "idle" | "searching" | "done" | "error";
   searchId: string | null;
   query: string;
   metadata: MetadataEvent | null;
+  progressSteps: ProgressEvent[];
   iterations: Iteration[];
   answer: string | null;
   sources: SearchSource[];
@@ -98,6 +106,7 @@ export const initialSearchState: SearchState = {
   searchId: null,
   query: "",
   metadata: null,
+  progressSteps: [],
   iterations: [],
   answer: null,
   sources: [],

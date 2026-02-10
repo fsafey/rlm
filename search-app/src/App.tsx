@@ -47,7 +47,12 @@ function App() {
         {/* Progress indicator */}
         {state.status === "searching" && (
           <div className="flex justify-center">
-            <SearchProgress iterations={state.iterations} />
+            <SearchProgress
+              query={state.query}
+              iterations={state.iterations}
+              metadata={state.metadata}
+              progressSteps={state.progressSteps}
+            />
           </div>
         )}
 

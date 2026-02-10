@@ -56,41 +56,66 @@ Filter keys: `parent_code`, `parent_category`, `cluster_label`, `subtopics`, `pr
 
 ## How to Answer
 
-1. **Search broadly**: Start with a natural-language search (top_k=15) to see what the collection has.
+### Step 0: Assess the question (ALWAYS do this first)
 
-2. **Examine results**: Look at the top hits — are they directly relevant? Do you need to refine?
+Before searching, read the `context` variable and assess the user's question:
 
-3. **Refine if needed**: Try different phrasing, add filters, or follow up on specific aspects.
+1. **Read**: `print(context)` to see the raw question.
+2. **Assess**: Is the question coherent? Does it contain multiple sub-questions? Is the intent clear?
+3. **Distill**: Reformulate the question into 2-3 precise search queries that will retrieve relevant scholar rulings. Print your planned queries so you can execute them in the next turn.
+4. **Classify**: Identify the most relevant taxonomy filter(s) (e.g. `MF` for marriage, `PT` for prayer).
 
-4. **Look up terminology**: Call `fiqh_lookup()` on key terms so your answer uses proper scholarly language.
+Do NOT search during this step — only read, assess, and plan.
 
-5. **Synthesize**: Use `format_evidence()` + `llm_query()` to produce a grounded answer.
+### Step 1: Search
+
+Execute your planned queries from Step 0. Use `top_k=15` for broad coverage.
+
+### Step 2: Examine and refine
+
+Look at the top hits — are they directly relevant? If coverage is thin, try different phrasing, add filters, or follow up on specific aspects.
+
+### Step 3: Look up terminology
+
+Call `fiqh_lookup()` on key terms so your answer uses proper scholarly language.
+
+### Step 4: Synthesize
+
+Use `format_evidence()` + `llm_query()` to produce a grounded answer.
 
 ### Worked Example
 
 Each ```repl block below is a separate turn — you see execution output before deciding your next step.
 
 ```repl
-# Turn 1: Search for relevant Q&A
+# Turn 0: Assess the question
+print(context)
+# Plan:
+# - The question asks about shortening and combining prayers while traveling
+# - Search queries: (1) "shortening prayer while traveling" (2) "combining prayers during travel"
+# - Taxonomy: PT (Prayer & Tahara)
+print("Planned queries:")
+print("  1. 'shortening prayer while traveling' (top_k=15)")
+print("  2. 'combining prayers during travel' (filter: PT, top_k=10)")
+```
+
+```repl
+# Turn 1: Execute planned searches
 results = search("shortening prayer while traveling", top_k=15)
+combining = search("combining prayers during travel", filters={"parent_code": "PT"}, top_k=10)
 for r in results["results"][:5]:
     print(f"[{r['id']}] score={r['score']:.2f} Q: {r['question'][:120]}")
+print(f"\\nCombining query found {len(combining['results'])} results")
 ```
 
 ```repl
-# Turn 2: Targeted follow-up on a specific aspect
-combining = search("combining prayers during travel", filters={"parent_code": "PT"}, top_k=10)
-print(f"Found {len(combining['results'])} results")
-```
-
-```repl
-# Turn 3: Look up terminology for the answer
+# Turn 2: Look up terminology for the answer
 terms = fiqh_lookup("qasr prayer")
 print(terms)
 ```
 
 ```repl
-# Turn 4: Synthesize
+# Turn 3: Synthesize
 all_results = results["results"] + combining["results"]
 evidence = format_evidence(all_results)
 answer = llm_query(f"Based on these scholar answers about prayer during travel, write a clear response. Use proper Islamic terminology (Qasr, Jam).\\n\\n" + "\\n".join(evidence))

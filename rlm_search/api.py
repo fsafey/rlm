@@ -133,6 +133,10 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
             f"[SEARCH:{search_id}] RLM initialized | max_iter={max_iterations} max_depth={max_depth}"
         )
 
+        # Single progress event after all setup is done — the real wait is the LLM call next
+        model_short = model.rsplit("-", 1)[0] if len(model.split("-")) > 3 else model
+        logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
+
         result = rlm.completion(query)
         print(
             f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s"

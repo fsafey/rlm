@@ -19,6 +19,17 @@ class StreamingLogger(RLMLogger):
         self._lock = threading.Lock()
         self._done = False
 
+    def emit_progress(self, phase: str, detail: str = "") -> None:
+        """Emit a lightweight progress event for frontend initialization display."""
+        event = {
+            "type": "progress",
+            "phase": phase,
+            "detail": detail,
+            "timestamp": datetime.now().isoformat(),
+        }
+        with self._lock:
+            self.queue.append(event)
+
     def log_metadata(self, metadata: RLMMetadata) -> None:
         super().log_metadata(metadata)
         event = {

@@ -51,6 +51,27 @@ npm run dev  # → http://localhost:3002
 
 The Vite dev server proxies `/api/*` to the backend at port 8092.
 
+## Team Testing (Cloudflare Tunnel)
+
+Share a live URL with the scholar team — no infrastructure setup needed.
+
+### Prerequisites
+
+- `brew install cloudflared`
+- Claude Code CLI authenticated (for `claude_cli` backend), or set `RLM_BACKEND=anthropic` + `ANTHROPIC_API_KEY`
+
+### One Command
+
+```bash
+make tunnel
+```
+
+This starts backend + frontend + Cloudflare Tunnel. Look for the `*.trycloudflare.com` URL in the output and share it with the team.
+
+**How it works:** Vite serves the React app and proxies `/api` to the backend. Cloudflared exposes the Vite dev server to the internet via an ephemeral tunnel — no DNS or firewall changes needed.
+
+**Note:** The URL changes on each restart. For a persistent URL, configure a named Cloudflare Tunnel.
+
 ## Configuration
 
 All via environment variables (or `.env` file):

@@ -1,6 +1,6 @@
 .PHONY: help install install-dev install-modal run-all \
         quickstart docker-repl lm-repl modal-repl \
-        lint format test check backend frontend
+        lint format test check backend frontend tunnel
 
 help:
 	@echo "RLM Examples Makefile"
@@ -24,6 +24,7 @@ help:
 	@echo "  make check          - Run lint + format + tests"
 	@echo "  make backend        - Start rlm_search API server (SEARCH_BACKEND_PORT, default 8092)"
 	@echo "  make frontend       - Start search frontend (SEARCH_FRONTEND_PORT, default 3002)"
+	@echo "  make tunnel         - Start backend + frontend + Cloudflare Tunnel (shareable URL)"
 
 install:
 	uv sync
@@ -66,3 +67,18 @@ backend:
 
 frontend:
 	cd search-app && SEARCH_FRONTEND_PORT=$${SEARCH_FRONTEND_PORT:-3002} SEARCH_BACKEND_PORT=$${SEARCH_BACKEND_PORT:-8092} npm run dev
+
+tunnel:
+	@echo "Starting RLM Search with Cloudflare Tunnel..."
+	@BPORT=$${SEARCH_BACKEND_PORT:-8092}; FPORT=$${SEARCH_FRONTEND_PORT:-3002}; \
+	echo "Backend: http://localhost:$$BPORT"; \
+	echo "Frontend: http://localhost:$$FPORT"; \
+	echo ""; \
+	echo "Killing existing processes on ports $$BPORT and $$FPORT..."; \
+	lsof -ti :$$BPORT :$$FPORT 2>/dev/null | xargs kill 2>/dev/null || true; \
+	sleep 1; \
+	$(MAKE) backend & \
+	sleep 2; \
+	$(MAKE) frontend & \
+	sleep 3; \
+	cloudflared tunnel --url http://localhost:$$FPORT

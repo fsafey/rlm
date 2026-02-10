@@ -57,7 +57,10 @@ cd search-app && npm run dev            # Search UI (localhost:3002)
 uv pip install fastapi uvicorn httpx    # Search deps (NOT in pyproject.toml)
 make backend                            # Search API server (port 8092)
 make frontend                           # Search UI dev server (port 3002)
+make tunnel                             # All of the above + Cloudflare Tunnel (shareable URL)
 ```
+
+`make tunnel` requires `cloudflared` (`brew install cloudflared`). Vite allows `*.trycloudflare.com` hosts via `allowedHosts` in `search-app/vite.config.ts`.
 
 ### Optional Dependency Groups
 

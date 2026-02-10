@@ -558,5 +558,172 @@ class TestSetupCodeInLocalREPL:
             assert callable(repl.locals["browse"])
             assert callable(repl.locals["kb_overview"])
             assert isinstance(repl.locals["search_log"], list)
+            # Sub-agent tools
+            for name in [
+                "evaluate_results",
+                "reformulate",
+                "critique_answer",
+                "classify_question",
+            ]:
+                assert name in repl.locals, f"Missing sub-agent tool: {name}"
+                assert callable(repl.locals[name])
         finally:
             repl.cleanup()
+
+
+def _make_sub_agent_ns(kb_overview_data=None):
+    """Helper: build setup code namespace with a mock llm_query."""
+    mock_overview = kb_overview_data or {
+        "collection": "test",
+        "total_documents": 100,
+        "categories": {
+            "PT": {
+                "name": "Prayer",
+                "document_count": 50,
+                "facets": {},
+                "clusters": {"Ghusl": "How to perform ghusl?"},
+            }
+        },
+    }
+    code = build_search_setup_code(api_url="http://localhost:8091", kb_overview_data=mock_overview)
+    ns: dict = {}
+    exec(code, ns)  # noqa: S102
+    return ns
+
+
+class TestEvaluateResults:
+    """Tests for the evaluate_results sub-agent function."""
+
+    def test_empty_results(self):
+        ns = _make_sub_agent_ns()
+        result = ns["evaluate_results"]("test question", [])
+        assert "No results" in result
+
+    def test_empty_results_from_dict(self):
+        ns = _make_sub_agent_ns()
+        result = ns["evaluate_results"]("test question", {"results": []})
+        assert "No results" in result
+
+    def test_calls_llm_query(self):
+        ns = _make_sub_agent_ns()
+        calls = []
+        ns["llm_query"] = lambda prompt, model=None: (calls.append(prompt), "RELEVANT")[1]
+        results = {"results": [{"id": "q1", "score": 0.8, "question": "Q", "answer": "A"}]}
+        ns["evaluate_results"]("test question", results)
+        assert len(calls) == 1
+        assert "test question" in calls[0]
+        assert "q1" in calls[0]
+
+    def test_accepts_dict_or_list(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "ok"
+        hit = {"id": "q1", "score": 0.5, "question": "Q", "answer": "A"}
+        # Dict form
+        ns["evaluate_results"]("q", {"results": [hit]})
+        # List form
+        ns["evaluate_results"]("q", [hit])
+
+    def test_handles_missing_fields(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "ok"
+        ns["evaluate_results"]("q", [{"id": "q1"}])  # no score, question, answer
+
+    def test_respects_top_n(self, capsys):
+        ns = _make_sub_agent_ns()
+        calls = []
+        ns["llm_query"] = lambda prompt, model=None: (calls.append(prompt), "ok")[1]
+        hits = [{"id": f"q{i}", "score": 0.5, "question": "Q", "answer": "A"} for i in range(10)]
+        ns["evaluate_results"]("q", hits, top_n=3)
+        # Should only include 3 results in the prompt
+        assert calls[0].count("score=") == 3
+        captured = capsys.readouterr()
+        assert "3 results assessed" in captured.out
+
+
+class TestReformulate:
+    """Tests for the reformulate sub-agent function."""
+
+    def test_returns_list(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "query one\nquery two\nquery three"
+        result = ns["reformulate"]("question", "failed query", 0.1)
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result[0] == "query one"
+
+    def test_caps_at_three(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "q1\nq2\nq3\nq4\nq5"
+        result = ns["reformulate"]("question", "failed", 0.1)
+        assert len(result) <= 3
+
+    def test_strips_empty_lines(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "\nq1\n\nq2\n\n"
+        result = ns["reformulate"]("question", "failed", 0.1)
+        assert result == ["q1", "q2"]
+
+    def test_prompt_contains_score(self):
+        ns = _make_sub_agent_ns()
+        calls = []
+        ns["llm_query"] = lambda prompt, model=None: (calls.append(prompt), "q1")[1]
+        ns["reformulate"]("question", "bad query", 0.18)
+        assert "0.18" in calls[0]
+
+
+class TestCritiqueAnswer:
+    """Tests for the critique_answer sub-agent function."""
+
+    def test_pass_verdict(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "PASS - all citations verified"
+        result = ns["critique_answer"]("question", "draft answer")
+        assert "PASS" in result
+
+    def test_fail_verdict(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "FAIL - missing citations"
+        result = ns["critique_answer"]("question", "draft")
+        assert "FAIL" in result
+        captured = capsys.readouterr()
+        assert "verdict=FAIL" in captured.out
+
+    def test_truncation_warning(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "PASS"
+        ns["critique_answer"]("question", "x" * 5000)
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "truncated" in captured.out
+
+    def test_no_warning_under_limit(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "PASS"
+        ns["critique_answer"]("question", "short draft")
+        captured = capsys.readouterr()
+        assert "truncated" not in captured.out
+
+
+class TestClassifyQuestion:
+    """Tests for the classify_question sub-agent function."""
+
+    def test_includes_kb_taxonomy(self):
+        ns = _make_sub_agent_ns()
+        calls = []
+        ns["llm_query"] = lambda prompt, model=None: (
+            calls.append(prompt),
+            "CATEGORY: PT\nCLUSTERS: Ghusl\nSTRATEGY: search",
+        )[1]
+        ns["classify_question"]("How to perform ghusl?")
+        assert "PT" in calls[0]
+        assert "Prayer" in calls[0]
+        assert "Ghusl" in calls[0]
+
+    def test_handles_none_kb_overview(self):
+        code = build_search_setup_code(api_url="http://localhost:8091", kb_overview_data=None)
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        ns["llm_query"] = lambda prompt, model=None: "CATEGORY: PT"
+        # Should not crash — just sends empty category info
+        result = ns["classify_question"]("question")
+        assert "PT" in result

@@ -94,7 +94,7 @@ uv pip install fastapi uvicorn httpx
 make backend    # Starts search API on port 8092
 ```
 
-The search API requires a running Cascade instance (default port 8091) and an `ANTHROPIC_API_KEY` environment variable.
+The search API requires a reachable Cascade instance (default: `https://cascade.vworksflow.com`) and an `ANTHROPIC_API_KEY` environment variable.
 
 ## Dependencies
 

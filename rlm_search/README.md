@@ -13,13 +13,28 @@ FastAPI Backend (rlm_search/, port 8092)
   │ ThreadPoolExecutor → rlm.completion()
   ▼
 RLM Engine (rlm/)
-  │ LM writes Python in REPL:
-  │   search("prayer menstruation", top_k=20)
-  │   browse(filters={"parent_code": "PT"})
-  │   llm_query("synthesize these findings...")
+  │ LM orchestrates via REPL:
+  │   search("prayer menstruation", top_k=20)    ──→ Cascade API
+  │   evaluate_results(context, results)          ──→ llm_query (sub-agent)
+  │   reformulate(context, query, score)          ──→ llm_query (sub-agent)
+  │   format_evidence(results) + llm_query(...)   ──→ synthesis
+  │   critique_answer(context, answer)            ──→ llm_query (sub-agent)
   │   FINAL_VAR("answer")
   ▼
-Cascade Search API (port 8091, existing)
+Cascade Search API (https://cascade.vworksflow.com)
+```
+
+### Capability Layers
+
+```
+Layer 2: Sub-agent tools (evaluate_results, reformulate, critique_answer, classify_question)
+         Wrap llm_query() with role-specific prompts. Fired by the main agent on demand.
+
+Layer 1: REPL tools (search, browse, kb_overview, fiqh_lookup, format_evidence)
+         Python functions calling Cascade API. Injected via setup_code.
+
+Layer 0: Orchestrating LM
+         Multi-turn REPL loop. Decides which tools and sub-agents to call.
 ```
 
 Zero changes to the RLM core library. Uses `custom_system_prompt` and `environment_kwargs={"setup_code": ...}` to inject search tools into the REPL.
@@ -28,7 +43,7 @@ Zero changes to the RLM core library. Uses `custom_system_prompt` and `environme
 
 ### Prerequisites
 
-- Cascade search API running on port 8091
+- Cascade search API reachable (default: `https://cascade.vworksflow.com`)
 - `ANTHROPIC_API_KEY` set in environment or `.env`
 
 ### Backend
@@ -116,11 +131,11 @@ All via environment variables (or `.env` file):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CASCADE_API_URL` | `http://localhost:8091` | Cascade search API base URL |
+| `CASCADE_API_URL` | `https://cascade.vworksflow.com` | Cascade search API base URL |
 | `CASCADE_API_KEY` | `""` | API key for cascade (sent as `x-api-key` header) |
 | `ANTHROPIC_API_KEY` | — | Required for default Anthropic backend |
 | `RLM_BACKEND` | `anthropic` | LM backend (`anthropic`, `openai`, etc.) |
-| `RLM_MODEL` | `claude-sonnet-4-20250514` | Model name |
+| `RLM_MODEL` | `claude-opus-4-6` | Model name |
 | `RLM_MAX_ITERATIONS` | `15` | Max REPL iterations per search |
 | `RLM_MAX_DEPTH` | `1` | Max RLM recursion depth |
 
@@ -170,25 +185,45 @@ Stream terminates after `done` or `error`. 10-minute timeout.
 
 ## REPL Tools
 
-The LM has access to these functions inside its Python REPL:
+The LM has access to these functions inside its Python REPL. Tools are injected via `setup_code` — zero changes to RLM core.
 
-### `search(query, filters=None, top_k=10)`
+### Search & Retrieval
 
-Semantic search against the knowledge base. Returns `{"results": [{"id", "score", "question", "answer", "metadata"}]}`.
+| Tool | Signature | Purpose |
+|------|-----------|---------|
+| `kb_overview()` | `-> dict \| None` | Pre-cached taxonomy: categories, cluster labels (with doc counts), sample questions, subtopic tags. Call first to orient. |
+| `search()` | `(query, filters=None, top_k=10) -> dict` | Semantic search. Returns `{results: [{id, score, question, answer, metadata}], total}`. Auto-bridges Arabic/English. |
+| `browse()` | `(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_limit=4) -> dict` | Filter-based browsing. Returns results, facets, grouped_results. Use for exploration, not answering. |
+| `fiqh_lookup()` | `(query) -> dict` | 453-term fiqh dictionary with Arabic/English bridging. For written answers, not search queries. |
+| `format_evidence()` | `(results, max_per_source=3) -> list[str]` | Format results as `[Source: <id>] Q: ... A: ...` citation strings. Accepts `search()` return dict directly. |
 
-### `browse(filters=None, offset=0, limit=20)`
+### Synthesis
 
-Browse documents by filter (no query needed). Useful for exploring a category.
+| Tool | Signature | Purpose |
+|------|-----------|---------|
+| `llm_query()` | `(prompt, model=None) -> str` | Cold sub-LLM call (~500K char input). No tools or history — prompt in, text out. |
+| `llm_query_batched()` | `(prompts, model=None) -> list[str]` | Parallel version of `llm_query()`. |
 
-### `llm_query(prompt, model=None)`
+### Sub-Agent Tools
 
-Sub-LM call for synthesis or analysis of retrieved documents.
+These wrap `llm_query()` with role-specific prompts. Each costs one sub-LLM call but saves full iterations by catching problems early.
 
-### `FINAL_VAR(variable_name)`
+| Tool | Signature | When to use |
+|------|-----------|-------------|
+| `evaluate_results()` | `(question, results, top_n=5) -> str` | After search — rates each result RELEVANT/PARTIAL/OFF-TOPIC, suggests next step. Use when scores are mixed (0.2–0.5). |
+| `reformulate()` | `(question, failed_query, top_score) -> list[str]` | Top score < 0.3 — returns up to 3 alternative query strings. |
+| `critique_answer()` | `(question, draft) -> str` | Before FINAL — returns PASS/FAIL verdict checking citations, topic drift, unsupported claims. |
+| `classify_question()` | `(question) -> str` | Optional — classifies question into CATEGORY, CLUSTERS, STRATEGY using kb_overview taxonomy. |
 
-Return the final answer stored in the named variable.
+### Utility
 
-### Taxonomy Filters
+| Tool | Purpose |
+|------|---------|
+| `search_log` | Auto-populated list of every search/browse call with query, filters, result count. |
+| `SHOW_VARS()` | Inspect all variables in the REPL. |
+| `FINAL_VAR(name)` | Return the named variable as the final answer. |
+
+### Taxonomy & Filters
 
 | Code | Category |
 |------|----------|
@@ -199,7 +234,29 @@ Return the final answer stored in the named variable.
 | `BE` | Beliefs & Ethics |
 | `OT` | Other Topics |
 
-Example: `search("zakat", filters={"parent_code": "FN"})`
+**Filter keys:** `parent_code` (str, e.g. `"PT"`), `cluster_label` (str, discover via `kb_overview()`), `subtopics` (str), `primary_topic` (str).
+
+Example: `search("zakat", filters={"parent_code": "FN", "cluster_label": "Khums Asset Liability"})`
+
+### Tool Selection Guide
+
+| Situation | Action |
+|-----------|--------|
+| Starting a question | `kb_overview()` → `search(context, ...)` |
+| Search scores < 0.3 | `reformulate(context, query, score)` → search alternatives |
+| Unsure if results match | `evaluate_results(context, results)` |
+| Large result set | `format_evidence()` → `llm_query()` |
+| Draft answer ready | `critique_answer(context, draft)` |
+| Unsure which category | `classify_question(context)` |
+
+### Score Interpretation
+
+| Score | Meaning | Action |
+|-------|---------|--------|
+| > 0.5 | Strong match | Use directly |
+| 0.3–0.5 | Partial | Verify relevance or call `evaluate_results()` |
+| < 0.3 | Off-topic | Call `reformulate()` or change filters |
+| 0 results | Filter too narrow | Drop filters, broaden query |
 
 ## Project Structure
 
@@ -207,8 +264,9 @@ Example: `search("zakat", filters={"parent_code": "FN"})`
 rlm_search/
   __init__.py
   config.py              # Env var loading
-  repl_tools.py          # build_search_setup_code() — injects tools into REPL
-  prompts.py             # Custom system prompt with tool docs + taxonomy
+  kb_overview.py         # build_kb_overview() — async startup taxonomy fetch
+  repl_tools.py          # build_search_setup_code() — injects all REPL tools + sub-agents
+  prompts.py             # System prompt: tool docs, selection guide, worked examples
   streaming_logger.py    # StreamingLogger(RLMLogger) — sync→async bridge
   models.py              # Pydantic request/response models
   api.py                 # FastAPI app with SSE streaming
@@ -228,14 +286,14 @@ search-app/
       types.ts           # TypeScript interfaces for SSE events
 
 tests/
-  test_repl_tools.py     # 19 tests — setup code validity, signatures, mocked API
+  test_repl_tools.py     # 38 tests — setup code, tool signatures, sub-agents, mocked API
   test_search_api.py     # 10 tests — endpoints, SSE streaming, cleanup
 ```
 
 ## Testing
 
 ```bash
-# Search-specific tests (29 tests, <1s)
+# Search-specific tests (48 tests, <1s)
 uv run pytest tests/test_repl_tools.py tests/test_search_api.py -v
 
 # Full RLM suite (181+ tests, ~14s)
@@ -245,6 +303,8 @@ uv run pytest
 ## How It Works
 
 1. **User submits query** → `POST /api/search` creates a `StreamingLogger` and launches `rlm.completion()` in a thread pool
-2. **RLM REPL loop** — the LM writes Python code that calls `search()` and `browse()`, which hit the cascade API at port 8091. Each iteration is logged via `StreamingLogger`
-3. **SSE stream** — the frontend polls `StreamingLogger.drain()` every 200ms, pushing events to the React UI as they arrive
-4. **Answer** — when the LM calls `FINAL_VAR("answer")`, the completion returns and a `done` event is emitted with the synthesized answer, sources, and usage stats
+2. **Turn 1 — Orient + search**: LM calls `kb_overview()` (pre-cached taxonomy), then `search(context, ...)` against Cascade API
+3. **Turn 2 — Evaluate + refine**: LM calls `evaluate_results()` (sub-agent) to rate relevance. If scores are low, `reformulate()` (sub-agent) generates alternative queries. `fiqh_lookup()` for terminology.
+4. **Turn 3 — Synthesize + verify**: `format_evidence()` → `llm_query()` for synthesis, then `critique_answer()` (sub-agent) as quality gate before `FINAL_VAR("answer")`
+5. **SSE stream** — the frontend polls `StreamingLogger.drain()` every 200ms, pushing events to the React UI as they arrive
+6. **Answer** — `done` event emitted with synthesized answer, sources, and usage stats

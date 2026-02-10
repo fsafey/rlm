@@ -15,7 +15,8 @@ def build_search_setup_code(
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
     Defines search(), browse(), kb_overview(), fiqh_lookup(), format_evidence(),
-    and a search_log list in the REPL namespace.
+    search_log list, and sub-agent tools (evaluate_results, reformulate,
+    critique_answer, classify_question) in the REPL namespace.
 
     The Cascade API returns hits with flat fields (id, question, answer,
     parent_code, cluster_label, etc.). These functions normalize the response
@@ -214,9 +215,8 @@ def fiqh_lookup(query: str) -> dict:
 def kb_overview():
     """Print and return a knowledge base taxonomy overview.
 
-    PRINTS a formatted summary (collection, categories, sample clusters).
-    You usually only need the printed output — the return value is for
-    programmatic filtering only.
+    PRINTS a formatted summary: categories, top clusters (with doc counts
+    and sample questions), and top subtopic filter values.
 
     Returns:
         None if unavailable, otherwise a dict:
@@ -227,8 +227,9 @@ def kb_overview():
                 {
                     "code": "PT",
                     "name": "Prayer & Tahara (Purification)",
-                    "document_count": 5200,
-                    "cluster_labels": ["Ghusl", "Wudu", ...],
+                    "document_count": 2836,
+                    "cluster_labels": ["Ghusl Procedure and Validity", ...],
+                    "top_subtopics": ["wudu validity", "ghusl janaba", ...],
                 },
                 ...
             ],
@@ -246,30 +247,180 @@ def kb_overview():
         name = cat.get("name", code)
         count = cat.get("document_count", 0)
         clusters = cat.get("clusters", {})
+        facets = cat.get("facets", {})
+        # Cluster doc counts from facets (capped at top 20 by API)
+        cluster_counts = {c["value"]: c["count"] for c in facets.get("clusters", [])}
+        # Subtopic tags from facets
+        subtopic_facets = facets.get("subtopics", [])
         print(f"{code} — {name} [{count:,} docs]")
+        # Show top 8 clusters with doc counts
         shown = 0
         for label, sample_q in clusters.items():
-            if shown >= 5:
+            if shown >= 8:
                 remaining = len(clusters) - shown
                 if remaining > 0:
                     print(f"  ... and {remaining} more clusters")
                 break
+            doc_n = cluster_counts.get(label, "")
+            count_str = f" ({doc_n})" if doc_n else ""
             if sample_q:
                 q_short = sample_q[:80] + "..." if len(sample_q) > 80 else sample_q
-                print(f"  · {label} — \\"{q_short}\\"")
+                print(f"  · {label}{count_str} — \\"{q_short}\\"")
             else:
-                print(f"  · {label}")
+                print(f"  · {label}{count_str}")
             shown += 1
+        # Show top subtopic tags
+        if subtopic_facets:
+            top_subs = [f"{s['value']} ({s['count']})" for s in subtopic_facets[:8]]
+            print(f"  Subtopics: {', '.join(top_subs)}")
         print()
+        top_subtopics = [s["value"] for s in subtopic_facets[:15]]
         categories.append({
             "code": code,
             "name": name,
             "document_count": count,
             "cluster_labels": list(clusters.keys()),
+            "top_subtopics": top_subtopics,
         })
     print("Filter keys: parent_code, cluster_label, subtopics, primary_topic")
-    print("Tip: Use cluster_label for precise targeting after identifying relevant clusters")
+    print("Tip: Use cluster_label or subtopics for precise targeting")
     return {"collection": collection, "total_documents": total, "categories": categories}
+'''
+
+    # Sub-agent tools: wrap llm_query with role-specific prompts.
+    # These are defined in a plain triple-quoted string (not f-string).
+    # In the exec'd code: \\n → \n (newline in string literals),
+    # \\" → \" (escaped double quote).
+    code += '''
+
+def evaluate_results(question, results, top_n=5):
+    """Sub-agent: evaluate search result relevance and suggest next steps.
+
+    Call after search() to check whether results match the question
+    before spending a turn examining them in detail.
+
+    Args:
+        question: The user's question (pass the context variable).
+        results: search() return dict or list of result dicts.
+        top_n: Number of top results to evaluate (default 5).
+
+    Returns:
+        String with per-result relevance ratings and suggested next step.
+    """
+    if isinstance(results, dict):
+        results = results.get("results", [])
+    if not results:
+        return "No results to evaluate. Try a different query or remove filters."
+    evidence = []
+    for r in results[:top_n]:
+        rid = r.get("id", "?")
+        score = r.get("score", 0)
+        q = (r.get("question", "") or "")[:150]
+        evidence.append(f"[{rid}] score={score:.2f} Q: {q}")
+    result_block = "\\n".join(evidence)
+    prompt = (
+        f"Evaluate these search results for the question:\\n"
+        f"\\"{question}\\"\\n\\n"
+        f"Results:\\n{result_block}\\n\\n"
+        f"For each result, rate: RELEVANT / PARTIAL / OFF-TOPIC.\\n"
+        f"Then state: should I refine the query, change filters, or proceed to synthesis?\\n"
+        f"Under 200 words."
+    )
+    assessment = llm_query(prompt)
+    print(f"[evaluate_results] {min(top_n, len(results))} results assessed")
+    return assessment
+
+
+def reformulate(question, failed_query, top_score=0.0):
+    """Sub-agent: generate alternative search queries when results are poor.
+
+    Call when search() top score is below 0.3.
+
+    Args:
+        question: The user's original question.
+        failed_query: The query that produced poor results.
+        top_score: Best relevance score from the failed search.
+
+    Returns:
+        List of up to 3 alternative query strings.
+    """
+    prompt = (
+        f"The search query \\"{failed_query}\\" returned poor results "
+        f"(best score: {top_score:.2f}) for the question:\\n"
+        f"\\"{question}\\"\\n\\n"
+        f"Generate exactly 3 alternative search queries that might find better results.\\n"
+        f"One query per line, no numbering, no quotes, no explanation."
+    )
+    response = llm_query(prompt)
+    queries = [line.strip() for line in response.strip().split("\\n") if line.strip()]
+    queries = queries[:3]
+    print(f"[reformulate] generated {len(queries)} queries")
+    return queries
+
+
+def critique_answer(question, draft):
+    """Sub-agent: review draft answer before finalizing.
+
+    Call before FINAL/FINAL_VAR to catch citation errors, topic drift,
+    and unsupported claims.
+
+    Args:
+        question: The user's original question.
+        draft: The draft answer text to review.
+
+    Returns:
+        String: PASS or FAIL verdict with specific feedback.
+    """
+    if len(draft) > 3000:
+        print(f"[critique_answer] WARNING: draft truncated from {len(draft)} to 3000 chars")
+    prompt = (
+        f"Review this draft answer to the question:\\n"
+        f"\\"{question}\\"\\n\\n"
+        f"Draft:\\n{draft[:3000]}\\n\\n"
+        f"Check:\\n"
+        f"1. Does it answer the actual question asked?\\n"
+        f"2. Are [Source: <id>] citations present for factual claims?\\n"
+        f"3. Are there unsupported claims or fabricated rulings?\\n"
+        f"4. Is anything important missing?\\n\\n"
+        f"Respond: PASS or FAIL, then brief feedback (under 150 words)."
+    )
+    verdict = llm_query(prompt)
+    status = "PASS" if verdict.strip().upper().startswith("PASS") else "FAIL"
+    print(f"[critique_answer] verdict={status}")
+    return verdict
+
+
+def classify_question(question):
+    """Sub-agent: classify question and recommend search strategy.
+
+    Optional — use if unsure which category fits after reviewing kb_overview().
+    Uses the taxonomy data to pick category, clusters, and search plan.
+
+    Args:
+        question: The user's question.
+
+    Returns:
+        String with CATEGORY code, relevant CLUSTERS, and search STRATEGY.
+    """
+    cat_info = ""
+    if _KB_OVERVIEW is not None:
+        for cat_code, cat in _KB_OVERVIEW.get("categories", {}).items():
+            name = cat.get("name", cat_code)
+            clusters = cat.get("clusters", {})
+            labels = ", ".join(list(clusters.keys())[:10])
+            cat_info += f"{cat_code} — {name}: {labels}\\n"
+    prompt = (
+        f"Classify this Islamic Q&A question and recommend a search strategy.\\n\\n"
+        f"Question: \\"{question}\\"\\n\\n"
+        f"Categories and clusters:\\n{cat_info}\\n"
+        f"Respond with exactly:\\n"
+        f"CATEGORY: <code>\\n"
+        f"CLUSTERS: <comma-separated relevant cluster labels>\\n"
+        f"STRATEGY: <1-2 sentence search plan>"
+    )
+    classification = llm_query(prompt)
+    print(f"[classify_question] done")
+    return classification
 '''
 
     return code

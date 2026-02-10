@@ -166,11 +166,11 @@ _run_search():
 ```
 
 **REPL tools** (injected via `setup_code`):
-- `search(query, collection, filters, top_k)` → Cascade API (`CASCADE_API_URL`, default port 8091)
+- `search(query, collection, filters, top_k)` → Cascade API (`CASCADE_API_URL`, default `https://cascade.vworksflow.com`)
 - `browse(collection, filters, offset, limit)` → Cascade API (filter-based, no query)
 
 **Env vars** (`rlm_search/config.py`, loaded via `python-dotenv`):
-- `CASCADE_API_URL` (default `http://localhost:8091`), `CASCADE_API_KEY`
+- `CASCADE_API_URL` (default `https://cascade.vworksflow.com`), `CASCADE_API_KEY`
 - `ANTHROPIC_API_KEY`, `RLM_BACKEND`, `RLM_MODEL`, `RLM_MAX_ITERATIONS`, `RLM_MAX_DEPTH`
 
 **Frontend** (`search-app/`): Vite + React 19 + Tailwind + shadcn/ui. Proxies `/api/*` → `localhost:8092`.

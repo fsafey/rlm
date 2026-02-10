@@ -136,7 +136,10 @@ class TestSearchFunctionBehavior:
         exec(code, ns)  # noqa: S102
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [{"id": "1", "score": 0.9, "question": "q", "answer": "a"}], "total": 1}
+        mock_resp.json.return_value = {
+            "hits": [{"id": "1", "score": 0.9, "question": "q", "answer": "a"}],
+            "total": 1,
+        }
         mock_resp.raise_for_status = MagicMock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
@@ -158,7 +161,10 @@ class TestSearchFunctionBehavior:
         exec(code, ns)  # noqa: S102
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"hits": [{"id": "2", "question": "q", "answer": "a"}], "total": 1}
+        mock_resp.json.return_value = {
+            "hits": [{"id": "2", "question": "q", "answer": "a"}],
+            "total": 1,
+        }
         mock_resp.raise_for_status = MagicMock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
@@ -190,19 +196,255 @@ class TestSearchFunctionBehavior:
         assert ns["search_log"][2]["type"] == "browse"
 
 
+class TestSearchCollectionParameter:
+    """Test that search() accepts and handles the collection parameter."""
+
+    def test_search_signature_includes_collection(self):
+        code = build_search_setup_code(api_url="http://localhost")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        sig = inspect.signature(ns["search"])
+        assert "collection" in sig.parameters
+        assert sig.parameters["collection"].default is None
+
+    def test_search_sends_collection_in_payload(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search"]("test", collection="risala_gemini")
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs.kwargs["json"]
+        assert payload["collection"] == "risala_gemini"
+
+    def test_search_omits_collection_when_none(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search"]("test")
+
+        call_kwargs = mock_post.call_args
+        payload = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs.kwargs["json"]
+        assert "collection" not in payload
+
+    def test_search_log_includes_collection(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["search"]("test", collection="enriched_gemini")
+
+        assert ns["search_log"][0]["collection"] == "enriched_gemini"
+
+
+class TestBrowseCollectionParameter:
+    """Test that browse() accepts and handles the collection parameter."""
+
+    def test_browse_signature_includes_collection(self):
+        code = build_search_setup_code(api_url="http://localhost")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        sig = inspect.signature(ns["browse"])
+        assert "collection" in sig.parameters
+        assert sig.parameters["collection"].default is None
+
+    def test_browse_sends_collection_in_payload(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["browse"](collection="risala_gemini", filters={"parent_code": "PT"})
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collection"] == "risala_gemini"
+
+    def test_browse_omits_collection_when_none(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["browse"]()
+
+        payload = mock_post.call_args[1]["json"]
+        assert "collection" not in payload
+
+
+class TestConvenienceWrappers:
+    """Test search_risala, search_qa, format_evidence, and sources_cited."""
+
+    def _exec_ns(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        return ns
+
+    def test_defines_search_risala(self):
+        ns = self._exec_ns()
+        assert "search_risala" in ns
+        assert callable(ns["search_risala"])
+
+    def test_defines_search_qa(self):
+        ns = self._exec_ns()
+        assert "search_qa" in ns
+        assert callable(ns["search_qa"])
+
+    def test_defines_format_evidence(self):
+        ns = self._exec_ns()
+        assert "format_evidence" in ns
+        assert callable(ns["format_evidence"])
+
+    def test_defines_sources_cited(self):
+        ns = self._exec_ns()
+        assert "sources_cited" in ns
+        assert isinstance(ns["sources_cited"], set)
+        assert len(ns["sources_cited"]) == 0
+
+    def test_search_risala_delegates_to_search(self):
+        ns = self._exec_ns()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search_risala"]("test query")
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collection"] == "risala_gemini"
+        assert payload["query"] == "test query"
+
+    def test_search_qa_delegates_to_search(self):
+        ns = self._exec_ns()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search_qa"]("test query")
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collection"] == "enriched_gemini"
+        assert payload["query"] == "test query"
+
+    def test_format_evidence_output(self):
+        ns = self._exec_ns()
+        results = [
+            {"id": "doc1", "question": "What is wudu?", "answer": "Wudu is ablution."},
+            {"id": "doc2", "question": "How to pray?", "answer": "Stand facing qibla."},
+        ]
+        lines = ns["format_evidence"](results)
+        assert len(lines) == 2
+        assert lines[0].startswith("[Source: doc1]")
+        assert "Q: What is wudu?" in lines[0]
+        assert "A: Wudu is ablution." in lines[0]
+
+    def test_format_evidence_populates_sources_cited(self):
+        ns = self._exec_ns()
+        # Reset sources_cited before test
+        ns["sources_cited"].clear()
+        results = [
+            {"id": "doc1", "question": "q", "answer": "a"},
+            {"id": "doc2", "question": "q", "answer": "a"},
+        ]
+        ns["format_evidence"](results)
+        assert ns["sources_cited"] == {"doc1", "doc2"}
+
+    def test_format_evidence_truncates_long_text(self):
+        ns = self._exec_ns()
+        ns["sources_cited"].clear()
+        results = [{"id": "d1", "question": "x" * 300, "answer": "y" * 600}]
+        lines = ns["format_evidence"](results)
+        assert len(lines) == 1
+        # Question truncated to 200, answer to 500
+        assert "x" * 200 in lines[0]
+        assert "x" * 201 not in lines[0]
+        assert "y" * 500 in lines[0]
+        assert "y" * 501 not in lines[0]
+
+    def test_format_evidence_caps_at_50_results(self):
+        ns = self._exec_ns()
+        ns["sources_cited"].clear()
+        results = [{"id": f"d{i}", "question": "q", "answer": "a"} for i in range(60)]
+        lines = ns["format_evidence"](results)
+        assert len(lines) == 50
+
+    def test_format_evidence_respects_max_per_source(self):
+        ns = self._exec_ns()
+        ns["sources_cited"].clear()
+        results = [{"id": "same", "question": f"q{i}", "answer": "a"} for i in range(5)]
+        lines = ns["format_evidence"](results, max_per_source=2)
+        assert len(lines) == 2
+
+    def test_search_risala_ignores_collection_kwarg(self):
+        """Passing collection= to search_risala should not cause TypeError."""
+        ns = self._exec_ns()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search_risala"]("test", collection="other")
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collection"] == "risala_gemini"
+
+    def test_sources_cited_accumulates_across_calls(self):
+        ns = self._exec_ns()
+        ns["sources_cited"].clear()
+        ns["format_evidence"]([{"id": "a", "question": "q", "answer": "a"}])
+        ns["format_evidence"]([{"id": "b", "question": "q", "answer": "a"}])
+        assert ns["sources_cited"] == {"a", "b"}
+
+
 class TestSetupCodeInLocalREPL:
     """Test that setup code works when injected into a real LocalREPL."""
 
     def test_names_available_in_repl(self):
-        """search, browse, search_log must exist in LocalREPL after setup."""
+        """All tool names must exist in LocalREPL after setup."""
         code = build_search_setup_code(api_url="http://localhost:8091")
         repl = LocalREPL(setup_code=code)
         try:
             assert "search" in repl.locals
             assert "browse" in repl.locals
             assert "search_log" in repl.locals
+            assert "search_risala" in repl.locals
+            assert "search_qa" in repl.locals
+            assert "format_evidence" in repl.locals
+            assert "sources_cited" in repl.locals
             assert callable(repl.locals["search"])
             assert callable(repl.locals["browse"])
+            assert callable(repl.locals["search_risala"])
+            assert callable(repl.locals["search_qa"])
+            assert callable(repl.locals["format_evidence"])
             assert isinstance(repl.locals["search_log"], list)
+            assert isinstance(repl.locals["sources_cited"], set)
         finally:
             repl.cleanup()

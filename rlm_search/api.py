@@ -95,12 +95,18 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
             custom_system_prompt=AGENTIC_SEARCH_SYSTEM_PROMPT,
             logger=logger,
         )
-        print(f"[SEARCH:{search_id}] RLM initialized | max_iter={max_iterations} max_depth={max_depth}")
+        print(
+            f"[SEARCH:{search_id}] RLM initialized | max_iter={max_iterations} max_depth={max_depth}"
+        )
 
         result = rlm.completion(query)
-        print(f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s")
+        print(
+            f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s"
+        )
 
-        # Extract sources from search_log if available
+        # TODO: REPL environment is cleaned up before we can access search_log or
+        # sources_cited from the namespace. Source info is visible in iteration SSE
+        # events via [REPL:search] print lines.
         sources: list[dict] = []
         usage = result.usage_summary.to_dict() if result.usage_summary else {}
 

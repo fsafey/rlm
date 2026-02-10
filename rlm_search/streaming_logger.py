@@ -39,7 +39,9 @@ class StreamingLogger(RLMLogger):
         }
         with self._lock:
             self.queue.append(event)
-            print(f"[STREAM] iteration {self._iteration_count} queued | has_code={bool(iteration.code_blocks)} final_answer={iteration.final_answer is not None}")
+            print(
+                f"[STREAM] iteration {self._iteration_count} queued | has_code={bool(iteration.code_blocks)} final_answer={iteration.final_answer is not None}"
+            )
 
     def mark_done(
         self, answer: str | None, sources: list[dict], execution_time: float, usage: dict

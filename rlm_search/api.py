@@ -63,9 +63,10 @@ _searches: dict[str, StreamingLogger] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
-def _run_search(search_id: str, query: str, collection: str, settings: dict[str, Any]) -> None:
+def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     """Run an RLM completion in a thread. Pushes events to the StreamingLogger."""
     logger = _searches[search_id]
+    print(f"[SEARCH:{search_id}] Starting | query={query!r} backend={settings.get('backend', RLM_BACKEND)} model={settings.get('model', RLM_MODEL)}")
 
     try:
         backend = settings.get("backend", RLM_BACKEND)
@@ -95,8 +96,10 @@ def _run_search(search_id: str, query: str, collection: str, settings: dict[str,
             custom_system_prompt=AGENTIC_SEARCH_SYSTEM_PROMPT,
             logger=logger,
         )
+        print(f"[SEARCH:{search_id}] RLM initialized | max_iter={max_iterations} max_depth={max_depth}")
 
         result = rlm.completion(query)
+        print(f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s")
 
         # Extract sources from search_log if available
         sources: list[dict] = []
@@ -110,23 +113,26 @@ def _run_search(search_id: str, query: str, collection: str, settings: dict[str,
         )
 
     except Exception as e:
+        print(f"[SEARCH:{search_id}] ERROR | {type(e).__name__}: {e}")
         logger.mark_error(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
 
 
 @app.post("/api/search", response_model=SearchResponse)
 async def start_search(req: SearchRequest) -> SearchResponse:
     search_id = str(uuid.uuid4())[:12]
+    print(f"[API] POST /api/search | id={search_id} query={req.query!r}")
     logger = StreamingLogger(log_dir="/tmp/rlm_search_logs", file_name=f"search_{search_id}")
     _searches[search_id] = logger
 
     settings = req.settings.model_dump() if req.settings else {}
-    _executor.submit(_run_search, search_id, req.query, req.collection, settings)
+    _executor.submit(_run_search, search_id, req.query, settings)
 
     return SearchResponse(search_id=search_id)
 
 
 @app.get("/api/search/{search_id}/stream")
 async def stream_search(search_id: str) -> StreamingResponse:
+    print(f"[API] GET /api/search/{search_id}/stream | found={search_id in _searches}")
     if search_id not in _searches:
         raise HTTPException(status_code=404, detail="Search not found")
 

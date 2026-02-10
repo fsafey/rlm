@@ -96,7 +96,6 @@ class TestSearchFunctionSignature:
         sig = inspect.signature(ns["search"])
         params = list(sig.parameters.keys())
         assert "query" in params
-        assert "collection" in params
         assert "filters" in params
         assert "top_k" in params
 
@@ -105,7 +104,6 @@ class TestSearchFunctionSignature:
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         sig = inspect.signature(ns["search"])
-        assert sig.parameters["collection"].default == "enriched_gemini"
         assert sig.parameters["filters"].default is None
         assert sig.parameters["top_k"].default == 10
 
@@ -115,7 +113,6 @@ class TestSearchFunctionSignature:
         exec(code, ns)  # noqa: S102
         sig = inspect.signature(ns["browse"])
         params = list(sig.parameters.keys())
-        assert "collection" in params
         assert "filters" in params
         assert "offset" in params
         assert "limit" in params
@@ -125,7 +122,6 @@ class TestSearchFunctionSignature:
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         sig = inspect.signature(ns["browse"])
-        assert sig.parameters["collection"].default == "enriched_gemini"
         assert sig.parameters["filters"].default is None
         assert sig.parameters["offset"].default == 0
         assert sig.parameters["limit"].default == 20
@@ -140,7 +136,7 @@ class TestSearchFunctionBehavior:
         exec(code, ns)  # noqa: S102
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": [{"id": "1", "score": 0.9}]}
+        mock_resp.json.return_value = {"hits": [{"id": "1", "score": 0.9, "question": "q", "answer": "a"}], "total": 1}
         mock_resp.raise_for_status = MagicMock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
@@ -149,7 +145,9 @@ class TestSearchFunctionBehavior:
         mock_post.assert_called_once()
         call_kwargs = mock_post.call_args
         assert "http://api.test/search" in call_kwargs[1].get("url", call_kwargs[0][0])
-        assert result == {"results": [{"id": "1", "score": 0.9}]}
+        assert len(result["results"]) == 1
+        assert result["results"][0]["id"] == "1"
+        assert result["total"] == 1
         assert len(ns["search_log"]) == 1
         assert ns["search_log"][0]["type"] == "search"
         assert ns["search_log"][0]["query"] == "test query"
@@ -160,14 +158,15 @@ class TestSearchFunctionBehavior:
         exec(code, ns)  # noqa: S102
 
         mock_resp = MagicMock()
-        mock_resp.json.return_value = {"results": [{"id": "2"}]}
+        mock_resp.json.return_value = {"hits": [{"id": "2", "question": "q", "answer": "a"}], "total": 1}
         mock_resp.raise_for_status = MagicMock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
             result = ns["browse"](filters={"parent_code": "PT"})
 
         mock_post.assert_called_once()
-        assert result == {"results": [{"id": "2"}]}
+        assert len(result["results"]) == 1
+        assert result["results"][0]["id"] == "2"
         assert len(ns["search_log"]) == 1
         assert ns["search_log"][0]["type"] == "browse"
 

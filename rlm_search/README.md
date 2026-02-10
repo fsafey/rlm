@@ -75,7 +75,6 @@ Start an agentic search. Returns immediately with a search ID.
 // Request
 {
   "query": "What are the rules for prayer during travel?",
-  "collection": "enriched_gemini",
   "settings": {
     "backend": "anthropic",
     "model": "claude-sonnet-4-20250514",
@@ -114,11 +113,11 @@ Stream terminates after `done` or `error`. 10-minute timeout.
 
 The LM has access to these functions inside its Python REPL:
 
-### `search(query, collection="enriched_gemini", filters=None, top_k=10)`
+### `search(query, filters=None, top_k=10)`
 
 Semantic search against the knowledge base. Returns `{"results": [{"id", "score", "question", "answer", "metadata"}]}`.
 
-### `browse(collection="enriched_gemini", filters=None, offset=0, limit=20)`
+### `browse(filters=None, offset=0, limit=20)`
 
 Browse documents by filter (no query needed). Useful for exploring a category.
 
@@ -159,7 +158,7 @@ search-app/
   src/
     App.tsx              # Main layout
     components/
-      SearchInput.tsx    # Query box + collection selector
+      SearchInput.tsx    # Query box + settings panel
       SearchProgress.tsx # Phase-aware loading indicator
       AnswerPanel.tsx    # Markdown-rendered answer with citations
       SourceCards.tsx    # Grid of cited source documents

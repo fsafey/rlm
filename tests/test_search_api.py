@@ -44,19 +44,6 @@ class TestSearchEndpoint:
         assert len(data["search_id"]) > 0
 
     @patch("rlm_search.api._executor")
-    def test_search_with_collection(self, mock_executor: MagicMock, client: TestClient):
-        mock_executor.submit = MagicMock()
-        resp = client.post(
-            "/api/search",
-            json={"query": "zakat rules", "collection": "custom_collection"},
-        )
-        assert resp.status_code == 200
-        # Verify the submit was called with the correct collection
-        call_args = mock_executor.submit.call_args
-        assert call_args[0][2] == "zakat rules"  # query
-        assert call_args[0][3] == "custom_collection"  # collection
-
-    @patch("rlm_search.api._executor")
     def test_search_with_settings(self, mock_executor: MagicMock, client: TestClient):
         mock_executor.submit = MagicMock()
         resp = client.post(
@@ -73,7 +60,7 @@ class TestSearchEndpoint:
         )
         assert resp.status_code == 200
         call_args = mock_executor.submit.call_args
-        settings = call_args[0][4]  # settings dict
+        settings = call_args[0][3]  # settings dict (was [4] when collection existed)
         assert settings["backend"] == "openai"
         assert settings["model"] == "gpt-4o"
         assert settings["max_iterations"] == 5

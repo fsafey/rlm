@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useSearch } from "@/lib/useSearch";
 import { SearchInput } from "@/components/SearchInput";
 import { SearchProgress } from "@/components/SearchProgress";
@@ -5,9 +6,17 @@ import { AnswerPanel } from "@/components/AnswerPanel";
 import { SourceCards } from "@/components/SourceCards";
 import { TracePanel } from "@/components/TracePanel";
 import { AlertCircle } from "lucide-react";
+import type { SearchSettings } from "@/lib/types";
 
 function App() {
   const { state, search, reset } = useSearch();
+
+  const handleSearch = useCallback(
+    (query: string, settings: SearchSettings) => {
+      search(query, settings);
+    },
+    [search],
+  );
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -30,7 +39,7 @@ function App() {
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         {/* Search bar */}
         <SearchInput
-          onSearch={search}
+          onSearch={handleSearch}
           onReset={reset}
           isSearching={state.status === "searching"}
         />

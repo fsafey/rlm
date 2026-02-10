@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 class SearchRequest(BaseModel):
     query: str
-    collection: str = "enriched_gemini"
     settings: SearchSettings | None = None
 
 

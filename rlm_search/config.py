@@ -12,6 +12,9 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
 CASCADE_API_URL = os.getenv("CASCADE_API_URL", "http://localhost:8090")
+CASCADE_API_HOST = os.getenv("CASCADE_API_HOST", "localhost")
+CASCADE_PORT_RANGE = os.getenv("CASCADE_PORT_RANGE", "8089-8095")
+_CASCADE_URL_EXPLICIT = os.getenv("CASCADE_API_URL") is not None
 CASCADE_API_KEY = os.getenv("CASCADE_API_KEY", "dev-key-change-me")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 RLM_BACKEND = os.getenv("RLM_BACKEND", "anthropic")

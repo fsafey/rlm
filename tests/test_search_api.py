@@ -22,12 +22,21 @@ def client():
 class TestHealthEndpoint:
     """GET /api/health returns status ok."""
 
-    def test_health_returns_ok(self, client: TestClient):
+    @patch("rlm_search.api.discover_cascade_url", side_effect=ConnectionError("no cascade"))
+    def test_health_returns_ok(self, mock_discover, client: TestClient):
         resp = client.get("/api/health")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
         assert "version" in data
+        assert data["cascade_url"] is None
+
+    @patch("rlm_search.api.discover_cascade_url", return_value="http://localhost:8091")
+    def test_health_with_cascade(self, mock_discover, client: TestClient):
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cascade_url"] == "http://localhost:8091"
 
 
 class TestSearchEndpoint:

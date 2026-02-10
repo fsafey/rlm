@@ -18,14 +18,18 @@ from fastapi.responses import StreamingResponse
 
 from rlm.core.rlm import RLM
 from rlm_search.config import (
+    _CASCADE_URL_EXPLICIT,
     ANTHROPIC_API_KEY,
+    CASCADE_API_HOST,
     CASCADE_API_KEY,
     CASCADE_API_URL,
+    CASCADE_PORT_RANGE,
     RLM_BACKEND,
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
 )
+from rlm_search.discovery import discover_cascade_url
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
 from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
 from rlm_search.repl_tools import build_search_setup_code
@@ -73,8 +77,16 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     print(f"[SEARCH:{search_id}] Starting | query={query!r} backend={backend} model={model}")
 
     try:
-        setup_code = build_search_setup_code(
+        cascade_url = discover_cascade_url(
             api_url=CASCADE_API_URL,
+            host=CASCADE_API_HOST,
+            port_range=CASCADE_PORT_RANGE,
+            explicit=_CASCADE_URL_EXPLICIT,
+        )
+        print(f"[SEARCH:{search_id}] Cascade discovered at {cascade_url}")
+
+        setup_code = build_search_setup_code(
+            api_url=cascade_url,
             api_key=CASCADE_API_KEY,
         )
 
@@ -170,4 +182,13 @@ async def stream_search(search_id: str) -> StreamingResponse:
 
 @app.get("/api/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    return HealthResponse()
+    try:
+        cascade_url = discover_cascade_url(
+            api_url=CASCADE_API_URL,
+            host=CASCADE_API_HOST,
+            port_range=CASCADE_PORT_RANGE,
+            explicit=_CASCADE_URL_EXPLICIT,
+        )
+    except ConnectionError:
+        cascade_url = None
+    return HealthResponse(cascade_url=cascade_url)

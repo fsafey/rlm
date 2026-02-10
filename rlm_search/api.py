@@ -28,12 +28,16 @@ from rlm_search.config import (
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
 )
+from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
 from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
 from rlm_search.repl_tools import build_search_setup_code
 from rlm_search.streaming_logger import StreamingLogger
 
 _log = logging.getLogger("rlm_search")
+
+# Cached KB overview — built once at startup, shared across searches
+_kb_overview_cache: dict | None = None
 
 
 async def _check_cascade_health(
@@ -58,11 +62,21 @@ async def _check_cascade_health(
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown lifecycle — Cascade health check + stale search cleanup."""
 
+    global _kb_overview_cache
+
     # Cascade API health check at startup
     status, url = await _check_cascade_health()
     _app.state.cascade_url = url if status == "connected" else None
     if status == "connected":
         _log.info("Cascade API at %s is reachable.", url)
+        # Build KB overview from Cascade facets
+        _kb_overview_cache = await build_kb_overview(url, CASCADE_API_KEY)
+        if _kb_overview_cache:
+            n_cats = len(_kb_overview_cache.get("categories", {}))
+            n_docs = _kb_overview_cache.get("total_documents", 0)
+            _log.info("KB overview built: %d categories, %d total docs", n_cats, n_docs)
+        else:
+            _log.warning("KB overview build returned None — searches will proceed without it.")
     else:
         _log.warning(
             "Cascade API at %s is not reachable. "
@@ -110,6 +124,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
         setup_code = build_search_setup_code(
             api_url=CASCADE_API_URL,
             api_key=CASCADE_API_KEY,
+            kb_overview_data=_kb_overview_cache,
         )
 
         if backend == "claude_cli":
@@ -163,7 +178,9 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
 async def start_search(req: SearchRequest) -> SearchResponse:
     search_id = str(uuid.uuid4())[:12]
     print(f"[API] POST /api/search | id={search_id} query={req.query!r}")
-    logger = StreamingLogger(log_dir="/tmp/rlm_search_logs", file_name=f"search_{search_id}")
+    logger = StreamingLogger(
+        log_dir="/Users/farieds/projects/rlm/rlm_logs", file_name=f"search_{search_id}"
+    )
     _searches[search_id] = logger
 
     settings = req.settings.model_dump() if req.settings else {}

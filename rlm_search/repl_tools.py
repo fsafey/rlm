@@ -2,22 +2,26 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 
 def build_search_setup_code(
     api_url: str,
     api_key: str = "",
     timeout: int = 30,
+    kb_overview_data: dict[str, Any] | None = None,
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
-    Defines search(), fiqh_lookup(), format_evidence(), and a search_log list
-    in the REPL namespace.
+    Defines search(), browse(), kb_overview(), fiqh_lookup(), format_evidence(),
+    and a search_log list in the REPL namespace.
 
     The Cascade API returns hits with flat fields (id, question, answer,
     parent_code, cluster_label, etc.). These functions normalize the response
     into a consistent {results: [...]} format with nested metadata for the LLM.
     """
-    return f'''
+    code = f'''
 import requests as _requests
 import json as _json
 
@@ -82,6 +86,55 @@ def search(query: str, filters: dict | None = None, top_k: int = 10) -> dict:
     return {{"results": results, "total": data.get("total", len(results))}}
 
 
+def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_limit=4):
+    """Browse the knowledge base by filter — no search query needed.
+
+    Use for: exploring categories, discovering clusters, paginated access.
+
+    Args:
+        filters: e.g. {{"parent_code": "PT", "cluster_label": "Ghusl"}}.
+        offset: Pagination offset (default 0).
+        limit: Results per page, 1-100 (default 20).
+        sort_by: Sort field, e.g. "quality_score", "id".
+        group_by: Group by field, e.g. "cluster_label" for clustered view.
+        group_limit: Max hits per group (default 4).
+
+    Returns:
+        Dict with results, total, has_more, facets, grouped_results.
+    """
+    payload = {{"collection": "enriched_gemini", "include_facets": True}}
+    if filters:
+        payload["filters"] = filters
+    payload["offset"] = offset
+    payload["limit"] = limit
+    if sort_by:
+        payload["sort_by"] = sort_by
+    if group_by:
+        payload["group_by"] = group_by
+        payload["group_limit"] = group_limit
+    resp = _requests.post(
+        f"{{_API_URL}}/browse", json=payload, headers=_HEADERS, timeout=_TIMEOUT
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    results = [_normalize_hit(h) for h in data.get("hits", [])]
+    grouped = data.get("grouped_results", [])
+    for group in grouped:
+        group["hits"] = [_normalize_hit(h) for h in group.get("hits", [])]
+    log_entry = {{"type": "browse", "filters": filters, "offset": offset, "limit": limit}}
+    if group_by:
+        log_entry["group_by"] = group_by
+    search_log.append(log_entry)
+    print(f"[browse] filters={{filters}} results={{len(results)}} total={{data.get('total', 0)}}")
+    return {{
+        "results": results,
+        "total": data.get("total", 0),
+        "has_more": data.get("has_more", False),
+        "facets": data.get("facets", {{}}),
+        "grouped_results": grouped,
+    }}
+
+
 def format_evidence(results: list[dict], max_per_source: int = 3) -> list[str]:
     """Format search results as citation strings for synthesis.
 
@@ -138,3 +191,56 @@ def fiqh_lookup(query: str) -> dict:
     print(f"[fiqh_lookup] query={{query!r}} bridges={{len(bridges)}} related={{len(related)}}")
     return {{"bridges": bridges, "related": related}}
 '''
+
+    # Append kb_overview data and function outside the f-string to avoid
+    # nested brace escaping issues with the JSON blob
+    if kb_overview_data is not None:
+        kb_json_str = json.dumps(kb_overview_data)
+        code += f"\n_KB_OVERVIEW = _json.loads({kb_json_str!r})\n"
+    else:
+        code += "\n_KB_OVERVIEW = None\n"
+
+    code += '''
+
+def kb_overview():
+    """Get a pre-computed overview of the knowledge base taxonomy.
+
+    Returns a dict with collection info, categories (with clusters and
+    sample questions), and global facets. Use this to orient before searching.
+
+    Returns:
+        Dict with taxonomy overview, or None if unavailable.
+    """
+    if _KB_OVERVIEW is None:
+        print("WARNING: Knowledge base overview unavailable — use search() directly.")
+        return None
+    ov = _KB_OVERVIEW
+    total = ov.get("total_documents", 0)
+    print(f"=== Knowledge Base: {ov.get(\'collection\', \'?\')} ({total:,} documents) ===\\n")
+    for code, cat in ov.get("categories", {}).items():
+        name = cat.get("name", code)
+        count = cat.get("document_count", 0)
+        clusters = cat.get("clusters", {})
+        print(f"{code} — {name} [{count:,} docs]")
+        shown = 0
+        for label, info in clusters.items():
+            if shown >= 5:
+                remaining = len(clusters) - shown
+                if remaining > 0:
+                    print(f"  ... and {remaining} more clusters")
+                break
+            sample = info.get("sample", {})
+            q = sample.get("question", "")
+            if q:
+                q_short = q[:80] + "..." if len(q) > 80 else q
+                print(f"  · {label} — \\"{q_short}\\"")
+            else:
+                print(f"  · {label}")
+            shown += 1
+        print()
+    print("Filter keys: parent_code, cluster_label, subtopics, primary_topic")
+    print("Tip: Use cluster_label for precise targeting after identifying relevant clusters")
+    return ov
+'''
+
+    return code

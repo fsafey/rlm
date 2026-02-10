@@ -52,8 +52,9 @@ class TestHealthEndpoint:
         assert "version" in data
         assert data["cascade_url"] is not None
 
+    @patch("rlm_search.api.build_kb_overview", new_callable=AsyncMock, return_value=None)
     @patch("rlm_search.api.httpx.AsyncClient")
-    def test_health_cascade_connected(self, mock_client_cls):
+    def test_health_cascade_connected(self, mock_client_cls, mock_kb_overview):
         """Health ping succeeds -> ok."""
         _searches.clear()
         mock_resp = MagicMock()

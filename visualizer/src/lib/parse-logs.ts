@@ -3,7 +3,7 @@ import { RLMIteration, RLMLogFile, LogMetadata, RLMConfigMetadata, extractFinalA
 // Extract the context variable from code block locals
 export function extractContextVariable(iterations: RLMIteration[]): string | null {
   for (const iter of iterations) {
-    for (const block of iter.code_blocks) {
+    for (const block of iter.code_blocks ?? []) {
       if (block.result?.locals?.context) {
         const ctx = block.result.locals.context;
         if (typeof ctx === 'string') {
@@ -55,10 +55,11 @@ export function parseJSONL(content: string): ParsedJSONL {
           environment_kwargs: parsed.environment_kwargs ?? null,
           other_backends: parsed.other_backends ?? null,
         };
-      } else {
-        // This is an iteration entry
+      } else if (parsed.type === 'iteration' || parsed.code_blocks != null) {
+        // Only push entries that are actual iterations (have code_blocks)
         iterations.push(parsed as RLMIteration);
       }
+      // Skip non-iteration entries (e.g. "done", "error" from search logs)
     } catch (e) {
       console.error('Failed to parse line:', line, e);
     }
@@ -105,7 +106,7 @@ export function extractContextQuestion(iterations: RLMIteration[]): string {
   
   // Check code block output for actual context
   for (const iter of iterations) {
-    for (const block of iter.code_blocks) {
+    for (const block of iter.code_blocks ?? []) {
       if (block.result?.locals?.context) {
         const ctx = block.result.locals.context;
         if (typeof ctx === 'string' && ctx.length < 500) {
@@ -126,20 +127,21 @@ export function computeMetadata(iterations: RLMIteration[]): LogMetadata {
   let finalAnswer: string | null = null;
   
   for (const iter of iterations) {
-    totalCodeBlocks += iter.code_blocks.length;
+    const codeBlocks = iter.code_blocks ?? [];
+    totalCodeBlocks += codeBlocks.length;
     
     // Use iteration_time if available, otherwise sum code block times
     if (iter.iteration_time != null) {
       totalExecutionTime += iter.iteration_time;
     } else {
-      for (const block of iter.code_blocks) {
+      for (const block of codeBlocks) {
         if (block.result) {
           totalExecutionTime += block.result.execution_time || 0;
         }
       }
     }
     
-    for (const block of iter.code_blocks) {
+    for (const block of codeBlocks) {
       if (block.result) {
         if (block.result.stderr) {
           hasErrors = true;

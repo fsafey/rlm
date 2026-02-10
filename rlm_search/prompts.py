@@ -91,6 +91,8 @@ Follow this approach for every query:
 
 ### Worked Example
 
+Each ```repl block below is a separate turn — you see execution output before deciding your next step.
+
 ```repl
 # Step 1: Look up fiqh terminology
 terms = fiqh_lookup("prayer travel shortening")

@@ -147,4 +147,36 @@ def format_evidence(results: list[dict], max_per_source: int = 3) -> list[str]:
         a = (r.get("answer", "") or "")[:500]
         lines.append(f"[Source: {{rid}}] Q: {{q}} A: {{a}}")
     return lines
+
+
+def fiqh_lookup(query: str) -> dict:
+    """Look up Islamic jurisprudence terminology.
+
+    Consults a dictionary of 453 canonical terms with 3,783 variants.
+    Supports English, Arabic, and transliterated input with stemming
+    and compound phrase matching.
+
+    Use to discover canonical Arabic/English term pairs before searching,
+    and to use proper terminology in your answers.
+
+    Args:
+        query: Term or phrase to look up (any language).
+
+    Returns:
+        Dict with 'bridges' (matched terms with canonical form, arabic,
+        english equivalents, expansions) and 'related' (morphologically
+        related terms).
+    """
+    resp = _requests.get(
+        f"{{_API_URL}}/bridge",
+        params={{"q": query}},
+        headers=_HEADERS,
+        timeout=_TIMEOUT,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    bridges = data.get("bridges", [])
+    related = data.get("related", [])
+    print(f"[REPL:fiqh_lookup] query={{query!r}} bridges={{len(bridges)}} related={{len(related)}}")
+    return {{"bridges": bridges, "related": related}}
 '''

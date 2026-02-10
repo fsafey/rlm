@@ -60,7 +60,9 @@ test: install-dev
 check: lint format test
 
 backend:
-	uv run uvicorn rlm_search.api:app --port $${SEARCH_BACKEND_PORT:-8092} --app-dir $(CURDIR) 2>&1 | tee /tmp/rlm_search
+	PORT=$${SEARCH_BACKEND_PORT:-8092}; \
+	trap 'lsof -ti :'"$$PORT"' | xargs kill -9 2>/dev/null; exit 0' INT TERM; \
+	uv run uvicorn rlm_search.api:app --port $$PORT --app-dir $(CURDIR) 2>&1 | tee /tmp/rlm_search
 
 frontend:
 	cd search-app && SEARCH_FRONTEND_PORT=$${SEARCH_FRONTEND_PORT:-3002} SEARCH_BACKEND_PORT=$${SEARCH_BACKEND_PORT:-8092} npm run dev

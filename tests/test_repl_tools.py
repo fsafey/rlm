@@ -424,6 +424,68 @@ class TestConvenienceWrappers:
         assert ns["sources_cited"] == {"a", "b"}
 
 
+class TestFiqhLookup:
+    """Test fiqh_lookup() function generation and behavior."""
+
+    def _exec_ns(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        return ns
+
+    def test_defines_fiqh_lookup(self):
+        """fiqh_lookup() must be defined and callable in the generated namespace."""
+        ns = self._exec_ns()
+        assert "fiqh_lookup" in ns
+        assert callable(ns["fiqh_lookup"])
+
+    def test_fiqh_lookup_calls_bridge_endpoint(self):
+        """fiqh_lookup() must call GET /bridge with correct params."""
+        ns = self._exec_ns()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"bridges": [], "related": []}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "get", return_value=mock_resp) as mock_get:
+            ns["fiqh_lookup"]("prayer")
+
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert (
+            "http://api.test/bridge" in call_args[0][0]
+            or call_args[1].get("url", "") == "http://api.test/bridge"
+        )
+        assert call_args[1]["params"] == {"q": "prayer"}
+
+    def test_fiqh_lookup_returns_bridges_and_related(self):
+        """fiqh_lookup() must return dict with 'bridges' and 'related' keys."""
+        ns = self._exec_ns()
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "bridges": [{"canonical": "salah", "arabic": "صلاة", "english": "prayer"}],
+            "related": [{"term": "qasr"}],
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "get", return_value=mock_resp):
+            result = ns["fiqh_lookup"]("prayer")
+
+        assert "bridges" in result
+        assert "related" in result
+        assert len(result["bridges"]) == 1
+        assert result["bridges"][0]["canonical"] == "salah"
+        assert len(result["related"]) == 1
+
+    def test_fiqh_lookup_signature(self):
+        """fiqh_lookup() must accept a single 'query' parameter."""
+        ns = self._exec_ns()
+        sig = inspect.signature(ns["fiqh_lookup"])
+        params = list(sig.parameters.keys())
+        assert params == ["query"]
+
+
 class TestSetupCodeInLocalREPL:
     """Test that setup code works when injected into a real LocalREPL."""
 
@@ -439,11 +501,13 @@ class TestSetupCodeInLocalREPL:
             assert "search_qa" in repl.locals
             assert "format_evidence" in repl.locals
             assert "sources_cited" in repl.locals
+            assert "fiqh_lookup" in repl.locals
             assert callable(repl.locals["search"])
             assert callable(repl.locals["browse"])
             assert callable(repl.locals["search_risala"])
             assert callable(repl.locals["search_qa"])
             assert callable(repl.locals["format_evidence"])
+            assert callable(repl.locals["fiqh_lookup"])
             assert isinstance(repl.locals["search_log"], list)
             assert isinstance(repl.locals["sources_cited"], set)
         finally:

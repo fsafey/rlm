@@ -38,6 +38,11 @@ Shortcut for `search(query, collection="enriched_gemini", ...)`. Use for practic
 ### format_evidence(results, max_per_source=3) -> list[str]
 Format results as `[Source: <id>] Q: ... A: ...` strings. Caps at 50 results, truncates Q to 200 chars and A to 500 chars. Populates `sources_cited` set automatically.
 
+### fiqh_lookup(query) -> dict
+Look up Islamic terminology from a 453-term dictionary with Arabic↔English bridging.
+Returns `{"bridges": [{"canonical", "arabic", "english", "expansions", ...}], "related": [...]}`.
+Use to discover canonical terms before searching, and to use proper terminology in answers.
+
 ### llm_query(prompt, model=None) -> str
 Recursive sub-LLM call. Can handle ~500K characters of input. Use to synthesize, summarize, or analyze large result sets that would exceed REPL output limits.
 
@@ -79,40 +84,11 @@ Example with multiple filter keys:
 results = search("prayer times", collection="risala_gemini", filters={"parent_code": "PT", "chapter": "Prayer"})
 ```
 
-## Fiqh Terminology Glossary
-
-Use dual terminology — "English (Arabic)" — in search queries for best recall:
-
-| English | Arabic | Notes |
-|---------|--------|-------|
-| Purification | Tahara | Ritual cleanliness |
-| Ablution | Wudu | Minor ritual washing |
-| Full bath | Ghusl | Major ritual washing |
-| Dry ablution | Tayammum | Sand/dust purification |
-| Prayer | Salah | Ritual worship |
-| Fasting | Sawm / Siyam | Ramadan and voluntary |
-| Alms tax | Zakat | Obligatory charity |
-| Pilgrimage | Hajj | Annual to Mecca |
-| Lesser pilgrimage | Umrah | Non-obligatory visit |
-| Obligatory | Wajib / Fard | Required by law |
-| Recommended | Mustahab / Sunnah | Encouraged acts |
-| Permissible | Mubah / Halal | Allowed |
-| Disliked | Makruh | Discouraged |
-| Forbidden | Haram | Prohibited |
-| Expiation | Kaffarah | Penalty for violation |
-| Dowry | Mahr | Marriage payment |
-| Divorce | Talaq | Marital dissolution |
-| Waiting period | Iddah | Post-divorce/death period |
-| Breastfeeding | Rada'ah | Milk kinship |
-| Endowment | Waqf | Charitable trust |
-| Bequest | Wasiyyah | Will/testament |
-| Inheritance | Mirath | Estate distribution |
-
 ## Search Strategy
 
 Follow this approach for every query:
 
-1. **Identify terms**: Map the question to fiqh terminology. Use dual "English (Arabic)" format in queries.
+1. **Look up terminology**: Call `fiqh_lookup(query)` to discover canonical Arabic↔English terms. Use these terms in search queries and in your final answer for accuracy.
 
 2. **Broad search**: Start with broad searches across both collections (top_k=15-20) to understand coverage.
 
@@ -125,14 +101,20 @@ Follow this approach for every query:
 ### Worked Example
 
 ```repl
-# Step 1: Broad search across both collections
+# Step 1: Look up fiqh terminology
+terms = fiqh_lookup("prayer travel shortening")
+print(terms)  # bridges: salah, qasr, safar with Arabic equivalents + related terms
+```
+
+```repl
+# Step 2: Broad search across both collections using canonical terms
 risala_results = search_risala("prayer travel shortening (Salah Qasr)", top_k=15)
 qa_results = search_qa("prayer during travel rules", top_k=15)
 print(f"Risala: {len(risala_results['results'])} hits, QA: {len(qa_results['results'])} hits")
 ```
 
 ```repl
-# Step 2: Examine top results
+# Step 3: Examine top results
 for r in risala_results["results"][:3]:
     print(f"[{r['id']}] score={r['score']:.2f} Q: {r['question'][:100]}")
     print(f"  A: {r['answer'][:200]}")
@@ -140,13 +122,13 @@ for r in risala_results["results"][:3]:
 ```
 
 ```repl
-# Step 3: Targeted follow-up with filters
+# Step 4: Targeted follow-up with filters
 combining = search_risala("combining prayers travel (Jam Salah)", filters={"parent_code": "PT"}, top_k=10)
 print(f"Found {len(combining['results'])} results on combining prayers")
 ```
 
 ```repl
-# Step 4: Synthesize with format_evidence and llm_query
+# Step 5: Synthesize with format_evidence and llm_query
 all_results = risala_results["results"] + qa_results["results"] + combining["results"]
 evidence = format_evidence(all_results)
 evidence_text = "\\n".join(evidence)

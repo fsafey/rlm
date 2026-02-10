@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 import traceback
 import uuid
@@ -12,33 +13,62 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+import httpx
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from rlm.core.rlm import RLM
 from rlm_search.config import (
-    _CASCADE_URL_EXPLICIT,
     ANTHROPIC_API_KEY,
-    CASCADE_API_HOST,
     CASCADE_API_KEY,
     CASCADE_API_URL,
-    CASCADE_PORT_RANGE,
     RLM_BACKEND,
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
 )
-from rlm_search.discovery import discover_cascade_url
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
 from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
 from rlm_search.repl_tools import build_search_setup_code
 from rlm_search.streaming_logger import StreamingLogger
 
+_log = logging.getLogger("rlm_search")
+
+
+async def _check_cascade_health(
+    cascade_url: str | None = None,
+) -> tuple[str, str | None]:
+    """Probe the Cascade API and return (status, url).
+
+    Returns ("connected", url) on success, ("unreachable", url) on failure.
+    """
+    url = cascade_url or CASCADE_API_URL
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{url}/health")
+            resp.raise_for_status()
+    except (httpx.HTTPError, httpx.ConnectError, OSError):
+        return "unreachable", url
+
+    return "connected", url
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Startup/shutdown lifecycle — runs stale search cleanup in background."""
+    """Startup/shutdown lifecycle — Cascade health check + stale search cleanup."""
+
+    # Cascade API health check at startup
+    status, url = await _check_cascade_health()
+    _app.state.cascade_url = url if status == "connected" else None
+    if status == "connected":
+        _log.info("Cascade API at %s is reachable.", url)
+    else:
+        _log.warning(
+            "Cascade API at %s is not reachable. "
+            "Search requests will fail until the API is available.",
+            url,
+        )
 
     async def _cleanup_stale() -> None:
         while True:
@@ -77,16 +107,8 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     print(f"[SEARCH:{search_id}] Starting | query={query!r} backend={backend} model={model}")
 
     try:
-        cascade_url = discover_cascade_url(
-            api_url=CASCADE_API_URL,
-            host=CASCADE_API_HOST,
-            port_range=CASCADE_PORT_RANGE,
-            explicit=_CASCADE_URL_EXPLICIT,
-        )
-        print(f"[SEARCH:{search_id}] Cascade discovered at {cascade_url}")
-
         setup_code = build_search_setup_code(
-            api_url=cascade_url,
+            api_url=CASCADE_API_URL,
             api_key=CASCADE_API_KEY,
         )
 
@@ -181,14 +203,13 @@ async def stream_search(search_id: str) -> StreamingResponse:
 
 
 @app.get("/api/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    try:
-        cascade_url = discover_cascade_url(
-            api_url=CASCADE_API_URL,
-            host=CASCADE_API_HOST,
-            port_range=CASCADE_PORT_RANGE,
-            explicit=_CASCADE_URL_EXPLICIT,
-        )
-    except ConnectionError:
-        cascade_url = None
-    return HealthResponse(cascade_url=cascade_url)
+async def health(request: Request) -> HealthResponse:
+    cached_url: str | None = getattr(request.app.state, "cascade_url", None)
+    status, url = await _check_cascade_health(cascade_url=cached_url)
+    if status == "connected":
+        return HealthResponse(status="ok", cascade_api="connected", cascade_url=url)
+    return HealthResponse(
+        status="degraded",
+        cascade_api="unreachable",
+        cascade_url=url or CASCADE_API_URL,
+    )

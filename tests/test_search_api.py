@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from starlette.testclient import TestClient
 
@@ -14,29 +15,62 @@ from rlm_search.streaming_logger import StreamingLogger
 
 @pytest.fixture()
 def client():
-    """Create a fresh test client, clearing active searches between tests."""
+    """Create a fresh test client, clearing active searches between tests.
+
+    Cascade health check is patched to avoid real network calls during lifespan.
+    """
     _searches.clear()
-    return TestClient(app)
+    with patch("rlm_search.api.httpx.AsyncClient") as mock_client_cls:
+        mock_instance = AsyncMock()
+        mock_instance.get = AsyncMock(side_effect=httpx.ConnectError("no cascade in test"))
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_instance
+        return TestClient(app)
 
 
 class TestHealthEndpoint:
-    """GET /api/health returns status ok."""
+    """GET /api/health returns status and cascade_api connectivity."""
 
-    @patch("rlm_search.api.discover_cascade_url", side_effect=ConnectionError("no cascade"))
-    def test_health_returns_ok(self, mock_discover, client: TestClient):
-        resp = client.get("/api/health")
+    @patch("rlm_search.api.httpx.AsyncClient")
+    def test_health_cascade_unreachable(self, mock_client_cls):
+        """Health ping fails -> degraded."""
+        _searches.clear()
+        mock_instance = AsyncMock()
+        mock_instance.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_instance
+
+        with TestClient(app) as client:
+            assert app.state.cascade_url is None
+            resp = client.get("/api/health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "degraded"
+        assert data["cascade_api"] == "unreachable"
+        assert "version" in data
+        assert data["cascade_url"] is not None
+
+    @patch("rlm_search.api.httpx.AsyncClient")
+    def test_health_cascade_connected(self, mock_client_cls):
+        """Health ping succeeds -> ok."""
+        _searches.clear()
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_instance = AsyncMock()
+        mock_instance.get = AsyncMock(return_value=mock_resp)
+        mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
+        mock_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_instance
+
+        with TestClient(app) as client:
+            assert app.state.cascade_url is not None
+            resp = client.get("/api/health")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert "version" in data
-        assert data["cascade_url"] is None
-
-    @patch("rlm_search.api.discover_cascade_url", return_value="http://localhost:8091")
-    def test_health_with_cascade(self, mock_discover, client: TestClient):
-        resp = client.get("/api/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["cascade_url"] == "http://localhost:8091"
+        assert data["cascade_api"] == "connected"
 
 
 class TestSearchEndpoint:

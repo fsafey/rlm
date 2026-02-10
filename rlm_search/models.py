@@ -37,4 +37,5 @@ class SearchEvent(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "0.1.0"
+    cascade_api: str = "connected"
     cascade_url: str | None = None

@@ -20,7 +20,7 @@ export function SearchProgress({ iterations }: SearchProgressProps) {
   const phase = detectPhase(iterations);
 
   return (
-    <div className="flex items-center gap-3 text-sm text-[hsl(var(--muted-foreground))]">
+    <div className="flex items-center gap-3 text-sm text-muted-foreground">
       <Loader2 className="h-4 w-4 animate-spin" />
       <span>{phase}</span>
       {iterations.length > 0 && (

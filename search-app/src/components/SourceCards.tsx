@@ -31,14 +31,14 @@ export function SourceCards({ sources }: SourceCardsProps) {
           return (
             <div
               key={source.id}
-              className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 hover:shadow-sm transition-shadow"
+              className="rounded-lg border border-border bg-card p-4 hover:shadow-sm transition-shadow"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
-                <span className="text-xs font-mono text-[hsl(var(--muted-foreground))]">
+                <span className="text-xs font-mono text-muted-foreground">
                   {source.id}
                 </span>
                 {label && (
-                  <span className="text-[10px] rounded-full px-2 py-0.5 bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))]">
+                  <span className="text-[10px] rounded-full px-2 py-0.5 bg-secondary text-secondary-foreground">
                     {label}
                   </span>
                 )}
@@ -47,12 +47,12 @@ export function SourceCards({ sources }: SourceCardsProps) {
                 <p className="text-sm font-medium mb-1 line-clamp-2">{source.question}</p>
               )}
               {source.answer && (
-                <p className="text-xs text-[hsl(var(--muted-foreground))] line-clamp-3">
+                <p className="text-xs text-muted-foreground line-clamp-3">
                   {source.answer}
                 </p>
               )}
               {source.score > 0 && (
-                <div className="mt-2 text-[10px] text-[hsl(var(--muted-foreground))]">
+                <div className="mt-2 text-[10px] text-muted-foreground">
                   Relevance: {(source.score * 100).toFixed(0)}%
                 </div>
               )}

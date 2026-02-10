@@ -29,14 +29,14 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
   return (
     <div className="w-full max-w-3xl mx-auto space-y-2">
       <form onSubmit={handleSubmit}>
-        <div className="flex items-center gap-3 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-2 shadow-sm focus-within:ring-2 focus-within:ring-[hsl(var(--ring))] transition-shadow">
-          <Search className="ml-2 h-5 w-5 text-[hsl(var(--muted-foreground))] flex-shrink-0" />
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-2 shadow-sm focus-within:ring-2 focus-within:ring-ring transition-shadow">
+          <Search className="ml-2 h-5 w-5 text-muted-foreground flex-shrink-0" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Ask a question about Islamic jurisprudence..."
-            className="flex-1 bg-transparent outline-none text-sm placeholder:text-[hsl(var(--muted-foreground))]"
+            className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
             disabled={isSearching}
           />
           <button
@@ -44,8 +44,8 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
             onClick={() => setShowSettings((s) => !s)}
             className={`p-1.5 rounded-lg transition-colors ${
               showSettings
-                ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))]"
-                : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--secondary))]"
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary"
             }`}
             title="Settings"
           >
@@ -55,7 +55,7 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
             <button
               type="button"
               onClick={onReset}
-              className="flex items-center gap-1.5 rounded-lg bg-[hsl(var(--destructive))] text-[hsl(var(--destructive-foreground))] px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
+              className="flex items-center gap-1.5 rounded-lg bg-destructive text-destructive-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
             >
               <X className="h-4 w-4" />
               Stop
@@ -64,7 +64,7 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
             <button
               type="submit"
               disabled={!query.trim()}
-              className="flex items-center gap-1.5 rounded-lg bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               <Search className="h-4 w-4" />
               Search
@@ -74,16 +74,16 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
       </form>
 
       {showSettings && (
-        <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-4 shadow-sm">
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+              <label className="text-xs font-medium text-muted-foreground">
                 Model
               </label>
               <select
                 value={settings.model}
                 onChange={(e) => setSettings((s) => ({ ...s, model: e.target.value }))}
-                className="text-xs bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] rounded-lg px-2 py-1.5 outline-none border-none"
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none"
               >
                 {MODEL_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -93,7 +93,7 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
+              <label className="text-xs font-medium text-muted-foreground">
                 Max Iterations
               </label>
               <input
@@ -107,7 +107,7 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
                     max_iterations: Math.max(1, Math.min(50, Number(e.target.value) || 1)),
                   }))
                 }
-                className="w-16 text-xs bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] rounded-lg px-2 py-1.5 outline-none border-none text-center"
+                className="w-16 text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
               />
             </div>
           </div>

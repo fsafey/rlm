@@ -19,17 +19,17 @@ function App() {
   );
 
   return (
-    <div className="min-h-screen bg-[hsl(var(--background))]">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-[hsl(var(--border))] bg-[hsl(var(--card))]">
+      <header className="border-b border-border bg-card">
         <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold">RLM Search</h1>
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">
+            <p className="text-xs text-muted-foreground">
               Agentic search over Islamic jurisprudence
             </p>
           </div>
-          <span className="text-[10px] font-mono text-[hsl(var(--muted-foreground))] bg-[hsl(var(--muted))] px-2 py-1 rounded">
+          <span className="text-[10px] font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
             v0.1.0
           </span>
         </div>

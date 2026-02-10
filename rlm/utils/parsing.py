@@ -47,9 +47,12 @@ def find_final_answer(text: str, environment: "BaseEnv | None" = None) -> str | 
         variable_name = match.group(1).strip().strip('"').strip("'")
         if environment is not None:
             result = environment.execute_code(f"print(FINAL_VAR({variable_name!r}))")
+            # Check for execution errors (variable not found, etc.)
+            if result.stderr.strip():
+                return None
             final_answer = result.stdout.strip()
-            if final_answer == "":
-                final_answer = result.stderr.strip() or ""
+            if not final_answer or final_answer.startswith("Error:"):
+                return None
             return final_answer
         return None
 

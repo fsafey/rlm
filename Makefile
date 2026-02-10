@@ -1,6 +1,6 @@
 .PHONY: help install install-dev install-modal run-all \
         quickstart docker-repl lm-repl modal-repl \
-        lint format test check
+        lint format test check backend frontend
 
 help:
 	@echo "RLM Examples Makefile"
@@ -22,6 +22,8 @@ help:
 	@echo "  make format         - Run ruff formatter"
 	@echo "  make test           - Run tests"
 	@echo "  make check          - Run lint + format + tests"
+	@echo "  make backend        - Start rlm_search API server (port 8092)"
+	@echo "  make frontend       - Start search frontend (port 3002)"
 
 install:
 	uv sync
@@ -56,3 +58,9 @@ test: install-dev
 	uv run pytest
 
 check: lint format test
+
+backend:
+	uv run uvicorn rlm_search.api:app --port 8092 --app-dir /Users/farieds/projects/rlm 2>&1 | tee /tmp/rlm_search
+
+frontend:
+	cd search-app && npm run dev

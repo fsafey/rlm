@@ -27,6 +27,7 @@ class StreamingLogger(RLMLogger):
         }
         with self._lock:
             self.queue.append(event)
+            print(f"[STREAM] metadata event queued | queue_size={len(self.queue)}")
 
     def log(self, iteration: RLMIteration) -> None:
         super().log(iteration)
@@ -38,6 +39,7 @@ class StreamingLogger(RLMLogger):
         }
         with self._lock:
             self.queue.append(event)
+            print(f"[STREAM] iteration {self._iteration_count} queued | has_code={bool(iteration.code_blocks)} final_answer={iteration.final_answer is not None}")
 
     def mark_done(
         self, answer: str | None, sources: list[dict], execution_time: float, usage: dict
@@ -64,7 +66,9 @@ class StreamingLogger(RLMLogger):
         with self._lock:
             events = self.queue[:]
             self.queue.clear()
-            return events
+        if events:
+            print(f"[STREAM] drained {len(events)} events | done={self._done}")
+        return events
 
     @property
     def is_done(self) -> bool:

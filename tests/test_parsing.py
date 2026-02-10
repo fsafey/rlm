@@ -259,10 +259,10 @@ multiline answer)"""
             result = find_final_answer(text, environment=env)
             assert result == "100", f"Expected '100', got '{result}'"
 
-            # Test that non-existent variable returns error message
+            # Test that non-existent variable returns None (so RLM continues iterating)
             text = "FINAL_VAR(nonexistent)"
             result = find_final_answer(text, environment=env)
-            assert "Error" in result or "not found" in result.lower()
+            assert result is None
         finally:
             env.cleanup()
 

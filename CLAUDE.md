@@ -55,8 +55,8 @@ cd search-app && npm run dev            # Search UI (localhost:3002)
 
 ```bash
 uv pip install fastapi uvicorn httpx    # Search deps (NOT in pyproject.toml)
-cd rlm_search && uvicorn api:app --port 8092  # Search backend
-cd search-app && npm install && npm run dev    # Search frontend (port 3002)
+make backend                            # Search API server (port 8092)
+make frontend                           # Search UI dev server (port 3002)
 ```
 
 ### Optional Dependency Groups

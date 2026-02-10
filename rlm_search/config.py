@@ -8,10 +8,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-CASCADE_API_URL = os.getenv("CASCADE_API_URL", "http://localhost:8091")
-CASCADE_API_KEY = os.getenv("CASCADE_API_KEY", "")
+CASCADE_API_URL = os.getenv("CASCADE_API_URL", "http://localhost:8090")
+CASCADE_API_KEY = os.getenv("CASCADE_API_KEY", "dev-key-change-me")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 RLM_BACKEND = os.getenv("RLM_BACKEND", "anthropic")
 RLM_MODEL = os.getenv("RLM_MODEL", "claude-sonnet-4-20250514")
 RLM_MAX_ITERATIONS = int(os.getenv("RLM_MAX_ITERATIONS", "15"))
 RLM_MAX_DEPTH = int(os.getenv("RLM_MAX_DEPTH", "1"))
+
+print(f"[CONFIG] cascade={CASCADE_API_URL} backend={RLM_BACKEND} model={RLM_MODEL} max_iter={RLM_MAX_ITERATIONS} max_depth={RLM_MAX_DEPTH}")
+print(f"[CONFIG] api_keys: anthropic={'SET' if ANTHROPIC_API_KEY else 'MISSING'} cascade={'SET' if CASCADE_API_KEY else 'MISSING'}")

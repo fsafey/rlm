@@ -107,11 +107,10 @@ async def build_kb_overview(
         for group in group_list:
             label = group.get("label", group.get("group_key", "Unknown"))
             hits = group.get("hits", [])
-            sample: dict[str, Any] = {}
+            sample_question = ""
             if hits:
-                h = hits[0]
-                sample = {"id": h.get("id", ""), "question": h.get("question", "")}
-            clusters[label] = {"sample": sample}
+                sample_question = hits[0].get("question", "")
+            clusters[label] = sample_question
 
         categories[code] = {
             "name": CATEGORIES[code],

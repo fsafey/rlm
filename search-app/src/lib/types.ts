@@ -97,7 +97,7 @@ export interface SearchSettings {
 }
 
 export const defaultSettings: SearchSettings = {
-  model: "claude-sonnet-4-5-20250929",
+  model: "claude-opus-4-6",
   max_iterations: 15,
 };
 

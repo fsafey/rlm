@@ -232,16 +232,14 @@ def kb_overview():
         clusters = cat.get("clusters", {})
         print(f"{code} — {name} [{count:,} docs]")
         shown = 0
-        for label, info in clusters.items():
+        for label, sample_q in clusters.items():
             if shown >= 5:
                 remaining = len(clusters) - shown
                 if remaining > 0:
                     print(f"  ... and {remaining} more clusters")
                 break
-            sample = info.get("sample", {})
-            q = sample.get("question", "")
-            if q:
-                q_short = q[:80] + "..." if len(q) > 80 else q
+            if sample_q:
+                q_short = sample_q[:80] + "..." if len(sample_q) > 80 else sample_q
                 print(f"  · {label} — \\"{q_short}\\"")
             else:
                 print(f"  · {label}")

@@ -502,8 +502,8 @@ class TestKbOverviewFunction:
                     "name": "Prayer & Tahara",
                     "document_count": 5200,
                     "clusters": {
-                        "Ghusl": {"sample": {"id": "1", "question": "How to do ghusl?"}},
-                        "Wudu": {"sample": {"id": "2", "question": "Does bleeding break wudu?"}},
+                        "Ghusl": "How to do ghusl?",
+                        "Wudu": "Does bleeding break wudu?",
                     },
                     "facets": {},
                 }

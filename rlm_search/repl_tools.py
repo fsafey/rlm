@@ -214,11 +214,25 @@ def fiqh_lookup(query: str) -> dict:
 def kb_overview():
     """Get a pre-computed overview of the knowledge base taxonomy.
 
-    Returns a dict with collection info, categories (with clusters and
-    sample questions), and global facets. Use this to orient before searching.
+    This function PRINTS a formatted summary automatically. The returned
+    dict is for programmatic access only — you rarely need to iterate it.
 
     Returns:
-        Dict with taxonomy overview, or None if unavailable.
+        None if unavailable, otherwise a dict with structure:
+        {
+            "collection": str,
+            "total_documents": int,
+            "categories": {
+                "<parent_code>": {
+                    "name": str,
+                    "document_count": int,
+                    "clusters": {"<cluster_label>": "<sample_question_str>", ...},
+                    "facets": dict,
+                }
+            },
+            "global_facets": dict,
+        }
+        Note: clusters map label → sample question STRING (not a dict).
     """
     if _KB_OVERVIEW is None:
         print("WARNING: Knowledge base overview unavailable — use search() directly.")

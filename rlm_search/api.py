@@ -66,14 +66,13 @@ _executor = ThreadPoolExecutor(max_workers=4)
 def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     """Run an RLM completion in a thread. Pushes events to the StreamingLogger."""
     logger = _searches[search_id]
-    print(f"[SEARCH:{search_id}] Starting | query={query!r} backend={settings.get('backend', RLM_BACKEND)} model={settings.get('model', RLM_MODEL)}")
+    backend = settings.get("backend") or RLM_BACKEND
+    model = settings.get("model") or RLM_MODEL
+    max_iterations = settings.get("max_iterations") or RLM_MAX_ITERATIONS
+    max_depth = settings.get("max_depth") or RLM_MAX_DEPTH
+    print(f"[SEARCH:{search_id}] Starting | query={query!r} backend={backend} model={model}")
 
     try:
-        backend = settings.get("backend", RLM_BACKEND)
-        model = settings.get("model", RLM_MODEL)
-        max_iterations = settings.get("max_iterations", RLM_MAX_ITERATIONS)
-        max_depth = settings.get("max_depth", RLM_MAX_DEPTH)
-
         setup_code = build_search_setup_code(
             api_url=CASCADE_API_URL,
             api_key=CASCADE_API_KEY,

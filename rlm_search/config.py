@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env from project root (parent of rlm_search/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_PROJECT_ROOT / ".env")
 
 CASCADE_API_URL = os.getenv("CASCADE_API_URL", "http://localhost:8090")
 CASCADE_API_KEY = os.getenv("CASCADE_API_KEY", "dev-key-change-me")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 RLM_BACKEND = os.getenv("RLM_BACKEND", "anthropic")
-RLM_MODEL = os.getenv("RLM_MODEL", "claude-sonnet-4-20250514")
+RLM_MODEL = os.getenv("RLM_MODEL", "claude-sonnet-4-5-20250929")
 RLM_MAX_ITERATIONS = int(os.getenv("RLM_MAX_ITERATIONS", "15"))
 RLM_MAX_DEPTH = int(os.getenv("RLM_MAX_DEPTH", "1"))
 

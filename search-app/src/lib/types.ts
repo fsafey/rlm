@@ -56,6 +56,7 @@ export interface SearchState {
   status: "idle" | "searching" | "done" | "error";
   searchId: string | null;
   query: string;
+  metadata: MetadataEvent | null;
   iterations: Iteration[];
   answer: string | null;
   sources: SearchSource[];
@@ -70,7 +71,7 @@ export interface SearchSettings {
 }
 
 export const defaultSettings: SearchSettings = {
-  model: "claude-sonnet-4-20250514",
+  model: "claude-sonnet-4-5-20250929",
   max_iterations: 15,
 };
 
@@ -78,6 +79,7 @@ export const initialSearchState: SearchState = {
   status: "idle",
   searchId: null,
   query: "",
+  metadata: null,
   iterations: [],
   answer: null,
   sources: [],

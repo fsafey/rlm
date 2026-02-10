@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { Iteration, SearchSettings, SearchState, SSEEvent } from "./types";
+import type { Iteration, MetadataEvent, SearchSettings, SearchState, SSEEvent } from "./types";
 import { defaultSettings, initialSearchState } from "./types";
 
 export function useSearch() {
@@ -97,6 +97,7 @@ export function useSearch() {
 
               case "metadata":
                 console.log("[SSE] metadata received", event);
+                setState((s) => ({ ...s, metadata: event as MetadataEvent }));
                 break;
             }
           } catch {

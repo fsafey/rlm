@@ -4,7 +4,7 @@ import type { SearchSettings } from "@/lib/types";
 import { defaultSettings } from "@/lib/types";
 
 const MODEL_OPTIONS = [
-  { value: "claude-sonnet-4-20250514", label: "Sonnet 4" },
+  { value: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
   { value: "claude-opus-4-6", label: "Opus 4.6" },
 ];

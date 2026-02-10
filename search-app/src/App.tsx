@@ -80,6 +80,7 @@ function App() {
         {state.iterations.length > 0 && (
           <TracePanel
             iterations={state.iterations}
+            metadata={state.metadata}
             isLive={state.status === "searching"}
           />
         )}

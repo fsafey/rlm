@@ -11,10 +11,10 @@ class SearchRequest(BaseModel):
 
 
 class SearchSettings(BaseModel):
-    backend: str = "anthropic"
-    model: str = "claude-sonnet-4-20250514"
-    max_iterations: int = 15
-    max_depth: int = 1
+    backend: str | None = None
+    model: str | None = None
+    max_iterations: int | None = None
+    max_depth: int | None = None
 
 
 class SearchResponse(BaseModel):

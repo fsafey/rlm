@@ -105,7 +105,9 @@ class RLM:
         # Log metadata if logger is provided
         if self.logger or verbose:
             metadata = RLMMetadata(
-                root_model=backend_kwargs.get("model_name", "unknown")
+                root_model=(
+                    backend_kwargs.get("model_name") or backend_kwargs.get("model", "unknown")
+                )
                 if backend_kwargs
                 else "unknown",
                 max_depth=max_depth,

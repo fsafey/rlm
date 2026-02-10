@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Iteration } from "@/lib/types";
+import type { Iteration, MetadataEvent } from "@/lib/types";
 
 interface TracePanelProps {
   iterations: Iteration[];
+  metadata: MetadataEvent | null;
   isLive: boolean;
 }
 
-export function TracePanel({ iterations, isLive }: TracePanelProps) {
+export function TracePanel({ iterations, metadata, isLive }: TracePanelProps) {
   const [expanded, setExpanded] = useState(true);
 
   if (iterations.length === 0) return null;
@@ -31,6 +32,16 @@ export function TracePanel({ iterations, isLive }: TracePanelProps) {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Live
             </span>
+          )}
+          {metadata && (
+            <div className="flex items-center gap-1.5 ml-auto mr-2">
+              <span className="text-[10px] font-mono bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] px-1.5 py-0.5 rounded">
+                {metadata.root_model}
+              </span>
+              <span className="text-[10px] font-mono bg-[hsl(var(--secondary))] text-[hsl(var(--secondary-foreground))] px-1.5 py-0.5 rounded">
+                max {metadata.max_iterations} iter
+              </span>
+            </div>
           )}
         </div>
         {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}

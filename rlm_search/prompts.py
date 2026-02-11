@@ -75,25 +75,27 @@ Inspect all variables currently in the REPL environment.
 
 These call `llm_query()` internally — each costs one sub-LLM call but saves you full iterations by catching problems early. To reduce cost, sub-agent calls can use a lighter model: e.g. `evaluate_results()` and `classify_question()` work well with smaller models.
 
-### evaluate_results(question, results, top_n=5) -> str
+### evaluate_results(question, results, top_n=5, model=None) -> dict
 Evaluate whether search results actually match the question.
 - `question`: The user's question (pass `context`).
 - `results`: search() return dict or list of result dicts.
-- Returns: Per-result relevance rating (RELEVANT/PARTIAL/OFF-TOPIC) and suggested next step.
+- Returns: `{"ratings": [{"id": str, "rating": "RELEVANT"|"PARTIAL"|"OFF-TOPIC"}, ...], "suggestion": str, "raw": str}`
+- Use `ratings` to filter results before `format_evidence()` — keep only RELEVANT/PARTIAL, drop OFF-TOPIC.
 - **When to use**: After search(), when unsure if results are on-topic. Especially useful when scores are mixed (0.2–0.5).
 
-### reformulate(question, failed_query, top_score=0.0) -> list[str]
+### reformulate(question, failed_query, top_score=0.0, model=None) -> list[str]
 Generate alternative search queries when results are poor.
 - Returns: List of up to 3 alternative query strings. Call `search()` with each.
 - **When to use**: Top search score < 0.3.
 
-### critique_answer(question, draft) -> str
+### critique_answer(question, draft, model=None) -> str
 Review draft answer before finalizing.
 - Returns: PASS or FAIL verdict with specific feedback.
 - Evaluates the first 3,000 characters of the draft (warns if truncated).
 - **When to use**: Before FINAL/FINAL_VAR — catches citation errors and topic drift.
+- **If FAIL**: Revise the answer using the feedback, then call `critique_answer()` again. Do not finalize a FAIL verdict.
 
-### classify_question(question) -> str
+### classify_question(question, model=None) -> str
 Classify question and recommend search strategy using kb_overview taxonomy.
 - Returns: CATEGORY code, relevant CLUSTERS, and search STRATEGY.
 - **When to use**: Optional — if unsure which category fits after reviewing kb_overview().
@@ -104,7 +106,7 @@ Classify question and recommend search strategy using kb_overview taxonomy.
 |-----------|------|-----|
 | Starting a question | `kb_overview()` then `search(context, ...)` | Orient first, then search raw question |
 | Search scores < 0.3 | `reformulate(context, query, score)` | Sub-agent generates better queries |
-| Unsure if results match | `evaluate_results(context, results)` | Sub-agent rates each result |
+| Unsure if results match | `evaluate_results(context, results)` | Returns structured ratings — filter OFF-TOPIC before synthesis |
 | Need Arabic/English terms | `fiqh_lookup(term)` | For written answer, not search queries |
 | Exploring a category | `browse(group_by="cluster_label", filters=...)` | See clusters and their content |
 | Large result set | `format_evidence(results)` + `llm_query(...)` | Compress then synthesize |
@@ -129,6 +131,7 @@ Classify question and recommend search strategy using kb_overview taxonomy.
 - **DON'T** ignore low scores — if top result is < 0.3, your query missed; call `reformulate()`
 - **DON'T** skip `critique_answer()` — it catches citation errors before they reach the user
 - **DON'T** use string slicing (`.split("?")[0]`, `[:100]`) as a "different query" — rephrase semantically or use different filters
+- **DON'T** write more than 3 ```repl blocks per response — if a block fails, all subsequent blocks that depend on its variables will cascade-fail. Write 1-3 blocks, observe results, then continue next turn.
 
 ## Taxonomy & Filters
 
@@ -202,23 +205,29 @@ print(f"\\nCombining query: {len(combining['results'])} results")
 ```
 
 ```repl
-# Turn 2: Evaluate + terminology
-eval_report = evaluate_results(context, results)
-print(eval_report)
+# Turn 2: Evaluate + filter + terminology
+eval_out = evaluate_results(context, results)
+# Filter out OFF-TOPIC results using structured ratings
+off_topic_ids = {r["id"] for r in eval_out["ratings"] if r["rating"] == "OFF-TOPIC"}
+good_results = [r for r in results["results"] if r["id"] not in off_topic_ids]
+print(f"Kept {len(good_results)}/{len(results['results'])} results (dropped {len(off_topic_ids)} off-topic)")
 terms = fiqh_lookup("qasr prayer")
-# Examine top hits
-for r in results["results"][:3]:
+for r in good_results[:3]:
     print(f"[{r['id']}] Q: {r['question'][:200]}")
     print(f"  A: {r['answer'][:300]}")
 ```
 
 ```repl
-# Turn 3: Synthesize + verify
-evidence = format_evidence(results) + format_evidence(combining)
+# Turn 3: Synthesize + verify (with retry on FAIL)
+evidence = format_evidence(good_results) + format_evidence(combining)
 answer = llm_query(f"Based on these scholar answers about prayer during travel, write a clear response.\\n\\n" + "\\n".join(evidence))
-# Quality gate — catch citation errors before finalizing
 review = critique_answer(context, answer)
 print(review)
+# If FAIL, revise using the feedback and re-check
+if "FAIL" in review[:20].upper():
+    answer = llm_query(f"Revise this answer based on the feedback.\\n\\nFeedback:\\n{review}\\n\\nOriginal answer:\\n{answer}\\n\\nEvidence:\\n" + "\\n".join(evidence))
+    review2 = critique_answer(context, answer)
+    print("Revision review:", review2)
 ```
 
 FINAL_VAR(answer)

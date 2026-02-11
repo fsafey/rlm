@@ -30,7 +30,7 @@ install:
 	uv sync
 
 install-dev:
-	uv sync --group dev --group test
+	uv sync --group dev --group test --group search
 
 install-modal:
 	uv pip install -e ".[modal]"

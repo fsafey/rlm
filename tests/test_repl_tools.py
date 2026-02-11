@@ -162,6 +162,42 @@ class TestSearchFunctionBehavior:
         assert ns["search_log"][0]["query"] == "q1"
         assert ns["search_log"][1]["query"] == "q2"
 
+    def test_search_truncates_long_query(self, capsys):
+        """search() truncates queries exceeding 500 chars to avoid API 422."""
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        long_query = "x" * 800
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search"](long_query)
+
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "truncating" in captured.out
+        payload = mock_post.call_args[1]["json"]
+        assert len(payload["query"]) == 500
+
+    def test_search_short_query_not_truncated(self):
+        """search() does not truncate queries under the limit."""
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+            ns["search"]("short query")
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["query"] == "short query"
+
 
 class TestFormatEvidence:
     """Test format_evidence() output formatting and limits."""
@@ -597,22 +633,32 @@ class TestEvaluateResults:
     def test_empty_results(self):
         ns = _make_sub_agent_ns()
         result = ns["evaluate_results"]("test question", [])
-        assert "No results" in result
+        assert isinstance(result, dict)
+        assert result["ratings"] == []
+        assert "No results" in result["suggestion"]
 
     def test_empty_results_from_dict(self):
         ns = _make_sub_agent_ns()
         result = ns["evaluate_results"]("test question", {"results": []})
-        assert "No results" in result
+        assert isinstance(result, dict)
+        assert result["ratings"] == []
+        assert "No results" in result["suggestion"]
 
     def test_calls_llm_query(self):
         ns = _make_sub_agent_ns()
         calls = []
-        ns["llm_query"] = lambda prompt, model=None: (calls.append(prompt), "RELEVANT")[1]
+        ns["llm_query"] = lambda prompt, model=None: (
+            calls.append(prompt),
+            "q1 RELEVANT\n\nSUGGESTION: proceed to synthesis",
+        )[1]
         results = {"results": [{"id": "q1", "score": 0.8, "question": "Q", "answer": "A"}]}
-        ns["evaluate_results"]("test question", results)
+        result = ns["evaluate_results"]("test question", results)
         assert len(calls) == 1
         assert "test question" in calls[0]
         assert "q1" in calls[0]
+        assert isinstance(result, dict)
+        assert result["ratings"][0]["id"] == "q1"
+        assert result["ratings"][0]["rating"] == "RELEVANT"
 
     def test_accepts_dict_or_list(self):
         ns = _make_sub_agent_ns()
@@ -631,13 +677,73 @@ class TestEvaluateResults:
     def test_respects_top_n(self, capsys):
         ns = _make_sub_agent_ns()
         calls = []
-        ns["llm_query"] = lambda prompt, model=None: (calls.append(prompt), "ok")[1]
+
+        def mock_llm(prompt, model=None):
+            calls.append(prompt)
+            return "q0 RELEVANT\nq1 PARTIAL\nq2 OFF-TOPIC\n\nSUGGESTION: proceed"
+
+        ns["llm_query"] = mock_llm
         hits = [{"id": f"q{i}", "score": 0.5, "question": "Q", "answer": "A"} for i in range(10)]
-        ns["evaluate_results"]("q", hits, top_n=3)
+        result = ns["evaluate_results"]("q", hits, top_n=3)
         # Should only include 3 results in the prompt
         assert calls[0].count("score=") == 3
+        # Should parse structured ratings
+        assert isinstance(result, dict)
+        assert len(result["ratings"]) == 3
+        assert result["suggestion"] == "proceed"
         captured = capsys.readouterr()
-        assert "3 results assessed" in captured.out
+        assert "3 rated" in captured.out
+
+    def test_id_prefix_collision(self):
+        """IDs like 'q1' and 'q10' must not collide — longest match wins."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: (
+            "q10 RELEVANT\nq1 OFF-TOPIC\nq2 PARTIAL\n\nSUGGESTION: proceed"
+        )
+        hits = [
+            {"id": "q1", "score": 0.5, "question": "Q1", "answer": "A"},
+            {"id": "q10", "score": 0.6, "question": "Q10", "answer": "A"},
+            {"id": "q2", "score": 0.4, "question": "Q2", "answer": "A"},
+        ]
+        result = ns["evaluate_results"]("q", hits)
+        ratings_by_id = {r["id"]: r["rating"] for r in result["ratings"]}
+        assert ratings_by_id["q10"] == "RELEVANT"
+        assert ratings_by_id["q1"] == "OFF-TOPIC"
+        assert ratings_by_id["q2"] == "PARTIAL"
+
+    def test_unknown_rating_fallback(self):
+        """ID found but no keyword → UNKNOWN, not silently dropped."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: (
+            "q1 — this result is somewhat useful\n\nSUGGESTION: proceed"
+        )
+        hits = [{"id": "q1", "score": 0.5, "question": "Q", "answer": "A"}]
+        result = ns["evaluate_results"]("q", hits)
+        assert len(result["ratings"]) == 1
+        assert result["ratings"][0]["rating"] == "UNKNOWN"
+
+    def test_missing_suggestion_line(self):
+        """If LLM omits SUGGESTION line, suggestion defaults to empty string."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "q1 RELEVANT"
+        hits = [{"id": "q1", "score": 0.5, "question": "Q", "answer": "A"}]
+        result = ns["evaluate_results"]("q", hits)
+        assert result["suggestion"] == ""
+        assert result["ratings"][0]["rating"] == "RELEVANT"
+
+    def test_integer_ids_do_not_crash(self):
+        """Cascade API returns int IDs — sorted(ids, key=len) must not TypeError."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = (
+            lambda prompt, model=None: "58 RELEVANT\n504 PARTIAL\n\nSUGGESTION: proceed"
+        )
+        hits = [
+            {"id": 58, "score": 1.05, "question": "Cannabis delivery", "answer": "A"},
+            {"id": 504, "score": 1.04, "question": "Accountant for adult co", "answer": "B"},
+        ]
+        result = ns["evaluate_results"]("test question", hits)
+        assert len(result["ratings"]) == 2
+        assert result["ratings"][0]["rating"] == "RELEVANT"
 
 
 class TestReformulate:
@@ -691,7 +797,7 @@ class TestCritiqueAnswer:
     def test_truncation_warning(self, capsys):
         ns = _make_sub_agent_ns()
         ns["llm_query"] = lambda prompt, model=None: "PASS"
-        ns["critique_answer"]("question", "x" * 5000)
+        ns["critique_answer"]("question", "x" * 10000)
         captured = capsys.readouterr()
         assert "WARNING" in captured.out
         assert "truncated" in captured.out

@@ -277,7 +277,7 @@ class RLM:
 
             # Default behavior: we run out of iterations, provide one final answer
             time_end = time.perf_counter()
-            final_answer = self._default_answer(message_history, lm_handler)
+            final_answer = self._default_answer(message_history, lm_handler, root_prompt)
             usage = lm_handler.get_usage_summary()
             self.verbose.print_final_answer(final_answer)
             self.verbose.print_summary(self.max_iterations, time_end - time_start, usage.to_dict())
@@ -311,15 +311,17 @@ class RLM:
         code_block_strs = find_code_blocks(response)
         code_blocks = []
 
-        syntax_error_seen = False
+        skip_reason: str | None = None
+        consecutive_errors = 0
+        _MAX_CONSECUTIVE_ERRORS = 2
         for code_block_str in code_block_strs:
-            if syntax_error_seen:
+            if skip_reason is not None:
                 code_blocks.append(
                     CodeBlock(
                         code=code_block_str,
                         result=REPLResult(
                             stdout="",
-                            stderr="[Skipped: prior code block had a SyntaxError]",
+                            stderr=f"[Skipped: {skip_reason}]",
                             locals={},
                             execution_time=0.0,
                             rlm_calls=[],
@@ -329,8 +331,19 @@ class RLM:
                 continue
             code_result: REPLResult = environment.execute_code(code_block_str)
             code_blocks.append(CodeBlock(code=code_block_str, result=code_result))
-            if code_result.stderr and code_result.stderr.lstrip().startswith("SyntaxError:"):
-                syntax_error_seen = True
+            if code_result.stderr:
+                stripped = code_result.stderr.lstrip()
+                if stripped.startswith("SyntaxError:"):
+                    skip_reason = "prior code block had a SyntaxError"
+                else:
+                    consecutive_errors += 1
+                    if consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                        skip_reason = (
+                            f"{consecutive_errors} consecutive runtime errors — "
+                            "likely cascading failure"
+                        )
+            else:
+                consecutive_errors = 0
 
         iteration_time = time.perf_counter() - iter_start
         return RLMIteration(
@@ -340,15 +353,23 @@ class RLM:
             iteration_time=iteration_time,
         )
 
-    def _default_answer(self, message_history: list[dict[str, Any]], lm_handler: LMHandler) -> str:
+    def _default_answer(
+        self,
+        message_history: list[dict[str, Any]],
+        lm_handler: LMHandler,
+        root_prompt: str | None = None,
+    ) -> str:
         """
         Default behavior if the RLM runs out of iterations and does not find a final answer.
         It will take the message history, and try to generate a final answer from it.
         """
+        nudge = "Please provide a final answer to the user's question based on the information provided."
+        if root_prompt:
+            nudge = f'Please provide a final answer to the original question: "{root_prompt}". Base your answer on the information gathered above.'
         current_prompt = message_history + [
             {
                 "role": "assistant",
-                "content": "Please provide a final answer to the user's question based on the information provided.",
+                "content": nudge,
             }
         ]
         response = lm_handler.completion(current_prompt)

@@ -45,7 +45,7 @@ _META_FIELDS = {{
 def _normalize_hit(hit: dict) -> dict:
     """Normalize a Cascade API hit into {{id, score, question, answer, metadata}}."""
     result = {{
-        "id": hit.get("id", ""),
+        "id": str(hit.get("id", "")),
         "score": hit.get("score", hit.get("relevance_score", 0.0)),
         "question": hit.get("question", ""),
         "answer": hit.get("answer", ""),
@@ -74,6 +74,10 @@ def search(query: str, filters: dict | None = None, top_k: int = 10) -> dict:
         Dict with 'results' list, each containing 'id', 'score', 'question',
         'answer', 'metadata' (parent_code, cluster_label, etc.).
     """
+    _MAX_QUERY_LEN = 500
+    if len(query) > _MAX_QUERY_LEN:
+        print(f"[search] WARNING: query too long ({{len(query)}} chars), truncating to {{_MAX_QUERY_LEN}}")
+        query = query[:_MAX_QUERY_LEN]
     payload = {{"query": query, "collection": "enriched_gemini", "top_k": top_k}}
     if filters:
         payload["filters"] = filters
@@ -303,17 +307,24 @@ def evaluate_results(question, results, top_n=5, model=None):
         question: The user's question (pass the context variable).
         results: search() return dict or list of result dicts.
         top_n: Number of top results to evaluate (default 5).
+        model: Optional model override for the sub-LLM call.
 
     Returns:
-        String with per-result relevance ratings and suggested next step.
+        Dict with:
+          "ratings": [{"id": str, "rating": "RELEVANT"|"PARTIAL"|"OFF-TOPIC"}, ...]
+          "suggestion": str (next step recommendation)
+          "raw": str (full sub-LLM response)
+        Use ratings to filter results before format_evidence().
     """
     if isinstance(results, dict):
         results = results.get("results", [])
     if not results:
-        return "No results to evaluate. Try a different query or remove filters."
+        return {"ratings": [], "suggestion": "No results to evaluate. Try a different query or remove filters.", "raw": ""}
     evidence = []
+    ids = []
     for r in results[:top_n]:
-        rid = r.get("id", "?")
+        rid = str(r.get("id", "?"))
+        ids.append(rid)
         score = r.get("score", 0)
         q = (r.get("question", "") or "")[:150]
         evidence.append(f"[{rid}] score={score:.2f} Q: {q}")
@@ -322,13 +333,43 @@ def evaluate_results(question, results, top_n=5, model=None):
         f"Evaluate these search results for the question:\\n"
         f"\\"{question}\\"\\n\\n"
         f"Results:\\n{result_block}\\n\\n"
-        f"For each result, rate: RELEVANT / PARTIAL / OFF-TOPIC.\\n"
-        f"Then state: should I refine the query, change filters, or proceed to synthesis?\\n"
-        f"Under 200 words."
+        f"For each result, output exactly one line: <id> RELEVANT|PARTIAL|OFF-TOPIC\\n"
+        f"Then a blank line, then one line starting with SUGGESTION: stating whether to refine the query, change filters, or proceed to synthesis."
     )
-    assessment = llm_query(prompt, model=model)
-    print(f"[evaluate_results] {min(top_n, len(results))} results assessed")
-    return assessment
+    raw = llm_query(prompt, model=model)
+    # Parse structured ratings from response
+    ratings = []
+    suggestion = ""
+    # Sort IDs longest-first to prevent prefix collisions (e.g. "q1" matching "q10")
+    sorted_ids = sorted(ids, key=len, reverse=True)
+    for line in raw.strip().split("\\n"):
+        line = line.strip()
+        if line.upper().startswith("SUGGESTION:"):
+            suggestion = line.split(":", 1)[1].strip()
+            continue
+        for rid in sorted_ids:
+            if rid in line:
+                upper = line.upper()
+                if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
+                    ratings.append({"id": rid, "rating": "OFF-TOPIC"})
+                elif "PARTIAL" in upper:
+                    ratings.append({"id": rid, "rating": "PARTIAL"})
+                elif "RELEVANT" in upper:
+                    ratings.append({"id": rid, "rating": "RELEVANT"})
+                else:
+                    ratings.append({"id": rid, "rating": "UNKNOWN"})
+                break
+    relevant_count = sum(1 for r in ratings if r["rating"] == "RELEVANT")
+    partial_count = sum(1 for r in ratings if r["rating"] == "PARTIAL")
+    off_topic_count = sum(1 for r in ratings if r["rating"] == "OFF-TOPIC")
+    unknown_count = sum(1 for r in ratings if r["rating"] == "UNKNOWN")
+    summary = f"{relevant_count} relevant, {partial_count} partial, {off_topic_count} off-topic"
+    if unknown_count:
+        summary += f", {unknown_count} unknown"
+    print(f"[evaluate_results] {len(ratings)} rated: {summary}")
+    if suggestion:
+        print(f"[evaluate_results] suggestion: {suggestion}")
+    return {"ratings": ratings, "suggestion": suggestion, "raw": raw}
 
 
 def reformulate(question, failed_query, top_score=0.0, model=None):
@@ -371,12 +412,13 @@ def critique_answer(question, draft, model=None):
     Returns:
         String: PASS or FAIL verdict with specific feedback.
     """
-    if len(draft) > 3000:
-        print(f"[critique_answer] WARNING: draft truncated from {len(draft)} to 3000 chars")
+    _MAX_DRAFT_LEN = 8000
+    if len(draft) > _MAX_DRAFT_LEN:
+        print(f"[critique_answer] WARNING: draft truncated from {len(draft)} to {_MAX_DRAFT_LEN} chars")
     prompt = (
         f"Review this draft answer to the question:\\n"
         f"\\"{question}\\"\\n\\n"
-        f"Draft:\\n{draft[:3000]}\\n\\n"
+        f"Draft:\\n{draft[:_MAX_DRAFT_LEN]}\\n\\n"
         f"Check:\\n"
         f"1. Does it answer the actual question asked?\\n"
         f"2. Are [Source: <id>] citations present for factual claims?\\n"

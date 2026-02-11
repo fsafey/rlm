@@ -162,7 +162,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
         model_short = model.rsplit("-", 1)[0] if len(model.split("-")) > 3 else model
         logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
 
-        result = rlm.completion(query)
+        result = rlm.completion(query, root_prompt=query)
         print(
             f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s"
         )

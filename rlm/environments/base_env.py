@@ -1,10 +1,21 @@
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 from rlm.core.types import REPLResult
 
 logger = logging.getLogger(__name__)
+
+# Patterns that indicate a real execution error in stderr, not a library warning.
+# SyntaxError comes from compile() pre-validation; others come from the except branch
+# in execute_code() which appends "\n{ExceptionType}: {message}" to stderr.
+_ERROR_PATTERN = re.compile(
+    r"(?:^|\n)\s*(?:SyntaxError|NameError|TypeError|ValueError|AttributeError"
+    r"|ImportError|ModuleNotFoundError|RuntimeError|KeyError|IndexError"
+    r"|ZeroDivisionError|FileNotFoundError|OSError|Exception"
+    r"|Traceback \(most recent call last\))"
+)
 
 
 class SetupCodeError(RuntimeError):
@@ -44,11 +55,17 @@ class BaseEnv(ABC):
 
         All environments should call this instead of bare execute_code(setup_code)
         during __init__ to ensure injection errors surface immediately.
+
+        Library warnings (e.g. DeprecationWarning) written to stderr are not
+        treated as errors. Only stderr containing known exception patterns
+        (SyntaxError, NameError, Traceback, etc.) triggers SetupCodeError.
         """
         result = self.execute_code(setup_code)
-        if result.stderr:
+        if result.stderr and _ERROR_PATTERN.search(result.stderr):
             logger.error("setup_code failed: %s", result.stderr)
             raise SetupCodeError(stderr=result.stderr, stdout=result.stdout)
+        if result.stderr:
+            logger.warning("setup_code produced warnings: %s", result.stderr)
         return result
 
 

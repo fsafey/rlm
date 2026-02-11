@@ -291,3 +291,20 @@ class TestSetupCodeErrorHandling:
         code = "def good_fn(): return 1\nraise RuntimeError('halfway')"
         with pytest.raises(SetupCodeError, match="halfway"):
             LocalREPL(setup_code=code)
+
+    def test_library_warnings_do_not_raise(self):
+        """Deprecation/library warnings on stderr should not be treated as errors."""
+        code = "import warnings\nwarnings.warn('this is deprecated', Warning)\nx = 42"
+        repl = LocalREPL(setup_code=code)
+        assert repl.locals["x"] == 42
+        repl.cleanup()
+
+    def test_stderr_warning_with_real_error_still_raises(self):
+        """If stderr has both a warning and a real error, it should raise."""
+        code = (
+            "import warnings\n"
+            "warnings.warn('deprecation note', Warning)\n"
+            "raise ValueError('actual failure')"
+        )
+        with pytest.raises(SetupCodeError, match="ValueError"):
+            LocalREPL(setup_code=code)

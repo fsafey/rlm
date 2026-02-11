@@ -465,4 +465,185 @@ def classify_question(question, model=None):
     return classification
 '''
 
+    # ── Composite tools ──────────────────────────────────────────────────
+    # These orchestrate the low-level tools so the L0 agent writes fewer
+    # code blocks.  They live at L0 (REPL) and make L2 calls internally.
+    code += '''
+
+def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None):
+    """Search, evaluate relevance, and deduplicate — all in one call.
+
+    Runs searches, evaluates the top results for relevance,
+    deduplicates by ID, and filters OFF-TOPIC hits.
+
+    Args:
+        query: Natural language string OR a list of search specs:
+               [{"query": str, "filters": dict, "top_k": int,
+                 "extra_queries": [...]}].
+               List mode merges all results for a single dedup + eval pass.
+        filters: Optional filter dict (string-query mode only).
+        top_k: Results per search call (default 10).
+        extra_queries: Optional list of {"query": str, "filters": dict, "top_k": int}
+                       (string-query mode only).
+        eval_model: Model for the relevance evaluation sub-call.
+
+    Returns:
+        Dict with:
+          "results"  — deduplicated, filtered, score-sorted list
+          "ratings"  — {id: "RELEVANT"|"PARTIAL"|"OFF-TOPIC"} for evaluated hits
+          "search_count" — how many search() calls were made
+          "eval_summary" — human-readable rating breakdown
+    """
+    all_results = []
+    search_count = 0
+    errors = []
+
+    # Normalize: list-of-specs OR single query -> unified search task list
+    if isinstance(query, list):
+        if not query:
+            print("[research] WARNING: empty query list")
+            return {
+                "results": [], "ratings": {}, "search_count": 0,
+                "eval_summary": "no queries provided",
+            }
+        specs = query
+        eval_question = " ; ".join(s["query"] for s in specs)
+    else:
+        specs = [{"query": query, "filters": filters, "top_k": top_k, "extra_queries": extra_queries}]
+        eval_question = query
+
+    for spec in specs:
+        q = spec["query"]
+        f = spec.get("filters")
+        k = spec.get("top_k", top_k)
+        try:
+            r = search(q, filters=f, top_k=k)
+            all_results.extend(r["results"])
+            search_count += 1
+        except Exception as e:
+            errors.append(str(e))
+            print(f"[research] WARNING: search failed: {e}")
+        for eq in (spec.get("extra_queries") or []):
+            try:
+                r = search(eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k))
+                all_results.extend(r["results"])
+                search_count += 1
+            except Exception as e:
+                errors.append(str(e))
+                print(f"[research] WARNING: search failed: {e}")
+
+    if not all_results:
+        print("[research] ERROR: all searches failed")
+        return {
+            "results": [], "ratings": {}, "search_count": search_count,
+            "eval_summary": "no results",
+        }
+
+    # Deduplicate by ID, keep highest score
+    seen = {}
+    for r in all_results:
+        rid = r["id"]
+        if rid not in seen or r["score"] > seen[rid]["score"]:
+            seen[rid] = r
+    deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
+
+    # Evaluate top results
+    ratings_map = {}
+    try:
+        eval_out = evaluate_results(eval_question, deduped[:10], model=eval_model)
+        for rt in eval_out["ratings"]:
+            ratings_map[rt["id"]] = rt["rating"]
+    except Exception as e:
+        print(f"[research] WARNING: evaluation failed, returning unrated: {e}")
+
+    # Filter OFF-TOPIC
+    filtered = [r for r in deduped if ratings_map.get(r["id"], "UNRATED") != "OFF-TOPIC"]
+
+    relevant = sum(1 for v in ratings_map.values() if v == "RELEVANT")
+    partial = sum(1 for v in ratings_map.values() if v == "PARTIAL")
+    off_topic = sum(1 for v in ratings_map.values() if v == "OFF-TOPIC")
+    summary = f"{relevant} relevant, {partial} partial, {off_topic} off-topic"
+
+    print(f"[research] {search_count} searches | {len(all_results)} raw > {len(deduped)} unique > {len(filtered)} filtered")
+    print(f"[research] {summary}")
+    for r in filtered[:5]:
+        tag = ratings_map.get(r["id"], "-")
+        print(f"  [{r['id']}] {r['score']:.2f} {tag:10s} Q: {r['question'][:100]}")
+    if len(filtered) > 5:
+        print(f"  ... and {len(filtered) - 5} more")
+
+    result = {
+        "results": filtered, "ratings": ratings_map,
+        "search_count": search_count, "eval_summary": summary,
+    }
+    if errors:
+        result["errors"] = errors
+    return result
+
+
+def draft_answer(question, results, instructions=None, model=None):
+    """Synthesize an answer from results, critique it, and revise if needed.
+
+    Handles: format_evidence -> llm_query synthesis -> critique ->
+    conditional revision (one retry on FAIL).
+
+    Args:
+        question: The user's question (pass ``context``).
+        results: List of result dicts (use ``research()["results"]``).
+        instructions: Optional guidance for the synthesis LLM call
+                      (e.g. "address each of the 4 scenarios separately").
+        model: Optional model override for synthesis / revision.
+
+    Returns:
+        Dict with:
+          "answer"   — final answer text
+          "critique" — critique feedback string
+          "passed"   — True if critique gave PASS verdict
+          "revised"  — True if the answer was revised after initial FAIL
+    """
+    evidence = format_evidence(results[:20])
+    if not evidence:
+        print("[draft_answer] ERROR: no evidence to synthesize from")
+        return {"answer": "", "critique": "", "passed": False, "revised": False}
+
+    prompt_parts = [
+        "You are an Islamic Q&A scholar synthesizing from verified sources.\\n\\n",
+        f"QUESTION:\\n{question}\\n\\n",
+        "EVIDENCE:\\n" + "\\n".join(evidence) + "\\n\\n",
+    ]
+    if instructions:
+        prompt_parts.append(f"INSTRUCTIONS:\\n{instructions}\\n\\n")
+    prompt_parts.append(
+        "FORMAT: ## Answer (with [Source: <id>] citations), "
+        "## Evidence (source summaries), ## Confidence (High/Medium/Low).\\n"
+        "Only cite IDs from the evidence. Flag gaps explicitly.\\n"
+    )
+
+    answer = llm_query("".join(prompt_parts), model=model)
+
+    critique_text = critique_answer(question, answer)
+    passed = critique_text.strip().strip("*").upper().startswith("PASS")
+    revised = False
+
+    if not passed:
+        rev_parts = [
+            "Revise this answer based on the critique.\\n\\n",
+            f"CRITIQUE:\\n{critique_text}\\n\\n",
+            f"ORIGINAL:\\n{answer}\\n\\n",
+            "EVIDENCE:\\n" + "\\n".join(evidence) + "\\n\\n",
+            "Fix flagged issues. Keep valid citations. Same format.\\n",
+        ]
+        answer = llm_query("".join(rev_parts), model=model)
+        critique_text = critique_answer(question, answer)
+        passed = critique_text.strip().strip("*").upper().startswith("PASS")
+        revised = True
+
+    print(
+        f"[draft_answer] {'PASS' if passed else 'FAIL'}"
+        f"{' (revised)' if revised else ''}"
+        f" | {len(answer)} chars | {len(evidence)} evidence entries"
+    )
+    return {"answer": answer, "critique": critique_text, "passed": passed, "revised": revised}
+'''
+
     return code

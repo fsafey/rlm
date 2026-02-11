@@ -193,13 +193,9 @@ class TestCompletionTurnCascadeSkip:
         mock_env.execute_code.side_effect = results
 
         iteration = rlm._completion_turn("test", mock_handler, mock_env)
-        # All 4 blocks should execute (success resets counter, then 2 errors triggers skip
-        # only at block 4... but we only have 4 blocks, so block 3 is the 2nd error → skip block 4)
+        # All 4 execute: block 1 success resets counter, blocks 2-3 are 2 consecutive
+        # errors which sets skip for block 4+, but no block 4 exists.
         assert len(iteration.code_blocks) == 4
-        # Blocks 0-3 executed: err, ok, err, err (3 is 2nd consecutive → triggers skip)
-        # But since block 3 is the last... it still executes.
-        # Actually: block 2 = 1st error after reset, block 3 = 2nd → triggers skip for block 4+
-        # But there's no block 4, so all 4 execute.
         assert mock_env.execute_code.call_count == 4
         assert iteration.code_blocks[0].result.stderr == "NameError: bad1"
         assert iteration.code_blocks[1].result.stdout == "ok"

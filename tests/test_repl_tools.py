@@ -603,6 +603,10 @@ class TestSetupCodeInLocalREPL:
             ]:
                 assert name in repl.locals, f"Missing sub-agent tool: {name}"
                 assert callable(repl.locals[name])
+            # Composite tools
+            for name in ["research", "draft_answer"]:
+                assert name in repl.locals, f"Missing composite tool: {name}"
+                assert callable(repl.locals[name])
         finally:
             repl.cleanup()
 
@@ -833,3 +837,355 @@ class TestClassifyQuestion:
         # Should not crash — just sends empty category info
         result = ns["classify_question"]("question")
         assert "PT" in result
+
+
+def _make_search_mock(hits=None):
+    """Helper: create a mock requests.post that returns given hits."""
+    if hits is None:
+        hits = [
+            {"id": 1, "score": 0.9, "question": "Q1", "answer": "A1"},
+            {"id": 2, "score": 0.7, "question": "Q2", "answer": "A2"},
+            {"id": 3, "score": 0.5, "question": "Q3", "answer": "A3"},
+        ]
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {"hits": hits, "total": len(hits)}
+    mock_resp.raise_for_status = MagicMock()
+    return mock_resp
+
+
+class TestResearch:
+    """Tests for the research() composite tool."""
+
+    def test_basic_research(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n2 PARTIAL\n\nSUGGESTION: proceed"
+        mock_resp = _make_search_mock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            result = ns["research"]("test question")
+
+        assert "results" in result
+        assert "ratings" in result
+        assert result["search_count"] == 1
+        assert len(result["results"]) >= 1
+        captured = capsys.readouterr()
+        assert "[research]" in captured.out
+
+    def test_extra_queries(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        mock_resp = _make_search_mock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            result = ns["research"](
+                "main query",
+                extra_queries=[
+                    {"query": "angle one"},
+                    {"query": "angle two", "filters": {"parent_code": "FN"}},
+                ],
+            )
+
+        assert result["search_count"] == 3  # primary + 2 extra
+
+    def test_deduplicates_by_id(self):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        # Two searches return overlapping results
+        hits_a = [{"id": 1, "score": 0.9, "question": "Q1", "answer": "A1"}]
+        hits_b = [{"id": 1, "score": 0.5, "question": "Q1", "answer": "A1"}]
+        call_count = {"n": 0}
+
+        def mock_post(*args, **kwargs):
+            call_count["n"] += 1
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "hits": hits_a if call_count["n"] == 1 else hits_b,
+                "total": 1,
+            }
+            return resp
+
+        with patch.object(ns["_requests"], "post", side_effect=mock_post):
+            result = ns["research"]("query", extra_queries=[{"query": "other"}])
+
+        # Should deduplicate: one result, keeping highest score
+        ids = [r["id"] for r in result["results"]]
+        assert ids.count("1") == 1
+        assert result["results"][0]["score"] == 0.9
+
+    def test_filters_off_topic(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n2 OFF-TOPIC\n3 PARTIAL"
+        mock_resp = _make_search_mock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            result = ns["research"]("question")
+
+        result_ids = {r["id"] for r in result["results"]}
+        assert "2" not in result_ids  # OFF-TOPIC filtered out
+        assert "1" in result_ids
+        assert "3" in result_ids
+
+    def test_handles_search_error(self, capsys):
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT"
+
+        def failing_post(*args, **kwargs):
+            raise Exception("Connection refused")
+
+        with patch.object(ns["_requests"], "post", side_effect=failing_post):
+            result = ns["research"]("query")
+
+        assert result["results"] == []
+        assert result["eval_summary"] == "no results"
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "ERROR" in captured.out
+
+    def test_handles_partial_search_failure(self, capsys):
+        """One extra_query fails but primary succeeds."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        call_count = {"n": 0}
+
+        def mixed_post(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise Exception("timeout")
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "hits": [{"id": 1, "score": 0.8, "question": "Q", "answer": "A"}],
+                "total": 1,
+            }
+            return resp
+
+        with patch.object(ns["_requests"], "post", side_effect=mixed_post):
+            result = ns["research"]("query", extra_queries=[{"query": "fail"}])
+
+        assert len(result["results"]) >= 1  # primary results survived
+        assert result["search_count"] == 1  # only primary counted
+
+
+class TestResearchListQuery:
+    """Tests for research() list-of-specs (multi-topic) mode."""
+
+    def test_list_query_basic(self, capsys):
+        """List of specs runs all queries and merges results."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n2 RELEVANT\n\nSUGGESTION: ok"
+        call_count = {"n": 0}
+
+        def mock_post(*args, **kwargs):
+            call_count["n"] += 1
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "hits": [{"id": call_count["n"], "score": 0.8, "question": f"Q{call_count['n']}", "answer": "A"}],
+                "total": 1,
+            }
+            return resp
+
+        with patch.object(ns["_requests"], "post", side_effect=mock_post):
+            result = ns["research"]([
+                {"query": "topic one", "filters": {"parent_code": "FN"}},
+                {"query": "topic two", "filters": {"parent_code": "MF"}},
+            ])
+
+        assert result["search_count"] == 2
+        assert len(result["results"]) == 2
+        captured = capsys.readouterr()
+        assert "[research]" in captured.out
+
+    def test_list_query_with_per_spec_extra_queries(self, capsys):
+        """Each spec can carry its own extra_queries."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        mock_resp = _make_search_mock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            result = ns["research"]([
+                {
+                    "query": "topic one",
+                    "extra_queries": [{"query": "angle 1a"}, {"query": "angle 1b"}],
+                },
+                {"query": "topic two"},
+            ])
+
+        # spec 1: primary + 2 extra = 3; spec 2: primary = 1; total = 4
+        assert result["search_count"] == 4
+
+    def test_list_query_deduplicates_across_specs(self):
+        """Results from different specs are deduped by ID."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        # Both specs return the same ID
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [{"id": 1, "score": 0.9, "question": "Q1", "answer": "A1"}],
+            "total": 1,
+        }
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            result = ns["research"]([
+                {"query": "topic one"},
+                {"query": "topic two"},
+            ])
+
+        ids = [r["id"] for r in result["results"]]
+        assert ids.count("1") == 1
+
+    def test_list_query_partial_spec_failure(self, capsys):
+        """One spec fails, others succeed — partial results returned."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        call_count = {"n": 0}
+
+        def mixed_post(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise Exception("timeout")
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {
+                "hits": [{"id": 1, "score": 0.8, "question": "Q", "answer": "A"}],
+                "total": 1,
+            }
+            return resp
+
+        with patch.object(ns["_requests"], "post", side_effect=mixed_post):
+            result = ns["research"]([
+                {"query": "failing topic"},
+                {"query": "working topic"},
+            ])
+
+        assert len(result["results"]) >= 1
+        assert result["search_count"] == 1  # only second spec counted
+        assert "errors" in result
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+
+    def test_list_query_empty_list(self, capsys):
+        """Empty list returns immediately with no-results dict."""
+        ns = _make_sub_agent_ns()
+        result = ns["research"]([])
+
+        assert result["results"] == []
+        assert result["search_count"] == 0
+        assert result["eval_summary"] == "no queries provided"
+        captured = capsys.readouterr()
+        assert "empty query list" in captured.out
+
+    def test_list_query_single_spec(self, capsys):
+        """Single-element list works identically to string query."""
+        ns = _make_sub_agent_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        mock_resp = _make_search_mock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            result = ns["research"]([{"query": "single topic"}])
+
+        assert result["search_count"] == 1
+        assert len(result["results"]) >= 1
+
+    def test_list_query_eval_question_joins_queries(self):
+        """List mode passes joined query strings to evaluate_results."""
+        ns = _make_sub_agent_ns()
+        captured_eval_question = []
+
+        def tracking_llm(prompt, model=None):
+            if "Evaluate these search results" in prompt:
+                captured_eval_question.append(prompt)
+            return "1 RELEVANT\n\nSUGGESTION: ok"
+
+        ns["llm_query"] = tracking_llm
+        mock_resp = _make_search_mock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["research"]([
+                {"query": "salary from fraud"},
+                {"query": "selling clothing"},
+            ])
+
+        assert len(captured_eval_question) == 1
+        assert "salary from fraud" in captured_eval_question[0]
+        assert "selling clothing" in captured_eval_question[0]
+
+
+class TestDraftAnswer:
+    """Tests for the draft_answer() composite tool."""
+
+    def test_pass_on_first_try(self, capsys):
+        ns = _make_sub_agent_ns()
+        calls = []
+        ns["llm_query"] = lambda prompt, model=None: (
+            calls.append(prompt),
+            "## Answer\nTest answer [Source: 1]\n## Evidence\n- [Source: 1]\n## Confidence\nHigh",
+        )[1]
+        # critique returns PASS
+        ns["critique_answer"] = lambda q, d, model=None: "PASS — looks good"
+
+        results = [
+            {"id": "1", "score": 0.9, "question": "Q", "answer": "A"},
+        ]
+        out = ns["draft_answer"]("question", results)
+
+        assert out["passed"] is True
+        assert out["revised"] is False
+        assert "## Answer" in out["answer"]
+        captured = capsys.readouterr()
+        assert "[draft_answer] PASS" in captured.out
+
+    def test_revises_on_fail(self, capsys):
+        ns = _make_sub_agent_ns()
+        call_count = {"n": 0}
+
+        def mock_llm(prompt, model=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return "Bad draft"
+            return "## Answer\nRevised [Source: 1]\n## Evidence\n## Confidence\nHigh"
+
+        ns["llm_query"] = mock_llm
+        critique_count = {"n": 0}
+
+        def mock_critique(q, d, model=None):
+            critique_count["n"] += 1
+            if critique_count["n"] == 1:
+                return "FAIL — missing citations"
+            return "PASS — fixed"
+
+        ns["critique_answer"] = mock_critique
+
+        results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
+        out = ns["draft_answer"]("question", results)
+
+        assert out["revised"] is True
+        assert out["passed"] is True
+        assert call_count["n"] == 2  # synthesis + revision
+        captured = capsys.readouterr()
+        assert "(revised)" in captured.out
+
+    def test_empty_results(self, capsys):
+        ns = _make_sub_agent_ns()
+        out = ns["draft_answer"]("question", [])
+
+        assert out["answer"] == ""
+        assert out["passed"] is False
+        captured = capsys.readouterr()
+        assert "ERROR" in captured.out
+
+    def test_instructions_included_in_prompt(self):
+        ns = _make_sub_agent_ns()
+        captured_prompt = []
+        ns["llm_query"] = lambda prompt, model=None: (
+            captured_prompt.append(prompt),
+            "## Answer\nTest [Source: 1]",
+        )[1]
+        ns["critique_answer"] = lambda q, d, model=None: "PASS"
+
+        results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
+        ns["draft_answer"]("question", results, instructions="address all 4 scenarios")
+
+        assert "address all 4 scenarios" in captured_prompt[0]

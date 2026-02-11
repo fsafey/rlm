@@ -9,7 +9,9 @@ import {
   FileText,
   MessageSquare,
   Sparkles,
-  Wrench,
+  RefreshCw,
+  ShieldCheck,
+  Tag,
 } from "lucide-react";
 import type { Iteration, MetadataEvent, ProgressEvent } from "@/lib/types";
 
@@ -24,7 +26,6 @@ interface SearchProgressProps {
 
 const PHASE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   reasoning: Brain,
-  tools: Wrench,
 };
 
 // --- Iteration activity detection ---
@@ -40,51 +41,114 @@ function extractMetric(stdout: string, pattern: RegExp): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * Detect iteration activity from stdout tags emitted by REPL tools.
+ *
+ * Each tool in repl_tools.py prints a structured `[tag] ...` line. We match
+ * these tags (most-specific first) to classify what the iteration did. This
+ * is more reliable than matching code strings because the stdout patterns are
+ * hardcoded in the tool implementations and cover composite tools that wrap
+ * multiple lower-level calls.
+ */
 function detectActivity(iteration: Iteration): IterationActivity {
-  const code = iteration.code_blocks.map((b) => b.code).join("\n");
   const stdout = iteration.code_blocks.map((b) => b.result.stdout).join("\n");
 
-  if (code.includes("search(")) {
-    const resultCount = extractMetric(stdout, /results=(\d+)/);
-    const queryText = extractMetric(stdout, /query='([^']*?)'/);
-    const truncated =
-      queryText && queryText.length > 35
-        ? `${queryText.slice(0, 35)}...`
-        : queryText;
-    const metric = resultCount
-      ? `${resultCount} results${truncated ? ` for "${truncated}"` : ""}`
-      : "Queried collections";
-    return { label: "Search", metric, icon: Search };
+  // --- Final answer (check first — takes priority) ---
+  if (iteration.final_answer) {
+    return { label: "Answer", metric: "Synthesized final answer", icon: MessageSquare };
   }
 
-  if (code.includes("fiqh_lookup(")) {
-    const bridgeCount = extractMetric(stdout, /bridges=(\d+)/);
-    const queryText = extractMetric(stdout, /query='([^']*?)'/);
+  // --- Composite tools (check before their sub-tools) ---
+
+  // draft_answer wraps format_evidence + synthesis + critique + optional revision
+  if (stdout.includes("[draft_answer]")) {
+    const passed = stdout.includes("PASS");
+    const revised = stdout.includes("(revised)");
+    let metric = passed ? "Drafted and verified" : "Drafted, needs revision";
+    if (revised) metric = "Drafted, revised, and verified";
+    return { label: "Drafting", metric, icon: MessageSquare };
+  }
+
+  // research wraps search + evaluate + dedup
+  if (stdout.includes("[research]")) {
+    const searchCount = extractMetric(stdout, /\[research\] (\d+) searches/);
+    const summary = extractMetric(stdout, /\[research\] (.+? off-topic)/);
+    const metric = summary
+      ? `${searchCount ?? "?"} searches — ${summary}`
+      : `${searchCount ?? "Multiple"} searches run`;
+    return { label: "Researching", metric, icon: Search };
+  }
+
+  // --- Sub-agent tools ---
+
+  if (stdout.includes("[evaluate_results]")) {
+    const summary = extractMetric(stdout, /\[evaluate_results\] \d+ rated: (.+)/);
+    return {
+      label: "Evaluating",
+      metric: summary ?? "Rated search results",
+      icon: ShieldCheck,
+    };
+  }
+
+  if (stdout.includes("[critique_answer]")) {
+    const verdict = extractMetric(stdout, /\[critique_answer\] verdict=(\w+)/);
+    return {
+      label: "Critiquing",
+      metric: verdict ? `Verdict: ${verdict}` : "Reviewed draft",
+      icon: ShieldCheck,
+    };
+  }
+
+  if (stdout.includes("[reformulate]")) {
+    const count = extractMetric(stdout, /\[reformulate\] generated (\d+) queries/);
+    return {
+      label: "Reformulating",
+      metric: count ? `${count} alternative queries` : "Generated alternatives",
+      icon: RefreshCw,
+    };
+  }
+
+  if (stdout.includes("[classify_question]")) {
+    return { label: "Classifying", metric: "Identified category and strategy", icon: Tag };
+  }
+
+  // --- Primary tools ---
+
+  if (stdout.includes("[search]")) {
+    const resultCount = extractMetric(stdout, /\[search\] query=.+? results=(\d+)/);
+    const queryText = extractMetric(stdout, /\[search\] query='([^']*?)'/);
+    const truncated =
+      queryText && queryText.length > 35 ? `${queryText.slice(0, 35)}...` : queryText;
+    const metric = resultCount
+      ? `${resultCount} results${truncated ? ` for "${truncated}"` : ""}`
+      : "Queried knowledge base";
+    return { label: "Searching", metric, icon: Search };
+  }
+
+  if (stdout.includes("[browse]")) {
+    const total = extractMetric(stdout, /\[browse\] .+? total=(\d+)/);
+    const metric = total ? `${total} documents browsed` : "Browsed knowledge base";
+    return { label: "Browsing", metric, icon: Search };
+  }
+
+  if (stdout.includes("[fiqh_lookup]")) {
+    const bridgeCount = extractMetric(stdout, /\[fiqh_lookup\] .+? bridges=(\d+)/);
+    const queryText = extractMetric(stdout, /\[fiqh_lookup\] query='([^']*?)'/);
     const metric = bridgeCount
       ? `${bridgeCount} term bridges${queryText ? ` for "${queryText.slice(0, 30)}"` : ""}`
       : "Looked up terminology";
     return { label: "Terminology", metric, icon: BookOpen };
   }
 
-  if (code.includes("format_evidence(")) {
-    return {
-      label: "Citations",
-      metric: "Built source citations",
-      icon: FileText,
-    };
+  // --- KB overview (orientation step) ---
+  if (stdout.includes("=== Knowledge Base:")) {
+    return { label: "Exploring KB", metric: "Reviewing taxonomy and categories", icon: BookOpen };
   }
 
-  if (code.includes("FINAL_VAR(") || iteration.final_answer) {
-    return {
-      label: "Answer",
-      metric: "Synthesized final answer",
-      icon: MessageSquare,
-    };
-  }
-
+  // --- Fallback ---
   const blockCount = iteration.code_blocks.length;
   return {
-    label: "Analyze",
+    label: "Processing",
     metric: `${blockCount} code block${blockCount !== 1 ? "s" : ""} executed`,
     icon: Sparkles,
   };
@@ -94,29 +158,37 @@ function detectActivity(iteration: Iteration): IterationActivity {
 
 function getActiveText(
   activities: IterationActivity[],
-  iterCount: number,
-  maxIterations: number,
+  _iterCount: number,
+  _maxIterations: number,
 ): { label: string; detail: string } {
-  if (iterCount === 0) {
+  if (activities.length === 0) {
     return { label: "Connecting", detail: "Setting up search agent..." };
   }
 
   const last = activities[activities.length - 1];
 
-  // Late stage — converging on an answer
-  if (iterCount / maxIterations > 0.6) {
-    return { label: "Converging", detail: "Refining final answer..." };
-  }
-
+  // Predict the likely next step based on what just completed.
+  // Matches the real tool pipeline in repl_tools.py.
   switch (last.label) {
-    case "Search":
-      return { label: "Reviewing", detail: "Analyzing search results..." };
+    case "Exploring KB":
+      return { label: "Planning", detail: "Choosing search strategy..." };
+    case "Classifying":
+      return { label: "Searching", detail: "Querying knowledge base..." };
+    case "Searching":
+    case "Browsing":
+      return { label: "Evaluating", detail: "Assessing result relevance..." };
+    case "Researching":
+      return { label: "Analyzing", detail: "Reviewing rated results..." };
+    case "Evaluating":
+      return { label: "Analyzing", detail: "Deciding next step..." };
+    case "Reformulating":
+      return { label: "Searching", detail: "Retrying with new queries..." };
     case "Terminology":
       return { label: "Applying", detail: "Incorporating terminology..." };
-    case "Citations":
-      return { label: "Composing", detail: "Preparing final response..." };
-    case "Analyze":
-      return { label: "Reasoning", detail: "Deepening analysis..." };
+    case "Drafting":
+      return { label: "Finalizing", detail: "Preparing final answer..." };
+    case "Critiquing":
+      return { label: "Revising", detail: "Addressing critique feedback..." };
     default:
       return { label: "Thinking", detail: "Processing..." };
   }

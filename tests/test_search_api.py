@@ -9,6 +9,7 @@ import httpx
 import pytest
 from starlette.testclient import TestClient
 
+from rlm.core.types import CodeBlock, REPLResult, RLMIteration
 from rlm_search.api import _extract_sources, _searches, app
 from rlm_search.streaming_logger import StreamingLogger
 
@@ -179,6 +180,49 @@ class TestStreamEndpoint:
 
         client.get(f"/api/search/{search_id}/stream")
         assert search_id not in _searches
+
+    def test_stream_iteration_includes_tool_calls(self, client: TestClient):
+        """Iteration events include tool_calls from locals."""
+        search_id = "test-stream-tc"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test_logs", file_name=f"test_{search_id}")
+
+        # Create an iteration with tool_calls in locals
+        repl_result = REPLResult(
+            stdout="[search] query='test' results=3",
+            stderr="",
+            locals={
+                "tool_calls": [
+                    {
+                        "tool": "search",
+                        "args": {"query": "test"},
+                        "result_summary": {"num_results": 3},
+                        "duration_ms": 150,
+                        "children": [],
+                        "error": None,
+                    },
+                ]
+            },
+            execution_time=0.2,
+        )
+        code_block = CodeBlock(code="search('test')", result=repl_result)
+        iteration = RLMIteration(
+            prompt="Search for test",
+            response="Let me search for that.",
+            code_blocks=[code_block],
+            final_answer=None,
+            iteration_time=1.0,
+        )
+        logger.log(iteration)
+        logger.mark_done(answer="Found it.", sources=[], execution_time=2.0, usage={})
+        _searches[search_id] = logger
+
+        resp = client.get(f"/api/search/{search_id}/stream")
+        events = _parse_sse_events(resp.text)
+        iter_events = [e for e in events if e.get("type") == "iteration"]
+        assert len(iter_events) == 1
+        assert "tool_calls" in iter_events[0]
+        assert len(iter_events[0]["tool_calls"]) == 1
+        assert iter_events[0]["tool_calls"][0]["tool"] == "search"
 
 
 class TestExtractSources:

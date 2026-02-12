@@ -37,6 +37,15 @@ export interface CodeBlock {
   result: CodeBlockResult;
 }
 
+export interface ToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+  result_summary: Record<string, unknown>;
+  duration_ms: number;
+  children: number[];
+  error: string | null;
+}
+
 export interface Iteration {
   type: "iteration";
   iteration: number;
@@ -45,6 +54,7 @@ export interface Iteration {
   code_blocks: CodeBlock[];
   final_answer: string | null;
   iteration_time: number | null;
+  tool_calls?: ToolCall[];
 }
 
 export interface MetadataEvent {

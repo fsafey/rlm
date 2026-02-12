@@ -4,6 +4,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { CodeBlock } from './CodeBlock';
+import { Clock, AlertCircle, ArrowRight } from 'lucide-react';
 import { extractTokens } from '@/lib/types';
 import type { Iteration } from '@/lib/types';
 
@@ -31,6 +32,9 @@ export function ExecutionPanel({ iteration }: ExecutionPanelProps) {
     (acc, block) => acc + (block.result?.rlm_calls?.length || 0),
     0
   );
+
+  const toolCalls = iteration.tool_calls ?? [];
+  const childIndices = new Set(toolCalls.flatMap((c) => c.children));
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
@@ -60,6 +64,11 @@ export function ExecutionPanel({ iteration }: ExecutionPanelProps) {
               {totalSubCalls} sub-LM call{totalSubCalls !== 1 ? 's' : ''}
             </Badge>
           )}
+          {toolCalls.length > 0 && (
+            <Badge className="bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border-cyan-500/30 text-xs">
+              {toolCalls.length} tool call{toolCalls.length !== 1 ? 's' : ''}
+            </Badge>
+          )}
           {iteration.final_answer && (
             <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 text-xs">
               Has Final Answer
@@ -71,12 +80,15 @@ export function ExecutionPanel({ iteration }: ExecutionPanelProps) {
       {/* Tabs - Code Execution and Sub-LM Calls only */}
       <Tabs defaultValue="code" className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-shrink-0 px-4 pt-3">
-          <TabsList className="w-full grid grid-cols-2">
+          <TabsList className="w-full grid grid-cols-3">
             <TabsTrigger value="code" className="text-xs">
               Code Execution
             </TabsTrigger>
             <TabsTrigger value="sublm" className="text-xs">
               Sub-LM Calls ({totalSubCalls})
+            </TabsTrigger>
+            <TabsTrigger value="tools" className="text-xs">
+              Tool Calls ({toolCalls.length})
             </TabsTrigger>
           </TabsList>
         </div>
@@ -193,6 +205,106 @@ export function ExecutionPanel({ iteration }: ExecutionPanelProps) {
                       </p>
                       <p className="text-muted-foreground text-xs mt-1">
                         Sub-LM calls appear when using llm_query() in the REPL
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="tools" className="h-full m-0 data-[state=active]:flex data-[state=active]:flex-col">
+            <ScrollArea className="flex-1 h-full">
+              <div className="p-4 space-y-3">
+                {toolCalls.length > 0 ? (
+                  toolCalls.map((tc, idx) => {
+                    const isChild = childIndices.has(idx);
+                    return (
+                      <Card
+                        key={idx}
+                        className={`${
+                          isChild
+                            ? 'ml-6 border-cyan-500/20 bg-cyan-500/5 dark:border-cyan-400/20'
+                            : 'border-cyan-500/30 bg-cyan-500/5 dark:border-cyan-400/30'
+                        }`}
+                      >
+                        <CardContent className="p-3 space-y-2">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              {isChild && (
+                                <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                              )}
+                              <Badge
+                                variant="outline"
+                                className="text-xs font-mono bg-cyan-500/10 border-cyan-500/30"
+                              >
+                                {tc.tool}
+                              </Badge>
+                              {tc.error && (
+                                <Badge className="bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30 text-xs">
+                                  <AlertCircle className="w-3 h-3 mr-1" />
+                                  Error
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="w-3 h-3" />
+                              {tc.duration_ms}ms
+                            </div>
+                          </div>
+
+                          {/* Args */}
+                          {Object.keys(tc.args).length > 0 && (
+                            <div className="text-xs">
+                              <span className="text-muted-foreground font-medium">Args: </span>
+                              <span className="font-mono text-foreground/80">
+                                {Object.entries(tc.args)
+                                  .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                                  .join(', ')}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Result summary */}
+                          {Object.keys(tc.result_summary).length > 0 && (
+                            <div className="text-xs">
+                              <span className="text-muted-foreground font-medium">Result: </span>
+                              <span className="font-mono text-foreground/80">
+                                {Object.entries(tc.result_summary)
+                                  .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                                  .join(', ')}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* Children refs */}
+                          {tc.children.length > 0 && (
+                            <div className="text-xs text-muted-foreground">
+                              Children: {tc.children.map((i) => toolCalls[i]?.tool ?? `#${i}`).join(', ')}
+                            </div>
+                          )}
+
+                          {/* Error message */}
+                          {tc.error && (
+                            <div className="text-xs text-red-600 dark:text-red-400 bg-red-500/10 rounded p-2 font-mono">
+                              {tc.error}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })
+                ) : (
+                  <Card className="border-dashed">
+                    <CardContent className="p-8 text-center">
+                      <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-muted/30 border border-border flex items-center justify-center">
+                        <span className="text-xl opacity-50">&#9670;</span>
+                      </div>
+                      <p className="text-muted-foreground text-sm">
+                        No tool calls were tracked in this iteration
+                      </p>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        Tool calls appear when using search(), browse(), research(), etc.
                       </p>
                     </CardContent>
                   </Card>

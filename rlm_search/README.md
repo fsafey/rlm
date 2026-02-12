@@ -177,6 +177,40 @@ data: {"type": "error", "message": "..."}
 
 Stream terminates after `done` or `error`. 10-minute timeout.
 
+#### Structured Tool Calls
+
+Each `iteration` event includes a `tool_calls` array — structured records of every REPL tool invoked during that iteration, extracted from `REPLResult.locals`:
+
+```json
+{
+  "tool": "search",
+  "args": {"query": "prayer rules", "top_k": 10},
+  "result_summary": {"num_results": 5, "total": 42, "query": "prayer rules"},
+  "duration_ms": 150,
+  "children": [],
+  "error": null
+}
+```
+
+Composite tools (`research`, `draft_answer`) record parent-child relationships via `children` indices — e.g. a `research` call's children include its `search` and `evaluate_results` calls.
+
+`result_summary` fields per tool:
+
+| Tool | Fields |
+|---|---|
+| `search` | `num_results`, `total`, `query` |
+| `browse` | `num_results`, `total` |
+| `fiqh_lookup` | `num_bridges`, `num_related` |
+| `kb_overview` | `num_categories`, `total_documents` |
+| `evaluate_results` | `num_rated`, `relevant`, `partial`, `off_topic` |
+| `reformulate` | `num_queries` |
+| `critique_answer` | `verdict` |
+| `classify_question` | `raw_length` |
+| `research` | `search_count`, `raw`, `unique`, `filtered`, `eval_summary` |
+| `draft_answer` | `passed`, `revised`, `answer_length` |
+
+The frontend's `SearchProgress.tsx` prefers structured `tool_calls` when present, falling back to stdout `[tag]` regex parsing for backward compatibility.
+
 ### `GET /api/health`
 
 ```json
@@ -276,7 +310,8 @@ search-app/
     App.tsx              # Main layout
     components/
       SearchInput.tsx    # Query box + settings panel
-      SearchProgress.tsx # Phase-aware loading indicator
+      SearchProgress.tsx # Phase-aware loading (structured tool_calls + stdout fallback)
+      ExecutionPanel.tsx # Iteration detail: Code / Sub-LM Calls / Tool Calls tabs
       AnswerPanel.tsx    # Markdown-rendered answer with citations
       SourceCards.tsx    # Grid of cited source documents
       TracePanel.tsx     # Collapsible iteration trace
@@ -286,17 +321,17 @@ search-app/
       types.ts           # TypeScript interfaces for SSE events
 
 tests/
-  test_repl_tools.py     # 38 tests — setup code, tool signatures, sub-agents, mocked API
-  test_search_api.py     # 10 tests — endpoints, SSE streaming, cleanup
+  test_repl_tools.py     # 46 tests — setup code, tool signatures, sub-agents, tool call tracking
+  test_search_api.py     # 11 tests — endpoints, SSE streaming, tool_calls enrichment
 ```
 
 ## Testing
 
 ```bash
-# Search-specific tests (48 tests, <1s)
+# Search-specific tests (57 tests, <1s)
 uv run pytest tests/test_repl_tools.py tests/test_search_api.py -v
 
-# Full RLM suite (181+ tests, ~14s)
+# Full RLM suite (289 tests, ~14s)
 uv run pytest
 ```
 

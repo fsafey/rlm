@@ -6,7 +6,6 @@ import {
   BookOpen,
   Brain,
   ChevronDown,
-  FileText,
   MessageSquare,
   Sparkles,
   RefreshCw,
@@ -50,7 +49,7 @@ function extractMetric(stdout: string, pattern: RegExp): string | null {
  * hardcoded in the tool implementations and cover composite tools that wrap
  * multiple lower-level calls.
  */
-function detectActivity(iteration: Iteration): IterationActivity {
+function detectActivityFromStdout(iteration: Iteration): IterationActivity {
   const stdout = iteration.code_blocks.map((b) => b.result.stdout).join("\n");
 
   // --- Final answer (check first — takes priority) ---
@@ -152,6 +151,115 @@ function detectActivity(iteration: Iteration): IterationActivity {
     metric: `${blockCount} code block${blockCount !== 1 ? "s" : ""} executed`,
     icon: Sparkles,
   };
+}
+
+/**
+ * Detect iteration activity from structured tool_calls data.
+ * Maps tool names to the same IterationActivity labels as the stdout-based detection.
+ */
+function detectActivityFromToolCalls(iteration: Iteration): IterationActivity {
+  const calls = iteration.tool_calls ?? [];
+  if (calls.length === 0) {
+    return detectActivityFromStdout(iteration);
+  }
+
+  if (iteration.final_answer) {
+    return { label: "Answer", metric: "Synthesized final answer", icon: MessageSquare };
+  }
+
+  // Find the primary (top-level) tool call — one without a parent
+  const childIndices = new Set(calls.flatMap((c) => c.children));
+  const topLevel = calls.filter((_, idx) => !childIndices.has(idx));
+  const primary = topLevel[topLevel.length - 1] ?? calls[calls.length - 1];
+
+  switch (primary.tool) {
+    case "draft_answer": {
+      const s = primary.result_summary;
+      const passed = s.passed as boolean | undefined;
+      const revised = s.revised as boolean | undefined;
+      let metric = passed ? "Drafted and verified" : "Drafted, needs revision";
+      if (revised) metric = "Drafted, revised, and verified";
+      return { label: "Drafting", metric, icon: MessageSquare };
+    }
+    case "research": {
+      const s = primary.result_summary;
+      const searchCount = s.search_count as number | undefined;
+      const evalSummary = s.eval_summary as string | undefined;
+      const metric = evalSummary
+        ? `${searchCount ?? "?"} searches — ${evalSummary}`
+        : `${searchCount ?? "Multiple"} searches run`;
+      return { label: "Researching", metric, icon: Search };
+    }
+    case "evaluate_results": {
+      const s = primary.result_summary;
+      const numRated = s.num_rated as number | undefined;
+      const relevant = s.relevant as number | undefined;
+      const partial = s.partial as number | undefined;
+      const offTopic = s.off_topic as number | undefined;
+      const metric = numRated != null
+        ? `${relevant ?? 0} relevant, ${partial ?? 0} partial, ${offTopic ?? 0} off-topic`
+        : "Rated search results";
+      return { label: "Evaluating", metric, icon: ShieldCheck };
+    }
+    case "critique_answer": {
+      const verdict = primary.result_summary.verdict as string | undefined;
+      return {
+        label: "Critiquing",
+        metric: verdict ? `Verdict: ${verdict}` : "Reviewed draft",
+        icon: ShieldCheck,
+      };
+    }
+    case "reformulate": {
+      const count = primary.result_summary.num_queries as number | undefined;
+      return {
+        label: "Reformulating",
+        metric: count ? `${count} alternative queries` : "Generated alternatives",
+        icon: RefreshCw,
+      };
+    }
+    case "classify_question":
+      return { label: "Classifying", metric: "Identified category and strategy", icon: Tag };
+    case "search": {
+      const s = primary.result_summary;
+      const numResults = s.num_results as number | undefined;
+      const query = primary.args.query as string | undefined;
+      const truncated = query && query.length > 35 ? `${query.slice(0, 35)}...` : query;
+      const metric = numResults != null
+        ? `${numResults} results${truncated ? ` for "${truncated}"` : ""}`
+        : "Queried knowledge base";
+      return { label: "Searching", metric, icon: Search };
+    }
+    case "browse": {
+      const total = primary.result_summary.total as number | undefined;
+      const metric = total != null ? `${total} documents browsed` : "Browsed knowledge base";
+      return { label: "Browsing", metric, icon: Search };
+    }
+    case "fiqh_lookup": {
+      const bridges = primary.result_summary.num_bridges as number | undefined;
+      const query = primary.args.query as string | undefined;
+      const metric = bridges != null
+        ? `${bridges} term bridges${query ? ` for "${query.slice(0, 30)}"` : ""}`
+        : "Looked up terminology";
+      return { label: "Terminology", metric, icon: BookOpen };
+    }
+    case "kb_overview":
+      return { label: "Exploring KB", metric: "Reviewing taxonomy and categories", icon: BookOpen };
+    default: {
+      const blockCount = iteration.code_blocks.length;
+      return {
+        label: "Processing",
+        metric: `${blockCount} code block${blockCount !== 1 ? "s" : ""} executed`,
+        icon: Sparkles,
+      };
+    }
+  }
+}
+
+function detectActivity(iteration: Iteration): IterationActivity {
+  if (iteration.tool_calls && iteration.tool_calls.length > 0) {
+    return detectActivityFromToolCalls(iteration);
+  }
+  return detectActivityFromStdout(iteration);
 }
 
 // --- Contextual active step based on what just happened ---

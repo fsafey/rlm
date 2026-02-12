@@ -36,6 +36,48 @@ if _API_KEY:
 search_log = []
 source_registry = {{}}
 
+import time as _time
+import contextlib as _contextlib
+
+tool_calls = []
+_current_parent_idx = None
+
+def _ToolCallTracker(tool_name, args, parent_idx=None):
+    """Create a context manager that records a tool call entry in tool_calls.
+
+    Yields a namespace dict with 'entry', 'idx', and 'set_summary' callable.
+    """
+    entry = {{
+        "tool": tool_name,
+        "args": args,
+        "result_summary": {{}},
+        "duration_ms": 0,
+        "children": [],
+        "error": None,
+    }}
+    tool_calls.append(entry)
+    idx = len(tool_calls) - 1
+    if parent_idx is not None:
+        tool_calls[parent_idx]["children"].append(idx)
+
+    def set_summary(summary):
+        entry["result_summary"] = summary
+
+    # Simple namespace object using a dict with attribute access
+    tc = type("_TC", (), {{"entry": entry, "idx": idx, "set_summary": staticmethod(set_summary)}})()
+
+    start = _time.time()
+    try:
+        yield tc
+    except BaseException as exc:
+        entry["duration_ms"] = int((_time.time() - start) * 1000)
+        entry["error"] = str(exc)
+        raise
+    else:
+        entry["duration_ms"] = int((_time.time() - start) * 1000)
+
+_ToolCallTracker = _contextlib.contextmanager(_ToolCallTracker)
+
 # Metadata fields to nest under 'metadata' key for cleaner LLM consumption
 _META_FIELDS = {{
     "parent_code", "parent_category", "cluster_label", "primary_topic",
@@ -80,17 +122,19 @@ def search(query: str, filters: dict | None = None, top_k: int = 10) -> dict:
     if len(query) > _MAX_QUERY_LEN:
         print(f"[search] WARNING: query too long ({{len(query)}} chars), truncating to {{_MAX_QUERY_LEN}}")
         query = query[:_MAX_QUERY_LEN]
-    payload = {{"query": query, "collection": "enriched_gemini", "top_k": top_k}}
-    if filters:
-        payload["filters"] = filters
-    resp = _requests.post(f"{{_API_URL}}/search", json=payload, headers=_HEADERS, timeout=_TIMEOUT)
-    resp.raise_for_status()
-    data = resp.json()
-    hits = data.get("hits", [])
-    results = [_normalize_hit(h) for h in hits]
-    print(f"[search] query={{query!r}} top_k={{top_k}} results={{len(results)}}")
-    search_log.append({{"type": "search", "query": query, "filters": filters, "top_k": top_k, "num_results": len(results)}})
-    return {{"results": results, "total": data.get("total", len(results))}}
+    with _ToolCallTracker("search", {{"query": query, "top_k": top_k}}, parent_idx=_current_parent_idx) as tc:
+        payload = {{"query": query, "collection": "enriched_gemini", "top_k": top_k}}
+        if filters:
+            payload["filters"] = filters
+        resp = _requests.post(f"{{_API_URL}}/search", json=payload, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        hits = data.get("hits", [])
+        results = [_normalize_hit(h) for h in hits]
+        print(f"[search] query={{query!r}} top_k={{top_k}} results={{len(results)}}")
+        search_log.append({{"type": "search", "query": query, "filters": filters, "top_k": top_k, "num_results": len(results)}})
+        tc.set_summary({{"num_results": len(results), "total": data.get("total", len(results)), "query": query}})
+        return {{"results": results, "total": data.get("total", len(results))}}
 
 
 def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_limit=4):
@@ -109,41 +153,43 @@ def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_
     Returns:
         Dict with results, total, has_more, facets, grouped_results.
     """
-    payload = {{"collection": "enriched_gemini", "include_facets": True}}
-    if filters:
-        payload["filters"] = filters
-    payload["offset"] = offset
-    payload["limit"] = limit
-    if sort_by:
-        payload["sort_by"] = sort_by
-    if group_by:
-        payload["group_by"] = group_by
-        payload["group_limit"] = group_limit
-    resp = _requests.post(
-        f"{{_API_URL}}/browse", json=payload, headers=_HEADERS, timeout=_TIMEOUT
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    results = [_normalize_hit(h) for h in data.get("hits", [])]
-    raw_grouped = data.get("grouped_results", {{}})
-    # Cascade returns {{"clusters": [...], ...}} — normalize to list
-    group_list = (
-        raw_grouped.get("clusters", []) if isinstance(raw_grouped, dict) else raw_grouped
-    )
-    for group in group_list:
-        group["hits"] = [_normalize_hit(h) for h in group.get("hits", [])]
-    log_entry = {{"type": "browse", "filters": filters, "offset": offset, "limit": limit}}
-    if group_by:
-        log_entry["group_by"] = group_by
-    search_log.append(log_entry)
-    print(f"[browse] filters={{filters}} results={{len(results)}} total={{data.get('total', 0)}}")
-    return {{
-        "results": results,
-        "total": data.get("total", 0),
-        "has_more": data.get("has_more", False),
-        "facets": data.get("facets", {{}}),
-        "grouped_results": group_list,
-    }}
+    with _ToolCallTracker("browse", {{"filters": filters, "offset": offset, "limit": limit}}, parent_idx=_current_parent_idx) as tc:
+        payload = {{"collection": "enriched_gemini", "include_facets": True}}
+        if filters:
+            payload["filters"] = filters
+        payload["offset"] = offset
+        payload["limit"] = limit
+        if sort_by:
+            payload["sort_by"] = sort_by
+        if group_by:
+            payload["group_by"] = group_by
+            payload["group_limit"] = group_limit
+        resp = _requests.post(
+            f"{{_API_URL}}/browse", json=payload, headers=_HEADERS, timeout=_TIMEOUT
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = [_normalize_hit(h) for h in data.get("hits", [])]
+        raw_grouped = data.get("grouped_results", {{}})
+        # Cascade returns {{"clusters": [...], ...}} — normalize to list
+        group_list = (
+            raw_grouped.get("clusters", []) if isinstance(raw_grouped, dict) else raw_grouped
+        )
+        for group in group_list:
+            group["hits"] = [_normalize_hit(h) for h in group.get("hits", [])]
+        log_entry = {{"type": "browse", "filters": filters, "offset": offset, "limit": limit}}
+        if group_by:
+            log_entry["group_by"] = group_by
+        search_log.append(log_entry)
+        print(f"[browse] filters={{filters}} results={{len(results)}} total={{data.get('total', 0)}}")
+        tc.set_summary({{"num_results": len(results), "total": data.get("total", 0)}})
+        return {{
+            "results": results,
+            "total": data.get("total", 0),
+            "has_more": data.get("has_more", False),
+            "facets": data.get("facets", {{}}),
+            "grouped_results": group_list,
+        }}
 
 
 def format_evidence(results, max_per_source: int = 3) -> list[str]:
@@ -194,18 +240,20 @@ def fiqh_lookup(query: str) -> dict:
         english equivalents, expansions) and 'related' (morphologically
         related terms).
     """
-    resp = _requests.get(
-        f"{{_API_URL}}/bridge",
-        params={{"q": query}},
-        headers=_HEADERS,
-        timeout=_TIMEOUT,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    bridges = data.get("bridges", [])
-    related = data.get("related", [])
-    print(f"[fiqh_lookup] query={{query!r}} bridges={{len(bridges)}} related={{len(related)}}")
-    return {{"bridges": bridges, "related": related}}
+    with _ToolCallTracker("fiqh_lookup", {{"query": query}}, parent_idx=_current_parent_idx) as tc:
+        resp = _requests.get(
+            f"{{_API_URL}}/bridge",
+            params={{"q": query}},
+            headers=_HEADERS,
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        bridges = data.get("bridges", [])
+        related = data.get("related", [])
+        print(f"[fiqh_lookup] query={{query!r}} bridges={{len(bridges)}} related={{len(related)}}")
+        tc.set_summary({{"num_bridges": len(bridges), "num_related": len(related)}})
+        return {{"bridges": bridges, "related": related}}
 '''
 
     # Append kb_overview data and function outside the f-string to avoid
@@ -244,53 +292,55 @@ def kb_overview():
     if _KB_OVERVIEW is None:
         print("WARNING: Knowledge base overview unavailable — use search() directly.")
         return None
-    ov = _KB_OVERVIEW
-    collection = ov.get("collection", "?")
-    total = ov.get("total_documents", 0)
-    print(f"=== Knowledge Base: {collection} ({total:,} documents) ===\\n")
-    categories = []
-    for code, cat in ov.get("categories", {}).items():
-        name = cat.get("name", code)
-        count = cat.get("document_count", 0)
-        clusters = cat.get("clusters", {})
-        facets = cat.get("facets", {})
-        # Cluster doc counts from facets (capped at top 20 by API)
-        cluster_counts = {c["value"]: c["count"] for c in facets.get("clusters", [])}
-        # Subtopic tags from facets
-        subtopic_facets = facets.get("subtopics", [])
-        print(f"{code} — {name} [{count:,} docs]")
-        # Show top 8 clusters with doc counts
-        shown = 0
-        for label, sample_q in clusters.items():
-            if shown >= 8:
-                remaining = len(clusters) - shown
-                if remaining > 0:
-                    print(f"  ... and {remaining} more clusters")
-                break
-            doc_n = cluster_counts.get(label, "")
-            count_str = f" ({doc_n})" if doc_n else ""
-            if sample_q:
-                q_short = sample_q[:80] + "..." if len(sample_q) > 80 else sample_q
-                print(f"  · {label}{count_str} — \\"{q_short}\\"")
-            else:
-                print(f"  · {label}{count_str}")
-            shown += 1
-        # Show top subtopic tags
-        if subtopic_facets:
-            top_subs = [f"{s['value']} ({s['count']})" for s in subtopic_facets[:8]]
-            print(f"  Subtopics: {', '.join(top_subs)}")
-        print()
-        top_subtopics = [s["value"] for s in subtopic_facets[:15]]
-        categories.append({
-            "code": code,
-            "name": name,
-            "document_count": count,
-            "cluster_labels": list(clusters.keys()),
-            "top_subtopics": top_subtopics,
-        })
-    print("Filter keys: parent_code, cluster_label, subtopics, primary_topic")
-    print("Tip: Use cluster_label or subtopics for precise targeting")
-    return {"collection": collection, "total_documents": total, "categories": categories}
+    with _ToolCallTracker("kb_overview", {"overview": "kb"}, parent_idx=_current_parent_idx) as tc:
+        ov = _KB_OVERVIEW
+        collection = ov.get("collection", "?")
+        total = ov.get("total_documents", 0)
+        print(f"=== Knowledge Base: {collection} ({total:,} documents) ===\\n")
+        categories = []
+        for code, cat in ov.get("categories", {}).items():
+            name = cat.get("name", code)
+            count = cat.get("document_count", 0)
+            clusters = cat.get("clusters", {})
+            facets = cat.get("facets", {})
+            # Cluster doc counts from facets (capped at top 20 by API)
+            cluster_counts = {c["value"]: c["count"] for c in facets.get("clusters", [])}
+            # Subtopic tags from facets
+            subtopic_facets = facets.get("subtopics", [])
+            print(f"{code} — {name} [{count:,} docs]")
+            # Show top 8 clusters with doc counts
+            shown = 0
+            for label, sample_q in clusters.items():
+                if shown >= 8:
+                    remaining = len(clusters) - shown
+                    if remaining > 0:
+                        print(f"  ... and {remaining} more clusters")
+                    break
+                doc_n = cluster_counts.get(label, "")
+                count_str = f" ({doc_n})" if doc_n else ""
+                if sample_q:
+                    q_short = sample_q[:80] + "..." if len(sample_q) > 80 else sample_q
+                    print(f"  · {label}{count_str} — \\"{q_short}\\"")
+                else:
+                    print(f"  · {label}{count_str}")
+                shown += 1
+            # Show top subtopic tags
+            if subtopic_facets:
+                top_subs = [f"{s['value']} ({s['count']})" for s in subtopic_facets[:8]]
+                print(f"  Subtopics: {', '.join(top_subs)}")
+            print()
+            top_subtopics = [s["value"] for s in subtopic_facets[:15]]
+            categories.append({
+                "code": code,
+                "name": name,
+                "document_count": count,
+                "cluster_labels": list(clusters.keys()),
+                "top_subtopics": top_subtopics,
+            })
+        print("Filter keys: parent_code, cluster_label, subtopics, primary_topic")
+        print("Tip: Use cluster_label or subtopics for precise targeting")
+        tc.set_summary({"num_categories": len(categories), "total_documents": total})
+        return {"collection": collection, "total_documents": total, "categories": categories}
 '''
 
     # Sub-agent tools: wrap llm_query with role-specific prompts.
@@ -322,56 +372,58 @@ def evaluate_results(question, results, top_n=5, model=None):
         results = results.get("results", [])
     if not results:
         return {"ratings": [], "suggestion": "No results to evaluate. Try a different query or remove filters.", "raw": ""}
-    evidence = []
-    ids = []
-    for r in results[:top_n]:
-        rid = str(r.get("id", "?"))
-        ids.append(rid)
-        score = r.get("score", 0)
-        q = (r.get("question", "") or "")[:150]
-        evidence.append(f"[{rid}] score={score:.2f} Q: {q}")
-    result_block = "\\n".join(evidence)
-    prompt = (
-        f"Evaluate these search results for the question:\\n"
-        f"\\"{question}\\"\\n\\n"
-        f"Results:\\n{result_block}\\n\\n"
-        f"For each result, output exactly one line: <id> RELEVANT|PARTIAL|OFF-TOPIC\\n"
-        f"Then a blank line, then one line starting with SUGGESTION: stating whether to refine the query, change filters, or proceed to synthesis."
-    )
-    raw = llm_query(prompt, model=model)
-    # Parse structured ratings from response
-    ratings = []
-    suggestion = ""
-    # Sort IDs longest-first to prevent prefix collisions (e.g. "q1" matching "q10")
-    sorted_ids = sorted(ids, key=len, reverse=True)
-    for line in raw.strip().split("\\n"):
-        line = line.strip()
-        if line.upper().startswith("SUGGESTION:"):
-            suggestion = line.split(":", 1)[1].strip()
-            continue
-        for rid in sorted_ids:
-            if rid in line:
-                upper = line.upper()
-                if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
-                    ratings.append({"id": rid, "rating": "OFF-TOPIC"})
-                elif "PARTIAL" in upper:
-                    ratings.append({"id": rid, "rating": "PARTIAL"})
-                elif "RELEVANT" in upper:
-                    ratings.append({"id": rid, "rating": "RELEVANT"})
-                else:
-                    ratings.append({"id": rid, "rating": "UNKNOWN"})
-                break
-    relevant_count = sum(1 for r in ratings if r["rating"] == "RELEVANT")
-    partial_count = sum(1 for r in ratings if r["rating"] == "PARTIAL")
-    off_topic_count = sum(1 for r in ratings if r["rating"] == "OFF-TOPIC")
-    unknown_count = sum(1 for r in ratings if r["rating"] == "UNKNOWN")
-    summary = f"{relevant_count} relevant, {partial_count} partial, {off_topic_count} off-topic"
-    if unknown_count:
-        summary += f", {unknown_count} unknown"
-    print(f"[evaluate_results] {len(ratings)} rated: {summary}")
-    if suggestion:
-        print(f"[evaluate_results] suggestion: {suggestion}")
-    return {"ratings": ratings, "suggestion": suggestion, "raw": raw}
+    with _ToolCallTracker("evaluate_results", {"question": question[:100], "top_n": top_n}, parent_idx=_current_parent_idx) as tc:
+        evidence = []
+        ids = []
+        for r in results[:top_n]:
+            rid = str(r.get("id", "?"))
+            ids.append(rid)
+            score = r.get("score", 0)
+            q = (r.get("question", "") or "")[:150]
+            evidence.append(f"[{rid}] score={score:.2f} Q: {q}")
+        result_block = "\\n".join(evidence)
+        prompt = (
+            f"Evaluate these search results for the question:\\n"
+            f"\\"{question}\\"\\n\\n"
+            f"Results:\\n{result_block}\\n\\n"
+            f"For each result, output exactly one line: <id> RELEVANT|PARTIAL|OFF-TOPIC\\n"
+            f"Then a blank line, then one line starting with SUGGESTION: stating whether to refine the query, change filters, or proceed to synthesis."
+        )
+        raw = llm_query(prompt, model=model)
+        # Parse structured ratings from response
+        ratings = []
+        suggestion = ""
+        # Sort IDs longest-first to prevent prefix collisions (e.g. "q1" matching "q10")
+        sorted_ids = sorted(ids, key=len, reverse=True)
+        for line in raw.strip().split("\\n"):
+            line = line.strip()
+            if line.upper().startswith("SUGGESTION:"):
+                suggestion = line.split(":", 1)[1].strip()
+                continue
+            for rid in sorted_ids:
+                if rid in line:
+                    upper = line.upper()
+                    if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
+                        ratings.append({"id": rid, "rating": "OFF-TOPIC"})
+                    elif "PARTIAL" in upper:
+                        ratings.append({"id": rid, "rating": "PARTIAL"})
+                    elif "RELEVANT" in upper:
+                        ratings.append({"id": rid, "rating": "RELEVANT"})
+                    else:
+                        ratings.append({"id": rid, "rating": "UNKNOWN"})
+                    break
+        relevant_count = sum(1 for r in ratings if r["rating"] == "RELEVANT")
+        partial_count = sum(1 for r in ratings if r["rating"] == "PARTIAL")
+        off_topic_count = sum(1 for r in ratings if r["rating"] == "OFF-TOPIC")
+        unknown_count = sum(1 for r in ratings if r["rating"] == "UNKNOWN")
+        summary = f"{relevant_count} relevant, {partial_count} partial, {off_topic_count} off-topic"
+        if unknown_count:
+            summary += f", {unknown_count} unknown"
+        print(f"[evaluate_results] {len(ratings)} rated: {summary}")
+        if suggestion:
+            print(f"[evaluate_results] suggestion: {suggestion}")
+        tc.set_summary({"num_rated": len(ratings), "relevant": relevant_count, "partial": partial_count, "off_topic": off_topic_count})
+        return {"ratings": ratings, "suggestion": suggestion, "raw": raw}
 
 
 def reformulate(question, failed_query, top_score=0.0, model=None):
@@ -387,18 +439,20 @@ def reformulate(question, failed_query, top_score=0.0, model=None):
     Returns:
         List of up to 3 alternative query strings.
     """
-    prompt = (
-        f"The search query \\"{failed_query}\\" returned poor results "
-        f"(best score: {top_score:.2f}) for the question:\\n"
-        f"\\"{question}\\"\\n\\n"
-        f"Generate exactly 3 alternative search queries that might find better results.\\n"
-        f"One query per line, no numbering, no quotes, no explanation."
-    )
-    response = llm_query(prompt, model=model)
-    queries = [line.strip() for line in response.strip().split("\\n") if line.strip()]
-    queries = queries[:3]
-    print(f"[reformulate] generated {len(queries)} queries")
-    return queries
+    with _ToolCallTracker("reformulate", {"failed_query": failed_query[:100], "top_score": top_score}, parent_idx=_current_parent_idx) as tc:
+        prompt = (
+            f"The search query \\"{failed_query}\\" returned poor results "
+            f"(best score: {top_score:.2f}) for the question:\\n"
+            f"\\"{question}\\"\\n\\n"
+            f"Generate exactly 3 alternative search queries that might find better results.\\n"
+            f"One query per line, no numbering, no quotes, no explanation."
+        )
+        response = llm_query(prompt, model=model)
+        queries = [line.strip() for line in response.strip().split("\\n") if line.strip()]
+        queries = queries[:3]
+        print(f"[reformulate] generated {len(queries)} queries")
+        tc.set_summary({"num_queries": len(queries)})
+        return queries
 
 
 def critique_answer(question, draft, model=None):
@@ -414,24 +468,26 @@ def critique_answer(question, draft, model=None):
     Returns:
         String: PASS or FAIL verdict with specific feedback.
     """
-    _MAX_DRAFT_LEN = 8000
-    if len(draft) > _MAX_DRAFT_LEN:
-        print(f"[critique_answer] WARNING: draft truncated from {len(draft)} to {_MAX_DRAFT_LEN} chars")
-    prompt = (
-        f"Review this draft answer to the question:\\n"
-        f"\\"{question}\\"\\n\\n"
-        f"Draft:\\n{draft[:_MAX_DRAFT_LEN]}\\n\\n"
-        f"Check:\\n"
-        f"1. Does it answer the actual question asked?\\n"
-        f"2. Are [Source: <id>] citations present for factual claims?\\n"
-        f"3. Are there unsupported claims or fabricated rulings?\\n"
-        f"4. Is anything important missing?\\n\\n"
-        f"Respond: PASS or FAIL, then brief feedback (under 150 words)."
-    )
-    verdict = llm_query(prompt, model=model)
-    status = "PASS" if verdict.strip().strip("*").upper().startswith("PASS") else "FAIL"
-    print(f"[critique_answer] verdict={status}")
-    return verdict
+    with _ToolCallTracker("critique_answer", {"question": question[:100]}, parent_idx=_current_parent_idx) as tc:
+        _MAX_DRAFT_LEN = 8000
+        if len(draft) > _MAX_DRAFT_LEN:
+            print(f"[critique_answer] WARNING: draft truncated from {len(draft)} to {_MAX_DRAFT_LEN} chars")
+        prompt = (
+            f"Review this draft answer to the question:\\n"
+            f"\\"{question}\\"\\n\\n"
+            f"Draft:\\n{draft[:_MAX_DRAFT_LEN]}\\n\\n"
+            f"Check:\\n"
+            f"1. Does it answer the actual question asked?\\n"
+            f"2. Are [Source: <id>] citations present for factual claims?\\n"
+            f"3. Are there unsupported claims or fabricated rulings?\\n"
+            f"4. Is anything important missing?\\n\\n"
+            f"Respond: PASS or FAIL, then brief feedback (under 150 words)."
+        )
+        verdict = llm_query(prompt, model=model)
+        status = "PASS" if verdict.strip().strip("*").upper().startswith("PASS") else "FAIL"
+        print(f"[critique_answer] verdict={status}")
+        tc.set_summary({"verdict": status})
+        return verdict
 
 
 def classify_question(question, model=None):
@@ -446,25 +502,27 @@ def classify_question(question, model=None):
     Returns:
         String with CATEGORY code, relevant CLUSTERS, and search STRATEGY.
     """
-    cat_info = ""
-    if _KB_OVERVIEW is not None:
-        for cat_code, cat in _KB_OVERVIEW.get("categories", {}).items():
-            name = cat.get("name", cat_code)
-            clusters = cat.get("clusters", {})
-            labels = ", ".join(list(clusters.keys())[:10])
-            cat_info += f"{cat_code} — {name}: {labels}\\n"
-    prompt = (
-        f"Classify this Islamic Q&A question and recommend a search strategy.\\n\\n"
-        f"Question: \\"{question}\\"\\n\\n"
-        f"Categories and clusters:\\n{cat_info}\\n"
-        f"Respond with exactly:\\n"
-        f"CATEGORY: <code>\\n"
-        f"CLUSTERS: <comma-separated relevant cluster labels>\\n"
-        f"STRATEGY: <1-2 sentence search plan>"
-    )
-    classification = llm_query(prompt, model=model)
-    print(f"[classify_question] done")
-    return classification
+    with _ToolCallTracker("classify_question", {"question": question[:100]}, parent_idx=_current_parent_idx) as tc:
+        cat_info = ""
+        if _KB_OVERVIEW is not None:
+            for cat_code, cat in _KB_OVERVIEW.get("categories", {}).items():
+                name = cat.get("name", cat_code)
+                clusters = cat.get("clusters", {})
+                labels = ", ".join(list(clusters.keys())[:10])
+                cat_info += f"{cat_code} — {name}: {labels}\\n"
+        prompt = (
+            f"Classify this Islamic Q&A question and recommend a search strategy.\\n\\n"
+            f"Question: \\"{question}\\"\\n\\n"
+            f"Categories and clusters:\\n{cat_info}\\n"
+            f"Respond with exactly:\\n"
+            f"CATEGORY: <code>\\n"
+            f"CLUSTERS: <comma-separated relevant cluster labels>\\n"
+            f"STRATEGY: <1-2 sentence search plan>"
+        )
+        classification = llm_query(prompt, model=model)
+        print(f"[classify_question] done")
+        tc.set_summary({"raw_length": len(classification)})
+        return classification
 '''
 
     # ── Composite tools ──────────────────────────────────────────────────
@@ -496,10 +554,7 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
           "search_count" — how many search() calls were made
           "eval_summary" — human-readable rating breakdown
     """
-    all_results = []
-    search_count = 0
-    errors = []
-
+    global _current_parent_idx
     # Normalize: list-of-specs OR single query -> unified search task list
     if isinstance(query, list):
         if not query:
@@ -508,79 +563,106 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
                 "results": [], "ratings": {}, "search_count": 0,
                 "eval_summary": "no queries provided",
             }
-        specs = query
-        eval_question = " ; ".join(s["query"] for s in specs)
-    else:
-        specs = [{"query": query, "filters": filters, "top_k": top_k, "extra_queries": extra_queries}]
-        eval_question = query
 
-    for spec in specs:
-        q = spec["query"]
-        f = spec.get("filters")
-        k = spec.get("top_k", top_k)
-        try:
-            r = search(q, filters=f, top_k=k)
-            all_results.extend(r["results"])
-            search_count += 1
-        except Exception as e:
-            errors.append(str(e))
-            print(f"[research] WARNING: search failed: {e}")
-        for eq in (spec.get("extra_queries") or []):
+    with _ToolCallTracker("research", {"query": query if isinstance(query, str) else f"{len(query)} specs", "top_k": top_k}, parent_idx=_current_parent_idx) as tc:
+        _saved_parent = _current_parent_idx
+        _current_parent_idx = tc.idx
+
+        all_results = []
+        search_count = 0
+        errors = []
+
+        if isinstance(query, list):
+            specs = query
+            eval_question = " ; ".join(s["query"] for s in specs)
+        else:
+            specs = [{"query": query, "filters": filters, "top_k": top_k, "extra_queries": extra_queries}]
+            eval_question = query
+
+        for spec in specs:
+            q = spec["query"]
+            f = spec.get("filters")
+            k = spec.get("top_k", top_k)
             try:
-                r = search(eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k))
+                r = search(q, filters=f, top_k=k)
                 all_results.extend(r["results"])
                 search_count += 1
             except Exception as e:
                 errors.append(str(e))
                 print(f"[research] WARNING: search failed: {e}")
+            for eq in (spec.get("extra_queries") or []):
+                try:
+                    r = search(eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k))
+                    all_results.extend(r["results"])
+                    search_count += 1
+                except Exception as e:
+                    errors.append(str(e))
+                    print(f"[research] WARNING: search failed: {e}")
 
-    if not all_results:
-        print("[research] ERROR: all searches failed")
-        return {
-            "results": [], "ratings": {}, "search_count": search_count,
-            "eval_summary": "no results",
+        if not all_results:
+            print("[research] ERROR: all searches failed")
+            _current_parent_idx = _saved_parent
+            tc.set_summary({
+                "search_count": search_count,
+                "raw": 0,
+                "unique": 0,
+                "filtered": 0,
+                "eval_summary": "no results",
+            })
+            return {
+                "results": [], "ratings": {}, "search_count": search_count,
+                "eval_summary": "no results",
+            }
+
+        # Deduplicate by ID, keep highest score
+        seen = {}
+        for r in all_results:
+            rid = r["id"]
+            if rid not in seen or r["score"] > seen[rid]["score"]:
+                seen[rid] = r
+        deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
+
+        # Evaluate top results
+        ratings_map = {}
+        try:
+            eval_out = evaluate_results(eval_question, deduped[:10], model=eval_model)
+            for rt in eval_out["ratings"]:
+                ratings_map[rt["id"]] = rt["rating"]
+        except Exception as e:
+            print(f"[research] WARNING: evaluation failed, returning unrated: {e}")
+
+        # Filter OFF-TOPIC
+        filtered = [r for r in deduped if ratings_map.get(r["id"], "UNRATED") != "OFF-TOPIC"]
+
+        relevant = sum(1 for v in ratings_map.values() if v == "RELEVANT")
+        partial = sum(1 for v in ratings_map.values() if v == "PARTIAL")
+        off_topic = sum(1 for v in ratings_map.values() if v == "OFF-TOPIC")
+        summary = f"{relevant} relevant, {partial} partial, {off_topic} off-topic"
+
+        print(f"[research] {search_count} searches | {len(all_results)} raw > {len(deduped)} unique > {len(filtered)} filtered")
+        print(f"[research] {summary}")
+        for r in filtered[:5]:
+            tag = ratings_map.get(r["id"], "-")
+            print(f"  [{r['id']}] {r['score']:.2f} {tag:10s} Q: {r['question'][:100]}")
+        if len(filtered) > 5:
+            print(f"  ... and {len(filtered) - 5} more")
+
+        _current_parent_idx = _saved_parent
+        tc.set_summary({
+            "search_count": search_count,
+            "raw": len(all_results),
+            "unique": len(deduped),
+            "filtered": len(filtered),
+            "eval_summary": summary,
+        })
+
+        result = {
+            "results": filtered, "ratings": ratings_map,
+            "search_count": search_count, "eval_summary": summary,
         }
-
-    # Deduplicate by ID, keep highest score
-    seen = {}
-    for r in all_results:
-        rid = r["id"]
-        if rid not in seen or r["score"] > seen[rid]["score"]:
-            seen[rid] = r
-    deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
-
-    # Evaluate top results
-    ratings_map = {}
-    try:
-        eval_out = evaluate_results(eval_question, deduped[:10], model=eval_model)
-        for rt in eval_out["ratings"]:
-            ratings_map[rt["id"]] = rt["rating"]
-    except Exception as e:
-        print(f"[research] WARNING: evaluation failed, returning unrated: {e}")
-
-    # Filter OFF-TOPIC
-    filtered = [r for r in deduped if ratings_map.get(r["id"], "UNRATED") != "OFF-TOPIC"]
-
-    relevant = sum(1 for v in ratings_map.values() if v == "RELEVANT")
-    partial = sum(1 for v in ratings_map.values() if v == "PARTIAL")
-    off_topic = sum(1 for v in ratings_map.values() if v == "OFF-TOPIC")
-    summary = f"{relevant} relevant, {partial} partial, {off_topic} off-topic"
-
-    print(f"[research] {search_count} searches | {len(all_results)} raw > {len(deduped)} unique > {len(filtered)} filtered")
-    print(f"[research] {summary}")
-    for r in filtered[:5]:
-        tag = ratings_map.get(r["id"], "-")
-        print(f"  [{r['id']}] {r['score']:.2f} {tag:10s} Q: {r['question'][:100]}")
-    if len(filtered) > 5:
-        print(f"  ... and {len(filtered) - 5} more")
-
-    result = {
-        "results": filtered, "ratings": ratings_map,
-        "search_count": search_count, "eval_summary": summary,
-    }
-    if errors:
-        result["errors"] = errors
-    return result
+        if errors:
+            result["errors"] = errors
+        return result
 
 
 def draft_answer(question, results, instructions=None, model=None):
@@ -603,49 +685,60 @@ def draft_answer(question, results, instructions=None, model=None):
           "passed"   — True if critique gave PASS verdict
           "revised"  — True if the answer was revised after initial FAIL
     """
+    global _current_parent_idx
     evidence = format_evidence(results[:20])
     if not evidence:
         print("[draft_answer] ERROR: no evidence to synthesize from")
         return {"answer": "", "critique": "", "passed": False, "revised": False}
 
-    prompt_parts = [
-        "You are an Islamic Q&A scholar synthesizing from verified sources.\\n\\n",
-        f"QUESTION:\\n{question}\\n\\n",
-        "EVIDENCE:\\n" + "\\n".join(evidence) + "\\n\\n",
-    ]
-    if instructions:
-        prompt_parts.append(f"INSTRUCTIONS:\\n{instructions}\\n\\n")
-    prompt_parts.append(
-        "FORMAT: ## Answer (with [Source: <id>] citations), "
-        "## Evidence (source summaries), ## Confidence (High/Medium/Low).\\n"
-        "Only cite IDs from the evidence. Flag gaps explicitly.\\n"
-    )
+    with _ToolCallTracker("draft_answer", {"question": question[:100], "num_results": len(results)}, parent_idx=_current_parent_idx) as tc:
+        _saved_parent = _current_parent_idx
+        _current_parent_idx = tc.idx
 
-    answer = llm_query("".join(prompt_parts), model=model)
-
-    critique_text = critique_answer(question, answer)
-    passed = critique_text.strip().strip("*").upper().startswith("PASS")
-    revised = False
-
-    if not passed:
-        rev_parts = [
-            "Revise this answer based on the critique.\\n\\n",
-            f"CRITIQUE:\\n{critique_text}\\n\\n",
-            f"ORIGINAL:\\n{answer}\\n\\n",
+        prompt_parts = [
+            "You are an Islamic Q&A scholar synthesizing from verified sources.\\n\\n",
+            f"QUESTION:\\n{question}\\n\\n",
             "EVIDENCE:\\n" + "\\n".join(evidence) + "\\n\\n",
-            "Fix flagged issues. Keep valid citations. Same format.\\n",
         ]
-        answer = llm_query("".join(rev_parts), model=model)
+        if instructions:
+            prompt_parts.append(f"INSTRUCTIONS:\\n{instructions}\\n\\n")
+        prompt_parts.append(
+            "FORMAT: ## Answer (with [Source: <id>] citations), "
+            "## Evidence (source summaries), ## Confidence (High/Medium/Low).\\n"
+            "Only cite IDs from the evidence. Flag gaps explicitly.\\n"
+        )
+
+        answer = llm_query("".join(prompt_parts), model=model)
+
         critique_text = critique_answer(question, answer)
         passed = critique_text.strip().strip("*").upper().startswith("PASS")
-        revised = True
+        revised = False
 
-    print(
-        f"[draft_answer] {'PASS' if passed else 'FAIL'}"
-        f"{' (revised)' if revised else ''}"
-        f" | {len(answer)} chars | {len(evidence)} evidence entries"
-    )
-    return {"answer": answer, "critique": critique_text, "passed": passed, "revised": revised}
+        if not passed:
+            rev_parts = [
+                "Revise this answer based on the critique.\\n\\n",
+                f"CRITIQUE:\\n{critique_text}\\n\\n",
+                f"ORIGINAL:\\n{answer}\\n\\n",
+                "EVIDENCE:\\n" + "\\n".join(evidence) + "\\n\\n",
+                "Fix flagged issues. Keep valid citations. Same format.\\n",
+            ]
+            answer = llm_query("".join(rev_parts), model=model)
+            critique_text = critique_answer(question, answer)
+            passed = critique_text.strip().strip("*").upper().startswith("PASS")
+            revised = True
+
+        print(
+            f"[draft_answer] {'PASS' if passed else 'FAIL'}"
+            f"{' (revised)' if revised else ''}"
+            f" | {len(answer)} chars | {len(evidence)} evidence entries"
+        )
+        _current_parent_idx = _saved_parent
+        tc.set_summary({
+            "passed": passed,
+            "revised": revised,
+            "answer_length": len(answer),
+        })
+        return {"answer": answer, "critique": critique_text, "passed": passed, "revised": revised}
 '''
 
     return code

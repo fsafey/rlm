@@ -32,6 +32,7 @@ class StreamingLogger(RLMLogger):
         self._done = False
         self._cancelled = False
         self.source_registry: dict[str, dict] = {}
+        self._last_tool_call_count = 0
 
     def emit_progress(self, phase: str, detail: str = "") -> None:
         """Emit a lightweight progress event for frontend initialization display."""
@@ -89,11 +90,20 @@ class StreamingLogger(RLMLogger):
                     if isinstance(data, dict):
                         self.source_registry[sid] = data
 
+        # Extract new tool_calls since last iteration
+        tool_calls_data: list[dict] = []
+        for block in iteration.code_blocks:
+            tc = block.result.locals.get("tool_calls")
+            if isinstance(tc, list):
+                tool_calls_data = tc[self._last_tool_call_count :]
+                self._last_tool_call_count = len(tc)
+
         event = {
             "type": "iteration",
             "iteration": self._iteration_count,
             "timestamp": datetime.now().isoformat(),
             **iteration.to_dict(),
+            "tool_calls": tool_calls_data,
         }
         with self._lock:
             self.queue.append(event)

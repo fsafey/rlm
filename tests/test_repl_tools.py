@@ -639,6 +639,9 @@ class TestSetupCodeInLocalREPL:
             assert callable(repl.locals["browse"])
             assert callable(repl.locals["kb_overview"])
             assert isinstance(repl.locals["search_log"], list)
+            assert "tool_calls" in repl.locals
+            assert isinstance(repl.locals["tool_calls"], list)
+            assert len(repl.locals["tool_calls"]) == 0
             # Sub-agent tools
             for name in [
                 "evaluate_results",
@@ -1251,3 +1254,168 @@ class TestDraftAnswer:
         ns["draft_answer"]("question", results, instructions="address all 4 scenarios")
 
         assert "address all 4 scenarios" in captured_prompt[0]
+
+
+class TestToolCallsTracking:
+    """Tests for structured tool call tracking via tool_calls list."""
+
+    def _exec_ns(self):
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        return ns
+
+    def test_tool_calls_initialized_empty(self):
+        """tool_calls list exists and is empty after setup."""
+        ns = self._exec_ns()
+        assert "tool_calls" in ns
+        assert isinstance(ns["tool_calls"], list)
+        assert len(ns["tool_calls"]) == 0
+
+    def test_search_records_tool_call(self):
+        """search() appends an entry with correct tool/args/summary/duration."""
+        ns = self._exec_ns()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [{"id": "1", "score": 0.9, "question": "q", "answer": "a"}],
+            "total": 1,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["search"]("test query", top_k=5)
+
+        assert len(ns["tool_calls"]) == 1
+        tc = ns["tool_calls"][0]
+        assert tc["tool"] == "search"
+        assert tc["args"]["query"] == "test query"
+        assert tc["args"]["top_k"] == 5
+        assert tc["result_summary"]["num_results"] == 1
+        assert tc["result_summary"]["total"] == 1
+        assert tc["result_summary"]["query"] == "test query"
+        assert tc["duration_ms"] >= 0
+        assert tc["error"] is None
+        assert tc["children"] == []
+
+    def test_browse_records_tool_call(self):
+        """browse() appends an entry with correct fields."""
+        ns = self._exec_ns()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [{"id": "1", "question": "q", "answer": "a"}],
+            "total": 42,
+            "has_more": True,
+            "facets": {},
+            "grouped_results": [],
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["browse"](filters={"parent_code": "PT"})
+
+        assert len(ns["tool_calls"]) == 1
+        tc = ns["tool_calls"][0]
+        assert tc["tool"] == "browse"
+        assert tc["result_summary"]["num_results"] == 1
+        assert tc["result_summary"]["total"] == 42
+        assert tc["error"] is None
+
+    def test_fiqh_lookup_records_tool_call(self):
+        """fiqh_lookup() appends an entry with correct fields."""
+        ns = self._exec_ns()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "bridges": [{"canonical": "salah"}],
+            "related": [{"term": "qasr"}, {"term": "jamaa"}],
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "get", return_value=mock_resp):
+            ns["fiqh_lookup"]("prayer")
+
+        assert len(ns["tool_calls"]) == 1
+        tc = ns["tool_calls"][0]
+        assert tc["tool"] == "fiqh_lookup"
+        assert tc["args"]["query"] == "prayer"
+        assert tc["result_summary"]["num_bridges"] == 1
+        assert tc["result_summary"]["num_related"] == 2
+
+    def test_research_records_parent_children(self):
+        """research() has children indices pointing to search + evaluate calls."""
+        ns = self._exec_ns()
+        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT\n\nSUGGESTION: ok"
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}],
+            "total": 1,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["research"]("test question")
+
+        # research is the parent (idx 0), search is child (idx 1), evaluate is child (idx 2)
+        assert len(ns["tool_calls"]) >= 3
+        research_tc = ns["tool_calls"][0]
+        assert research_tc["tool"] == "research"
+        assert len(research_tc["children"]) >= 2
+        # Children should include search and evaluate_results
+        child_tools = [ns["tool_calls"][i]["tool"] for i in research_tc["children"]]
+        assert "search" in child_tools
+        assert "evaluate_results" in child_tools
+        assert research_tc["result_summary"]["search_count"] == 1
+
+    def test_draft_answer_records_parent_children(self):
+        """draft_answer() has children for critique."""
+        ns = self._exec_ns()
+        ns["llm_query"] = lambda prompt, model=None: (
+            "PASS — good"
+            if "Review this draft" in prompt
+            else "## Answer\nTest [Source: 1]\n## Evidence\n## Confidence\nHigh"
+        )
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
+        ns["draft_answer"]("question", results)
+
+        # draft_answer is parent, critique_answer is child
+        assert len(ns["tool_calls"]) >= 2
+        draft_tc = ns["tool_calls"][0]
+        assert draft_tc["tool"] == "draft_answer"
+        assert len(draft_tc["children"]) >= 1
+        child_tools = [ns["tool_calls"][i]["tool"] for i in draft_tc["children"]]
+        assert "critique_answer" in child_tools
+
+    def test_tool_call_captures_error(self):
+        """Failed API call populates the error field."""
+        ns = self._exec_ns()
+
+        with patch.object(ns["_requests"], "post", side_effect=Exception("Connection refused")):
+            try:
+                ns["search"]("test")
+            except Exception:
+                pass
+
+        assert len(ns["tool_calls"]) == 1
+        tc = ns["tool_calls"][0]
+        assert tc["error"] is not None
+        assert "Connection refused" in tc["error"]
+
+    def test_tool_calls_accumulate(self):
+        """Multiple calls grow the tool_calls list."""
+        ns = self._exec_ns()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["search"]("q1")
+            ns["search"]("q2")
+            ns["browse"]()
+
+        assert len(ns["tool_calls"]) == 3
+        assert ns["tool_calls"][0]["tool"] == "search"
+        assert ns["tool_calls"][1]["tool"] == "search"
+        assert ns["tool_calls"][2]["tool"] == "browse"

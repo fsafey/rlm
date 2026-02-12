@@ -1,8 +1,3 @@
----
-name: mastering-agent-skills
-description: Comprehensive guide for designing, building, and evaluating Claude Code Skills. Use when creating new Skills, refactoring existing Skills, deciding between Skills vs subagents vs CLAUDE.md, or when the user mentions "skill design", "create skill", "skill architecture", or "progressive disclosure".
----
-
 # Mastering Agent Skills: A Practitioner's Guide
 
 ## Synthesized from Anthropic's Official Documentation, Engineering Posts & Context Engineering Framework
@@ -256,8 +251,6 @@ python scripts/extract_fields.py input.pdf
 
 For detailed form-filling instructions, see [forms.md](forms.md).
 
-````
-
 Claude executes the script deterministically — consistent, repeatable, and token-efficient.
 
 ---
@@ -298,7 +291,7 @@ description: Helps with documents
 description: Extract text and tables from PDF files, fill forms, merge
 documents. Use when working with PDF files or when the user mentions
 PDFs, forms, or document extraction.
-````
+```
 
 ### 6.3 File Organization
 
@@ -564,8 +557,6 @@ with pdfplumber.open("doc.pdf") as pdf:
 For form filling, see [forms.md](forms.md).
 For detailed API reference, see [reference.md](reference.md).
 
-````
-
 ### 10.4 Forked Skill (Subagent-like Isolation)
 
 ```markdown
@@ -594,7 +585,7 @@ Output a structured report:
 
 ## Positive Observations
 [What's done well]
-````
+```
 
 ### 10.5 Subagent That Loads Skills
 

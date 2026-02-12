@@ -1,8 +1,3 @@
----
-name: mastering-subagents
-description: Comprehensive guide for designing, configuring, and evaluating Claude Code subagents. Use when creating new subagents, optimizing existing agents, planning multi-agent workflows, or when the user mentions "subagent design", "create agent", "agent architecture", "delegation", or "multi-agent".
----
-
 # Mastering Subagents: A Practitioner's Guide
 
 ## Synthesized from Anthropic's Official Documentation, Engineering Posts & Boris Cherny's Workflow

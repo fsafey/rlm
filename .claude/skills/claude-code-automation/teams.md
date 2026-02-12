@@ -1,8 +1,3 @@
----
-name: mastering-agent-teams
-description: Comprehensive guide for coordinating multiple Claude Code instances with shared tasks, inter-agent messaging, and centralized management. Use when creating agent teams, designing multi-agent workflows, planning parallel work across teammates, or when the user mentions "agent team", "team lead", "spawn teammates", "delegate mode", "shared task list", or "swarm".
----
-
 # Mastering Agent Teams: A Practitioner's Guide
 
 ## Coordinating Multiple Claude Code Instances with Shared Tasks, Inter-Agent Messaging & Centralized Management

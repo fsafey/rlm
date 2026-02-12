@@ -31,6 +31,7 @@ class StreamingLogger(RLMLogger):
         self._lock = threading.Lock()
         self._done = False
         self._cancelled = False
+        self.source_registry: dict[str, dict] = {}
 
     def emit_progress(self, phase: str, detail: str = "") -> None:
         """Emit a lightweight progress event for frontend initialization display."""
@@ -79,6 +80,15 @@ class StreamingLogger(RLMLogger):
             if self._cancelled:
                 raise SearchCancelled("Search cancelled by client")
         super().log(iteration)
+
+        # Accumulate source data from REPL's source_registry (populated by _normalize_hit)
+        for block in iteration.code_blocks:
+            sr = block.result.locals.get("source_registry")
+            if isinstance(sr, dict):
+                for sid, data in sr.items():
+                    if isinstance(data, dict):
+                        self.source_registry[sid] = data
+
         event = {
             "type": "iteration",
             "iteration": self._iteration_count,

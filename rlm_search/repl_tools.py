@@ -34,6 +34,7 @@ if _API_KEY:
     _HEADERS["x-api-key"] = _API_KEY
 
 search_log = []
+source_registry = {{}}
 
 # Metadata fields to nest under 'metadata' key for cleaner LLM consumption
 _META_FIELDS = {{
@@ -56,6 +57,7 @@ def _normalize_hit(hit: dict) -> dict:
             metadata[k] = v
     if metadata:
         result["metadata"] = metadata
+    source_registry[result["id"]] = result
     return result
 
 

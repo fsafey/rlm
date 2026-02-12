@@ -32,6 +32,15 @@ class TestBuildSearchSetupCodeValidity:
         assert isinstance(ns["search_log"], list)
         assert len(ns["search_log"]) == 0
 
+    def test_defines_source_registry(self):
+        """source_registry dict must be defined in the generated namespace."""
+        code = build_search_setup_code(api_url="http://localhost:8091")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        assert "source_registry" in ns
+        assert isinstance(ns["source_registry"], dict)
+        assert len(ns["source_registry"]) == 0
+
 
 class TestBuildSearchSetupCodeEmbedding:
     """Test that API URL, key, and timeout are correctly embedded."""
@@ -128,6 +137,41 @@ class TestSearchFunctionBehavior:
         assert len(ns["search_log"]) == 1
         assert ns["search_log"][0]["type"] == "search"
         assert ns["search_log"][0]["query"] == "test query"
+
+    def test_search_populates_source_registry(self):
+        """search() must populate source_registry with normalized hits keyed by ID."""
+        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [
+                {
+                    "id": "42",
+                    "score": 0.85,
+                    "question": "What is wudu?",
+                    "answer": "Wudu is ablution.",
+                    "parent_code": "PT",
+                    "cluster_label": "Wudu Basics",
+                },
+                {"id": "99", "score": 0.7, "question": "Q2", "answer": "A2"},
+            ],
+            "total": 2,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+            ns["search"]("wudu query")
+
+        reg = ns["source_registry"]
+        assert "42" in reg
+        assert "99" in reg
+        assert reg["42"]["question"] == "What is wudu?"
+        assert reg["42"]["score"] == 0.85
+        assert reg["42"]["metadata"]["parent_code"] == "PT"
+        assert reg["42"]["metadata"]["cluster_label"] == "Wudu Basics"
+        assert reg["99"]["question"] == "Q2"
 
     def test_search_always_sends_enriched_collection(self):
         """search() must always include collection=enriched_gemini in payload."""
@@ -584,6 +628,7 @@ class TestSetupCodeInLocalREPL:
         try:
             assert "search" in repl.locals
             assert "search_log" in repl.locals
+            assert "source_registry" in repl.locals
             assert "format_evidence" in repl.locals
             assert "fiqh_lookup" in repl.locals
             assert "browse" in repl.locals
@@ -981,16 +1026,25 @@ class TestResearchListQuery:
             resp = MagicMock()
             resp.raise_for_status = MagicMock()
             resp.json.return_value = {
-                "hits": [{"id": call_count["n"], "score": 0.8, "question": f"Q{call_count['n']}", "answer": "A"}],
+                "hits": [
+                    {
+                        "id": call_count["n"],
+                        "score": 0.8,
+                        "question": f"Q{call_count['n']}",
+                        "answer": "A",
+                    }
+                ],
                 "total": 1,
             }
             return resp
 
         with patch.object(ns["_requests"], "post", side_effect=mock_post):
-            result = ns["research"]([
-                {"query": "topic one", "filters": {"parent_code": "FN"}},
-                {"query": "topic two", "filters": {"parent_code": "MF"}},
-            ])
+            result = ns["research"](
+                [
+                    {"query": "topic one", "filters": {"parent_code": "FN"}},
+                    {"query": "topic two", "filters": {"parent_code": "MF"}},
+                ]
+            )
 
         assert result["search_count"] == 2
         assert len(result["results"]) == 2
@@ -1004,13 +1058,15 @@ class TestResearchListQuery:
         mock_resp = _make_search_mock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp):
-            result = ns["research"]([
-                {
-                    "query": "topic one",
-                    "extra_queries": [{"query": "angle 1a"}, {"query": "angle 1b"}],
-                },
-                {"query": "topic two"},
-            ])
+            result = ns["research"](
+                [
+                    {
+                        "query": "topic one",
+                        "extra_queries": [{"query": "angle 1a"}, {"query": "angle 1b"}],
+                    },
+                    {"query": "topic two"},
+                ]
+            )
 
         # spec 1: primary + 2 extra = 3; spec 2: primary = 1; total = 4
         assert result["search_count"] == 4
@@ -1028,10 +1084,12 @@ class TestResearchListQuery:
         }
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp):
-            result = ns["research"]([
-                {"query": "topic one"},
-                {"query": "topic two"},
-            ])
+            result = ns["research"](
+                [
+                    {"query": "topic one"},
+                    {"query": "topic two"},
+                ]
+            )
 
         ids = [r["id"] for r in result["results"]]
         assert ids.count("1") == 1
@@ -1055,10 +1113,12 @@ class TestResearchListQuery:
             return resp
 
         with patch.object(ns["_requests"], "post", side_effect=mixed_post):
-            result = ns["research"]([
-                {"query": "failing topic"},
-                {"query": "working topic"},
-            ])
+            result = ns["research"](
+                [
+                    {"query": "failing topic"},
+                    {"query": "working topic"},
+                ]
+            )
 
         assert len(result["results"]) >= 1
         assert result["search_count"] == 1  # only second spec counted
@@ -1103,10 +1163,12 @@ class TestResearchListQuery:
         mock_resp = _make_search_mock()
 
         with patch.object(ns["_requests"], "post", return_value=mock_resp):
-            ns["research"]([
-                {"query": "salary from fraud"},
-                {"query": "selling clothing"},
-            ])
+            ns["research"](
+                [
+                    {"query": "salary from fraud"},
+                    {"query": "selling clothing"},
+                ]
+            )
 
         assert len(captured_eval_question) == 1
         assert "salary from fraud" in captured_eval_question[0]

@@ -115,10 +115,17 @@ _executor = ThreadPoolExecutor(max_workers=4)
 _SOURCE_PATTERN = re.compile(r"\[Source:\s*(\d+)\]")
 
 
-def _extract_sources(answer: str) -> list[dict]:
-    """Extract unique source IDs from [Source: XXXX] references in the answer text."""
+def _extract_sources(answer: str, registry: dict[str, dict] | None = None) -> list[dict]:
+    """Extract unique source IDs from [Source: XXXX] references and enrich with metadata."""
     ids = list(dict.fromkeys(_SOURCE_PATTERN.findall(answer)))
-    return [{"id": int(sid)} for sid in ids]
+    sources = []
+    for sid in ids:
+        entry = (registry or {}).get(sid)
+        if entry and isinstance(entry, dict):
+            sources.append(entry)
+        else:
+            sources.append({"id": sid})
+    return sources
 
 
 def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
@@ -167,7 +174,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
             f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s"
         )
 
-        sources = _extract_sources(result.response or "")
+        sources = _extract_sources(result.response or "", logger.source_registry)
         usage = result.usage_summary.to_dict() if result.usage_summary else {}
 
         logger.mark_done(
@@ -250,6 +257,71 @@ async def stream_search(search_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/logs/recent")
+async def list_recent_logs(limit: int = 20) -> list[dict]:
+    """List recent search logs with metadata (query, timestamp, search_id)."""
+    log_dir = _PROJECT_ROOT / "rlm_logs"
+    if not log_dir.exists():
+        return []
+    files = sorted(log_dir.glob("search_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    results = []
+    for f in files[:limit]:
+        try:
+            with open(f) as fh:
+                first_line = fh.readline().strip()
+            if not first_line:
+                continue
+            meta = json.loads(first_line)
+            results.append(
+                {
+                    "filename": f.name,
+                    "search_id": meta.get("search_id", ""),
+                    "query": meta.get("query", ""),
+                    "timestamp": meta.get("timestamp", ""),
+                    "root_model": meta.get("root_model", ""),
+                }
+            )
+        except (json.JSONDecodeError, OSError):
+            continue
+    return results
+
+
+@app.get("/api/logs/{search_id}")
+async def get_log(search_id: str) -> dict:
+    """Load a completed search log by search_id prefix match."""
+    log_dir = _PROJECT_ROOT / "rlm_logs"
+    if not log_dir.exists():
+        raise HTTPException(status_code=404, detail="No logs directory")
+    # Match by search_id prefix in filename
+    matches = list(log_dir.glob(f"search_{search_id}*.jsonl"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Log not found")
+    log_file = max(matches, key=lambda f: f.stat().st_mtime)
+    events: list[dict] = []
+    with open(log_file) as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    if not events:
+        raise HTTPException(status_code=404, detail="Empty log file")
+    # Separate by type
+    metadata = next((e for e in events if e.get("type") == "metadata"), None)
+    iterations = [e for e in events if e.get("type") == "iteration"]
+    done = next((e for e in events if e.get("type") == "done"), None)
+    error = next((e for e in events if e.get("type") == "error"), None)
+    return {
+        "metadata": metadata,
+        "iterations": iterations,
+        "done": done,
+        "error": error,
+        "filename": log_file.name,
+    }
 
 
 @app.get("/api/health", response_model=HealthResponse)

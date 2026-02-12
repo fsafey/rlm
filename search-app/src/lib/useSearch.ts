@@ -136,5 +136,5 @@ export function useSearch() {
     setState(initialSearchState);
   }, []);
 
-  return { state, search, reset };
+  return { state, search, reset, setState };
 }

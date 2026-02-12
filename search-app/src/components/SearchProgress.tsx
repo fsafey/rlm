@@ -357,13 +357,13 @@ export function SearchProgress({
   return (
     <div className="w-full max-w-2xl mx-auto">
       <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
-        {/* Header */}
+        {/* Header — reflects current stage */}
         <div className="px-6 py-4 border-b border-border">
           <h2 className="text-sm font-semibold text-foreground tracking-tight">
-            Researching Your Question
+            {activeText.label}
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Searching sources and analyzing findings
+            {activeText.detail}
           </p>
         </div>
 

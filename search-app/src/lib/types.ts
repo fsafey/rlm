@@ -54,6 +54,8 @@ export interface MetadataEvent {
   max_iterations: number;
   backend: string;
   log_file?: string;
+  search_id?: string;
+  query?: string;
 }
 
 export interface DoneEvent {

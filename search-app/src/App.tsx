@@ -1,22 +1,38 @@
 import { useCallback } from "react";
 import { useSearch } from "@/lib/useSearch";
+import { useSearchHistory } from "@/lib/useSearchHistory";
 import { SearchInput } from "@/components/SearchInput";
 import { SearchProgress } from "@/components/SearchProgress";
 import { AnswerPanel } from "@/components/AnswerPanel";
 import { SourceCards } from "@/components/SourceCards";
 import { TracePanel } from "@/components/TracePanel";
+import { RecentSearches } from "@/components/RecentSearches";
 import { AlertCircle } from "lucide-react";
-import type { SearchSettings } from "@/lib/types";
+import type { SearchSettings, SearchState } from "@/lib/types";
 
 function App() {
-  const { state, search, reset } = useSearch();
+  const { state, search, reset, setState } = useSearch();
+  const { recentLogs, loadLog, loadingLog } = useSearchHistory(
+    setState as React.Dispatch<React.SetStateAction<SearchState>>,
+  );
 
   const handleSearch = useCallback(
     (query: string, settings: SearchSettings) => {
+      // Clear URL param when starting a new search
+      const url = new URL(window.location.href);
+      url.searchParams.delete("log");
+      window.history.replaceState({}, "", url.toString());
       search(query, settings);
     },
     [search],
   );
+
+  const handleReset = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("log");
+    window.history.replaceState({}, "", url.toString());
+    reset();
+  }, [reset]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -40,9 +56,18 @@ function App() {
         {/* Search bar */}
         <SearchInput
           onSearch={handleSearch}
-          onReset={reset}
+          onReset={handleReset}
           isSearching={state.status === "searching"}
         />
+
+        {/* Recent searches — shown when idle */}
+        {state.status === "idle" && (
+          <RecentSearches
+            logs={recentLogs}
+            onSelect={loadLog}
+            loading={loadingLog}
+          />
+        )}
 
         {/* Progress indicator */}
         {state.status === "searching" && (

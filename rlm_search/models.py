@@ -13,6 +13,7 @@ class SearchRequest(BaseModel):
 class SearchSettings(BaseModel):
     backend: str | None = None
     model: str | None = None
+    sub_model: str | None = None
     max_iterations: int | None = None
     max_depth: int | None = None
 

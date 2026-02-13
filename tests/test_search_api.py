@@ -278,6 +278,159 @@ class TestExtractSources:
         assert len(sources) == 1
 
 
+class TestSubModelWiring:
+    """Test sub_model → other_backends wiring in _run_search."""
+
+    @patch("rlm_search.api._executor")
+    def test_sub_model_passed_in_settings(self, mock_executor: MagicMock, client: TestClient):
+        """sub_model in settings is forwarded to _run_search."""
+        mock_executor.submit = MagicMock()
+        resp = client.post(
+            "/api/search",
+            json={
+                "query": "test",
+                "settings": {"sub_model": "claude-sonnet-4-5-20250929"},
+            },
+        )
+        assert resp.status_code == 200
+        call_args = mock_executor.submit.call_args
+        settings = call_args[0][3]
+        assert settings["sub_model"] == "claude-sonnet-4-5-20250929"
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api.RLM_BACKEND", "anthropic")
+    def test_sub_model_wires_other_backends(self, _mock_setup, mock_rlm):
+        """When sub_model differs from model, other_backends is set."""
+        from rlm_search.api import _run_search, _searches
+        from rlm_search.streaming_logger import StreamingLogger
+
+        search_id = "test-sub-1"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_rlm.return_value = mock_instance
+
+        _run_search(
+            search_id,
+            "test query",
+            {"model": "claude-opus-4-6", "sub_model": "claude-sonnet-4-5-20250929"},
+        )
+
+        rlm_kwargs = mock_rlm.call_args[1]
+        assert rlm_kwargs["other_backends"] == ["anthropic"]
+        assert rlm_kwargs["other_backend_kwargs"] is not None
+        assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-sonnet-4-5-20250929"
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    def test_sub_model_same_as_root_skips(self, _mock_setup, mock_rlm):
+        """When sub_model == model, other_backends is None."""
+        from rlm_search.api import _run_search, _searches
+        from rlm_search.streaming_logger import StreamingLogger
+
+        search_id = "test-sub-2"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_rlm.return_value = mock_instance
+
+        _run_search(
+            search_id,
+            "test query",
+            {"model": "claude-opus-4-6", "sub_model": "claude-opus-4-6"},
+        )
+
+        rlm_kwargs = mock_rlm.call_args[1]
+        assert rlm_kwargs["other_backends"] is None
+        assert rlm_kwargs["other_backend_kwargs"] is None
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    def test_sub_model_empty_skips(self, _mock_setup, mock_rlm):
+        """When sub_model is empty string, other_backends is None."""
+        from rlm_search.api import _run_search, _searches
+        from rlm_search.streaming_logger import StreamingLogger
+
+        search_id = "test-sub-3"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_rlm.return_value = mock_instance
+
+        _run_search(search_id, "test query", {"sub_model": ""})
+
+        rlm_kwargs = mock_rlm.call_args[1]
+        assert rlm_kwargs["other_backends"] is None
+        assert rlm_kwargs["other_backend_kwargs"] is None
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api.RLM_SUB_MODEL", "claude-haiku-4-5-20251001")
+    @patch("rlm_search.api.RLM_BACKEND", "anthropic")
+    def test_env_var_fallback(self, _mock_setup, mock_rlm):
+        """When settings has no sub_model, falls back to RLM_SUB_MODEL env var."""
+        from rlm_search.api import _run_search, _searches
+        from rlm_search.streaming_logger import StreamingLogger
+
+        search_id = "test-sub-4"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_rlm.return_value = mock_instance
+
+        _run_search(search_id, "test query", {})
+
+        rlm_kwargs = mock_rlm.call_args[1]
+        assert rlm_kwargs["other_backends"] == ["anthropic"]
+        assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-haiku-4-5-20251001"
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
+    def test_sub_model_claude_cli_backend(self, _mock_setup, mock_rlm):
+        """claude_cli backend uses 'model' key instead of 'model_name'."""
+        from rlm_search.api import _run_search, _searches
+        from rlm_search.streaming_logger import StreamingLogger
+
+        search_id = "test-sub-5"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_rlm.return_value = mock_instance
+
+        _run_search(
+            search_id,
+            "test query",
+            {"sub_model": "claude-sonnet-4-5-20250929"},
+        )
+
+        rlm_kwargs = mock_rlm.call_args[1]
+        assert rlm_kwargs["other_backends"] == ["claude_cli"]
+        assert rlm_kwargs["other_backend_kwargs"][0]["model"] == "claude-sonnet-4-5-20250929"
+        assert "model_name" not in rlm_kwargs["other_backend_kwargs"][0]
+
+
 class TestStreamingLoggerSourceRegistry:
     """Test that StreamingLogger accumulates source_registry from iterations."""
 

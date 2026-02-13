@@ -9,6 +9,12 @@ const MODEL_OPTIONS = [
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
 
+const SUB_MODEL_OPTIONS = [
+  { value: "", label: "Same as root" },
+  { value: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+];
+
 interface SearchInputProps {
   onSearch: (query: string, settings: SearchSettings) => void;
   onReset: () => void;
@@ -86,6 +92,22 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
                 className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none"
               >
                 {MODEL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-muted-foreground">
+                Sub-Model
+              </label>
+              <select
+                value={settings.sub_model}
+                onChange={(e) => setSettings((s) => ({ ...s, sub_model: e.target.value }))}
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none"
+              >
+                {SUB_MODEL_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
                     {opt.label}
                   </option>

@@ -106,11 +106,13 @@ export interface SearchState {
 
 export interface SearchSettings {
   model: string;
+  sub_model: string;
   max_iterations: number;
 }
 
 export const defaultSettings: SearchSettings = {
   model: "claude-opus-4-6",
+  sub_model: "",
   max_iterations: 15,
 };
 

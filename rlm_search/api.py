@@ -29,6 +29,7 @@ from rlm_search.config import (
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
+    RLM_SUB_MODEL,
 )
 from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
@@ -166,9 +167,13 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     logger = _searches[search_id]
     backend = settings.get("backend") or RLM_BACKEND
     model = settings.get("model") or RLM_MODEL
+    sub_model = settings.get("sub_model") or RLM_SUB_MODEL
     max_iterations = settings.get("max_iterations") or RLM_MAX_ITERATIONS
     max_depth = settings.get("max_depth") or RLM_MAX_DEPTH
-    print(f"[SEARCH:{search_id}] Starting | query={query!r} backend={backend} model={model}")
+    print(
+        f"[SEARCH:{search_id}] Starting | query={query!r} backend={backend}"
+        f" model={model} sub_model={sub_model or '(same)'}"
+    )
 
     try:
         setup_code = build_search_setup_code(
@@ -184,9 +189,24 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
             if ANTHROPIC_API_KEY:
                 backend_kwargs["api_key"] = ANTHROPIC_API_KEY
 
+        # Build other_backends for sub-model routing (depth-1 calls)
+        other_backends_arg: list[str] | None = None
+        other_backend_kwargs_arg: list[dict[str, Any]] | None = None
+        if sub_model and sub_model not in ("", "same") and sub_model != model:
+            if backend == "claude_cli":
+                sub_kwargs: dict[str, Any] = {"model": sub_model}
+            else:
+                sub_kwargs: dict[str, Any] = {"model_name": sub_model}
+                if ANTHROPIC_API_KEY:
+                    sub_kwargs["api_key"] = ANTHROPIC_API_KEY
+            other_backends_arg = [backend]
+            other_backend_kwargs_arg = [sub_kwargs]
+
         rlm = RLM(
             backend=backend,
             backend_kwargs=backend_kwargs,
+            other_backends=other_backends_arg,
+            other_backend_kwargs=other_backend_kwargs_arg,
             environment="local",
             environment_kwargs={"setup_code": setup_code},
             max_iterations=max_iterations,

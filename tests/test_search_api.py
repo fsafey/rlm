@@ -10,7 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from rlm.core.types import CodeBlock, REPLResult, RLMIteration
-from rlm_search.api import _extract_sources, _searches, _sessions, app
+from rlm_search.api import _extract_sources, _pre_classify, _searches, _sessions, app
 from rlm_search.streaming_logger import StreamingLogger
 
 
@@ -642,7 +642,9 @@ class TestSessionLifecycle:
         mock_rlm.assert_not_called()
 
         # Existing RLM's completion() was called
-        existing_rlm.completion.assert_called_once_with("follow-up query", root_prompt="follow-up query")
+        existing_rlm.completion.assert_called_once_with(
+            "follow-up query", root_prompt="follow-up query"
+        )
 
         # Logger was swapped
         assert existing_rlm.logger is logger
@@ -654,6 +656,84 @@ class TestSessionLifecycle:
         assert logger._last_tool_call_count == 1
 
         _sessions.clear()
+
+
+class TestPreClassify:
+    """Test _pre_classify() enrichment and fallback behavior."""
+
+    _KB_OVERVIEW = {
+        "categories": {
+            "PT": {"name": "Prayer & Tahara", "clusters": {"Wudu": {}, "Ghusl": {}}},
+            "FN": {"name": "Finance & Transactions", "clusters": {"Riba": {}, "Zakat": {}}},
+        },
+        "total_documents": 100,
+    }
+
+    @patch("rlm.clients.get_client")
+    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
+    def test_happy_path_claude_cli(self, mock_get_client):
+        """Classification via claude_cli backend uses 'model' key."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCLUSTERS: Riba, Zakat\n"
+            'FILTERS: {"parent_code": "FN"}\n'
+            "STRATEGY: Search for riba rulings"
+        )
+        mock_get_client.return_value = mock_client
+
+        result = _pre_classify("Is riba haram?", self._KB_OVERVIEW)
+
+        assert result.startswith("Is riba haram?")
+        assert "\n\n--- Pre-Classification ---\n" in result
+        assert "CATEGORY: FN" in result
+        mock_get_client.assert_called_once_with(
+            "claude_cli",
+            {"model": "claude-haiku-4-5-20251001"},
+        )
+
+    @patch("rlm.clients.get_client")
+    @patch("rlm_search.api.RLM_BACKEND", "anthropic")
+    @patch("rlm_search.api.ANTHROPIC_API_KEY", "test-key")
+    def test_happy_path_anthropic(self, mock_get_client):
+        """Classification via anthropic backend uses 'model_name' + api_key."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = "CATEGORY: PT"
+        mock_get_client.return_value = mock_client
+
+        result = _pre_classify("wudu question", self._KB_OVERVIEW)
+
+        assert "\n\n--- Pre-Classification ---\n" in result
+        mock_get_client.assert_called_once_with(
+            "anthropic",
+            {"model_name": "claude-haiku-4-5-20251001", "api_key": "test-key"},
+        )
+
+    def test_no_kb_overview_returns_plain_query(self):
+        """Without KB overview, returns query unchanged."""
+        assert _pre_classify("test query", None) == "test query"
+
+    @patch("rlm.clients.get_client")
+    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
+    def test_client_exception_returns_plain_query(self, mock_get_client):
+        """Client error falls back to plain query."""
+        mock_get_client.side_effect = RuntimeError("model unavailable")
+
+        result = _pre_classify("test query", self._KB_OVERVIEW)
+        assert result == "test query"
+
+    @patch("rlm.clients.get_client")
+    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
+    def test_enriched_format(self, mock_get_client):
+        """Verify the exact separator format."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = "CATEGORY: PT"
+        mock_get_client.return_value = mock_client
+
+        result = _pre_classify("wudu question", self._KB_OVERVIEW)
+        parts = result.split("\n\n--- Pre-Classification ---\n")
+        assert len(parts) == 2
+        assert parts[0] == "wudu question"
+        assert parts[1] == "CATEGORY: PT"
 
 
 def _parse_sse_events(text: str) -> list[dict]:

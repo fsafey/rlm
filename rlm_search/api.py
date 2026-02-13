@@ -30,6 +30,7 @@ from rlm_search.config import (
     CASCADE_API_KEY,
     CASCADE_API_URL,
     RLM_BACKEND,
+    RLM_CLASSIFY_MODEL,
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
@@ -253,6 +254,59 @@ def _build_rlm_kwargs(
     }
 
 
+def _pre_classify(query: str, kb_overview: dict | None) -> str:
+    """Classify query via cheap LM call and return enriched context string.
+
+    Returns the original query with appended classification metadata.
+    Falls back to plain query on any failure (no-op degradation).
+    """
+    if not kb_overview:
+        return query
+
+    # Build category + cluster summary from cached KB overview
+    cat_lines = []
+    for code, cat in kb_overview.get("categories", {}).items():
+        name = cat.get("name", code)
+        clusters = list(cat.get("clusters", {}).keys())[:10]
+        cat_lines.append(f"{code} — {name}: {', '.join(clusters)}")
+    cat_info = "\n".join(cat_lines)
+
+    prompt = [
+        {
+            "role": "user",
+            "content": (
+                "Classify this Islamic Q&A question into one of these categories"
+                " and suggest search filters.\n\n"
+                f'Question: "{query}"\n\n'
+                f"Categories and their clusters:\n{cat_info}\n\n"
+                "Respond with exactly (no other text):\n"
+                "CATEGORY: <code>\n"
+                "CLUSTERS: <comma-separated relevant cluster labels>\n"
+                'FILTERS: <json dict, e.g. {"parent_code": "BE"}>\n'
+                "STRATEGY: <1 sentence search plan>"
+            ),
+        },
+    ]
+
+    try:
+        from rlm.clients import get_client
+
+        # Use the configured backend — claude_cli for tunnel, anthropic for direct API
+        if RLM_BACKEND == "claude_cli":
+            classify_kwargs: dict[str, Any] = {"model": RLM_CLASSIFY_MODEL}
+        else:
+            classify_kwargs = {"model_name": RLM_CLASSIFY_MODEL}
+            if ANTHROPIC_API_KEY:
+                classify_kwargs["api_key"] = ANTHROPIC_API_KEY
+
+        client = get_client(RLM_BACKEND, classify_kwargs)
+        classification = client.completion(prompt)
+        return f"{query}\n\n--- Pre-Classification ---\n{classification}"
+    except Exception as e:
+        _log.warning("Pre-classification failed, proceeding without: %s", e)
+        return query
+
+
 def _emit_metadata(logger: StreamingLogger, rlm: RLM) -> None:
     """Emit RLM metadata to a logger (used for follow-up searches where __init__ already ran)."""
     bk = rlm.backend_kwargs or {}
@@ -314,9 +368,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
             # ── New session: create persistent RLM ──
             kw = _build_rlm_kwargs(settings)
             model_short = (
-                kw["model"].rsplit("-", 1)[0]
-                if len(kw["model"].split("-")) > 3
-                else kw["model"]
+                kw["model"].rsplit("-", 1)[0] if len(kw["model"].split("-")) > 3 else kw["model"]
             )
 
             print(
@@ -344,8 +396,11 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                 lock=threading.Lock(),
             )
 
+            logger.emit_progress("classifying", f"Pre-classifying with {RLM_CLASSIFY_MODEL}")
+            enriched_query = _pre_classify(query, _kb_overview_cache)
+
             logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
-            result = rlm.completion(query, root_prompt=query)
+            result = rlm.completion(enriched_query, root_prompt=query)
 
         print(
             f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} "

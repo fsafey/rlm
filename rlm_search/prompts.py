@@ -95,6 +95,13 @@ answer = result["answer"]
 
 FINAL_VAR(answer)
 
+## Pre-Classification
+
+Your `context` variable may include a `--- Pre-Classification ---` section with CATEGORY, CLUSTERS, FILTERS, and STRATEGY. When present:
+- Use the suggested FILTERS directly in your first `research()` call
+- Skip calling `kb_overview()` — the classification already incorporates the taxonomy
+- Override if results are poor — the classification is a starting hint, not a constraint
+
 **Aim for 3 code blocks.** For multi-part questions, use a list query to research all sub-questions in one `research()` call — do NOT write separate blocks per sub-question. Do NOT write extra blocks to print the answer, critique, or metadata — `draft_answer()` already prints a summary. Each block adds to conversation history and costs context.
 
 ## Grounding Rules

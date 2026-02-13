@@ -6,6 +6,10 @@ from unittest.mock import MagicMock, patch
 from rlm.environments.local_repl import LocalREPL
 from rlm_search.repl_tools import build_search_setup_code
 
+# Common mock target prefix for API tools
+_API_POST = "rlm_search.tools.api_tools.requests.post"
+_API_GET = "rlm_search.tools.api_tools.requests.get"
+
 
 class TestBuildSearchSetupCodeValidity:
     """Test that generated code is valid Python and defines expected names."""
@@ -55,36 +59,35 @@ class TestBuildSearchSetupCodeEmbedding:
 
     def test_empty_api_key_default(self):
         code = build_search_setup_code(api_url="http://localhost")
-        # Should embed empty string as default
         ns: dict = {}
         exec(code, ns)  # noqa: S102
-        assert ns["_API_KEY"] == ""
+        assert ns["_ctx"].api_key == ""
 
     def test_timeout_embedded(self):
         code = build_search_setup_code(api_url="http://localhost", timeout=60)
         ns: dict = {}
         exec(code, ns)  # noqa: S102
-        assert ns["_TIMEOUT"] == 60
+        assert ns["_ctx"].timeout == 60
 
     def test_default_timeout(self):
         code = build_search_setup_code(api_url="http://localhost")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
-        assert ns["_TIMEOUT"] == 30
+        assert ns["_ctx"].timeout == 30
 
     def test_api_key_sets_header(self):
         """When api_key is provided, x-api-key header must be set."""
         code = build_search_setup_code(api_url="http://localhost", api_key="my-key")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
-        assert ns["_HEADERS"]["x-api-key"] == "my-key"
+        assert ns["_ctx"].headers["x-api-key"] == "my-key"
 
     def test_no_api_key_no_header(self):
         """When api_key is empty, x-api-key header must NOT be set."""
         code = build_search_setup_code(api_url="http://localhost", api_key="")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
-        assert "x-api-key" not in ns["_HEADERS"]
+        assert "x-api-key" not in ns["_ctx"].headers
 
 
 class TestSearchFunctionSignature:
@@ -125,7 +128,7 @@ class TestSearchFunctionBehavior:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
             result = ns["search"]("test query")
 
         mock_post.assert_called_once()
@@ -161,7 +164,7 @@ class TestSearchFunctionBehavior:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["search"]("wudu query")
 
         reg = ns["source_registry"]
@@ -183,7 +186,7 @@ class TestSearchFunctionBehavior:
         mock_resp.json.return_value = {"hits": [], "total": 0}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
             ns["search"]("test")
 
         payload = mock_post.call_args[1]["json"]
@@ -198,7 +201,7 @@ class TestSearchFunctionBehavior:
         mock_resp.json.return_value = {"hits": [], "total": 0}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["search"]("q1")
             ns["search"]("q2")
 
@@ -217,7 +220,7 @@ class TestSearchFunctionBehavior:
         mock_resp.json.return_value = {"hits": [], "total": 0}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
             ns["search"](long_query)
 
         captured = capsys.readouterr()
@@ -236,7 +239,7 @@ class TestSearchFunctionBehavior:
         mock_resp.json.return_value = {"hits": [], "total": 0}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
             ns["search"]("short query")
 
         payload = mock_post.call_args[1]["json"]
@@ -326,7 +329,7 @@ class TestFiqhLookup:
         mock_resp.json.return_value = {"bridges": [], "related": []}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "get", return_value=mock_resp) as mock_get:
+        with patch(_API_GET, return_value=mock_resp) as mock_get:
             ns["fiqh_lookup"]("prayer")
 
         mock_get.assert_called_once()
@@ -350,7 +353,7 @@ class TestFiqhLookup:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "get", return_value=mock_resp):
+        with patch(_API_GET, return_value=mock_resp):
             result = ns["fiqh_lookup"]("prayer")
 
         assert "bridges" in result
@@ -418,7 +421,7 @@ class TestBrowseFunction:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
             result = ns["browse"](filters={"parent_code": "PT"})
 
         mock_post.assert_called_once()
@@ -445,7 +448,7 @@ class TestBrowseFunction:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["browse"](filters={"parent_code": "PT"})
 
         assert len(ns["search_log"]) == 1
@@ -468,7 +471,7 @@ class TestBrowseFunction:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp) as mock_post:
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
             result = ns["browse"](group_by="cluster_label", group_limit=2)
 
         payload = mock_post.call_args[1]["json"]
@@ -511,7 +514,7 @@ class TestBrowseFunction:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["browse"]()
 
         # Direct results should be normalized
@@ -660,7 +663,7 @@ class TestSetupCodeInLocalREPL:
 
 
 def _make_sub_agent_ns(kb_overview_data=None):
-    """Helper: build setup code namespace with a mock llm_query."""
+    """Helper: build setup code namespace with mock llm_query wired into _ctx."""
     mock_overview = kb_overview_data or {
         "collection": "test",
         "total_documents": 100,
@@ -674,12 +677,12 @@ def _make_sub_agent_ns(kb_overview_data=None):
         },
     }
     code = build_search_setup_code(api_url="http://localhost:8091", kb_overview_data=mock_overview)
-    ns: dict = {}
+    # Provide dummy llm callables so bootstrap can wire them into _ctx
+    ns: dict = {
+        "llm_query": lambda prompt, model=None: "",
+        "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
+    }
     exec(code, ns)  # noqa: S102
-    if "llm_query_batched" not in ns:
-        ns["llm_query_batched"] = lambda prompts, model=None: [
-            ns["llm_query"](p, model=model) for p in prompts
-        ]
     return ns
 
 
@@ -708,7 +711,7 @@ class TestEvaluateResults:
             calls.extend(prompts)
             return ["RELEVANT CONFIDENCE:4"] * len(prompts)
 
-        ns["llm_query_batched"] = mock_batched
+        ns["_ctx"].llm_query_batched = mock_batched
         results = {"results": [{"id": "q1", "score": 0.8, "question": "Q", "answer": "A"}]}
         result = ns["evaluate_results"]("test question", results)
         assert len(calls) == 1
@@ -720,7 +723,8 @@ class TestEvaluateResults:
 
     def test_accepts_dict_or_list(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "ok"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "ok"
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["ok"] * len(prompts)
         hit = {"id": "q1", "score": 0.5, "question": "Q", "answer": "A"}
         # Dict form
         ns["evaluate_results"]("q", {"results": [hit]})
@@ -729,7 +733,7 @@ class TestEvaluateResults:
 
     def test_handles_missing_fields(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "ok"
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["ok"] * len(prompts)
         ns["evaluate_results"]("q", [{"id": "q1"}])  # no score, question, answer
 
     def test_respects_top_n(self, capsys):
@@ -742,7 +746,7 @@ class TestEvaluateResults:
                 : len(prompts)
             ]
 
-        ns["llm_query_batched"] = mock_batched
+        ns["_ctx"].llm_query_batched = mock_batched
         hits = [{"id": f"q{i}", "score": 0.5, "question": "Q", "answer": "A"} for i in range(10)]
         result = ns["evaluate_results"]("q", hits, top_n=3)
         assert len(captured_prompts) == 3
@@ -759,7 +763,7 @@ class TestEvaluateResults:
     def test_ids_assigned_by_index(self):
         """Each rating ID comes from the corresponding input result by index."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "RELEVANT CONFIDENCE:4",
             "OFF-TOPIC CONFIDENCE:1",
             "PARTIAL CONFIDENCE:3",
@@ -778,7 +782,9 @@ class TestEvaluateResults:
     def test_unknown_rating_fallback(self):
         """No keyword in response → UNKNOWN rating."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["this result is somewhat useful"]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
+            "this result is somewhat useful"
+        ]
         hits = [{"id": "q1", "score": 0.5, "question": "Q", "answer": "A"}]
         result = ns["evaluate_results"]("q", hits)
         assert len(result["ratings"]) == 1
@@ -787,7 +793,7 @@ class TestEvaluateResults:
     def test_suggestion_always_derived(self):
         """Suggestion is always derived algorithmically from ratings."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"]
         hits = [{"id": "q1", "score": 0.5, "question": "Q", "answer": "A"}]
         result = ns["evaluate_results"]("q", hits)
         assert result["suggestion"] != ""
@@ -796,7 +802,7 @@ class TestEvaluateResults:
     def test_integer_ids_do_not_crash(self):
         """Cascade API returns int IDs — str() conversion must not TypeError."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "RELEVANT CONFIDENCE:4",
             "PARTIAL CONFIDENCE:3",
         ]
@@ -812,7 +818,7 @@ class TestEvaluateResults:
         """Per-result prompts include answer text (up to 1000 chars)."""
         ns = _make_sub_agent_ns()
         captured = []
-        ns["llm_query_batched"] = lambda prompts, model=None: (
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: (
             captured.extend(prompts),
             ["RELEVANT CONFIDENCE:5"] * len(prompts),
         )[1]
@@ -831,7 +837,7 @@ class TestEvaluateResults:
     def test_batched_eval_confidence_score(self):
         """Parse CONFIDENCE:5 -> confidence=5."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:5"]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:5"]
         hits = [{"id": "q1", "score": 0.8, "question": "Q", "answer": "A"}]
         result = ns["evaluate_results"]("q", hits)
         assert result["ratings"][0]["confidence"] == 5
@@ -839,7 +845,7 @@ class TestEvaluateResults:
     def test_batched_eval_default_confidence(self):
         """Missing CONFIDENCE -> confidence=3."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT"]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT"]
         hits = [{"id": "q1", "score": 0.8, "question": "Q", "answer": "A"}]
         result = ns["evaluate_results"]("q", hits)
         assert result["ratings"][0]["confidence"] == 3
@@ -847,7 +853,7 @@ class TestEvaluateResults:
     def test_batched_eval_error_resilience(self):
         """One 'Error:' response -> UNKNOWN with confidence=0, others unaffected."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "RELEVANT CONFIDENCE:4",
             "Error: rate limit exceeded",
             "PARTIAL CONFIDENCE:2",
@@ -868,7 +874,7 @@ class TestEvaluateResults:
     def test_batched_eval_suggestion_derived(self):
         """3 relevant -> 'Proceed to synthesis'."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         hits = [{"id": f"q{i}", "score": 0.8, "question": "Q", "answer": "A"} for i in range(5)]
@@ -878,7 +884,7 @@ class TestEvaluateResults:
     def test_batched_eval_raw_field_joined(self):
         """raw field is all responses joined by --- separator."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "RELEVANT CONFIDENCE:5",
             "PARTIAL CONFIDENCE:3",
         ]
@@ -894,7 +900,7 @@ class TestEvaluateResults:
     def test_batched_eval_single_result(self):
         """top_n=1 edge case works."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:5"]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:5"]
         hits = [{"id": "q1", "score": 0.9, "question": "Q", "answer": "A"}]
         result = ns["evaluate_results"]("q", hits, top_n=1)
         assert len(result["ratings"]) == 1
@@ -906,7 +912,7 @@ class TestReformulate:
 
     def test_returns_list(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "query one\nquery two\nquery three"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "query one\nquery two\nquery three"
         result = ns["reformulate"]("question", "failed query", 0.1)
         assert isinstance(result, list)
         assert len(result) == 3
@@ -914,20 +920,20 @@ class TestReformulate:
 
     def test_caps_at_three(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "q1\nq2\nq3\nq4\nq5"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "q1\nq2\nq3\nq4\nq5"
         result = ns["reformulate"]("question", "failed", 0.1)
         assert len(result) <= 3
 
     def test_strips_empty_lines(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "\nq1\n\nq2\n\n"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "\nq1\n\nq2\n\n"
         result = ns["reformulate"]("question", "failed", 0.1)
         assert result == ["q1", "q2"]
 
     def test_prompt_contains_score(self):
         ns = _make_sub_agent_ns()
         calls = []
-        ns["llm_query"] = lambda prompt, model=None: (calls.append(prompt), "q1")[1]
+        ns["_ctx"].llm_query = lambda prompt, model=None: (calls.append(prompt), "q1")[1]
         ns["reformulate"]("question", "bad query", 0.18)
         assert "0.18" in calls[0]
 
@@ -937,13 +943,13 @@ class TestCritiqueAnswer:
 
     def test_pass_verdict(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "PASS - all citations verified"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "PASS - all citations verified"
         result = ns["critique_answer"]("question", "draft answer")
         assert "PASS" in result
 
     def test_fail_verdict(self, capsys):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "FAIL - missing citations"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "FAIL - missing citations"
         result = ns["critique_answer"]("question", "draft")
         assert "FAIL" in result
         captured = capsys.readouterr()
@@ -951,7 +957,7 @@ class TestCritiqueAnswer:
 
     def test_truncation_warning(self, capsys):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "PASS"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "PASS"
         ns["critique_answer"]("question", "x" * 10000)
         captured = capsys.readouterr()
         assert "WARNING" in captured.out
@@ -959,7 +965,7 @@ class TestCritiqueAnswer:
 
     def test_no_warning_under_limit(self, capsys):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "PASS"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "PASS"
         ns["critique_answer"]("question", "short draft")
         captured = capsys.readouterr()
         assert "truncated" not in captured.out
@@ -968,9 +974,12 @@ class TestCritiqueAnswer:
         """critique_answer() still uses llm_query, not batched."""
         ns = _make_sub_agent_ns()
         calls = []
-        ns["llm_query"] = lambda prompt, model=None: (calls.append("llm_query"), "PASS — ok")[1]
+        ns["_ctx"].llm_query = lambda prompt, model=None: (
+            calls.append("llm_query"),
+            "PASS — ok",
+        )[1]
         batched_calls = []
-        ns["llm_query_batched"] = lambda prompts, model=None: (
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: (
             batched_calls.append("batched"),
             ["ok"] * len(prompts),
         )[1]
@@ -986,7 +995,7 @@ class TestClassifyQuestion:
     def test_includes_kb_taxonomy(self):
         ns = _make_sub_agent_ns()
         calls = []
-        ns["llm_query"] = lambda prompt, model=None: (
+        ns["_ctx"].llm_query = lambda prompt, model=None: (
             calls.append(prompt),
             "CATEGORY: PT\nCLUSTERS: Ghusl\nSTRATEGY: search",
         )[1]
@@ -997,9 +1006,11 @@ class TestClassifyQuestion:
 
     def test_handles_none_kb_overview(self):
         code = build_search_setup_code(api_url="http://localhost:8091", kb_overview_data=None)
-        ns: dict = {}
+        ns: dict = {
+            "llm_query": lambda prompt, model=None: "CATEGORY: PT",
+            "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
+        }
         exec(code, ns)  # noqa: S102
-        ns["llm_query"] = lambda prompt, model=None: "CATEGORY: PT"
         # Should not crash — just sends empty category info
         result = ns["classify_question"]("question")
         assert "PT" in result
@@ -1024,13 +1035,13 @@ class TestResearch:
 
     def test_basic_research(self, capsys):
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "RELEVANT CONFIDENCE:4" if i == 0 else "PARTIAL CONFIDENCE:3"
             for i in range(len(prompts))
         ]
         mock_resp = _make_search_mock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["research"]("test question")
 
         assert "results" in result
@@ -1042,12 +1053,12 @@ class TestResearch:
 
     def test_extra_queries(self, capsys):
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         mock_resp = _make_search_mock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["research"](
                 "main query",
                 extra_queries=[
@@ -1060,7 +1071,7 @@ class TestResearch:
 
     def test_deduplicates_by_id(self):
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         # Two searches return overlapping results
@@ -1078,7 +1089,7 @@ class TestResearch:
             }
             return resp
 
-        with patch.object(ns["_requests"], "post", side_effect=mock_post):
+        with patch(_API_POST, side_effect=mock_post):
             result = ns["research"]("query", extra_queries=[{"query": "other"}])
 
         # Should deduplicate: one result, keeping highest score
@@ -1094,10 +1105,10 @@ class TestResearch:
             "OFF-TOPIC CONFIDENCE:1",
             "PARTIAL CONFIDENCE:3",
         ]
-        ns["llm_query_batched"] = lambda prompts, model=None: batched_responses[: len(prompts)]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: batched_responses[: len(prompts)]
         mock_resp = _make_search_mock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["research"]("question")
 
         result_ids = {r["id"] for r in result["results"]}
@@ -1107,12 +1118,12 @@ class TestResearch:
 
     def test_handles_search_error(self, capsys):
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "1 RELEVANT"
+        ns["_ctx"].llm_query = lambda prompt, model=None: "1 RELEVANT"
 
         def failing_post(*args, **kwargs):
             raise Exception("Connection refused")
 
-        with patch.object(ns["_requests"], "post", side_effect=failing_post):
+        with patch(_API_POST, side_effect=failing_post):
             result = ns["research"]("query")
 
         assert result["results"] == []
@@ -1124,7 +1135,7 @@ class TestResearch:
     def test_handles_partial_search_failure(self, capsys):
         """One extra_query fails but primary succeeds."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         call_count = {"n": 0}
@@ -1141,7 +1152,7 @@ class TestResearch:
             }
             return resp
 
-        with patch.object(ns["_requests"], "post", side_effect=mixed_post):
+        with patch(_API_POST, side_effect=mixed_post):
             result = ns["research"]("query", extra_queries=[{"query": "fail"}])
 
         assert len(result["results"]) >= 1  # primary results survived
@@ -1154,7 +1165,7 @@ class TestResearchListQuery:
     def test_list_query_basic(self, capsys):
         """List of specs runs all queries and merges results."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         call_count = {"n": 0}
@@ -1176,7 +1187,7 @@ class TestResearchListQuery:
             }
             return resp
 
-        with patch.object(ns["_requests"], "post", side_effect=mock_post):
+        with patch(_API_POST, side_effect=mock_post):
             result = ns["research"](
                 [
                     {"query": "topic one", "filters": {"parent_code": "FN"}},
@@ -1192,12 +1203,12 @@ class TestResearchListQuery:
     def test_list_query_with_per_spec_extra_queries(self, capsys):
         """Each spec can carry its own extra_queries."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         mock_resp = _make_search_mock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["research"](
                 [
                     {
@@ -1214,7 +1225,7 @@ class TestResearchListQuery:
     def test_list_query_deduplicates_across_specs(self):
         """Results from different specs are deduped by ID."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         # Both specs return the same ID
@@ -1225,7 +1236,7 @@ class TestResearchListQuery:
             "total": 1,
         }
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["research"](
                 [
                     {"query": "topic one"},
@@ -1239,7 +1250,7 @@ class TestResearchListQuery:
     def test_list_query_partial_spec_failure(self, capsys):
         """One spec fails, others succeed — partial results returned."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         call_count = {"n": 0}
@@ -1256,7 +1267,7 @@ class TestResearchListQuery:
             }
             return resp
 
-        with patch.object(ns["_requests"], "post", side_effect=mixed_post):
+        with patch(_API_POST, side_effect=mixed_post):
             result = ns["research"](
                 [
                     {"query": "failing topic"},
@@ -1284,12 +1295,12 @@ class TestResearchListQuery:
     def test_list_query_single_spec(self, capsys):
         """Single-element list works identically to string query."""
         ns = _make_sub_agent_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         mock_resp = _make_search_mock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             result = ns["research"]([{"query": "single topic"}])
 
         assert result["search_count"] == 1
@@ -1304,10 +1315,10 @@ class TestResearchListQuery:
             captured_prompts.extend(prompts)
             return ["RELEVANT CONFIDENCE:4"] * len(prompts)
 
-        ns["llm_query_batched"] = tracking_batched
+        ns["_ctx"].llm_query_batched = tracking_batched
         mock_resp = _make_search_mock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["research"](
                 [
                     {"query": "salary from fraud"},
@@ -1333,7 +1344,7 @@ class TestResearchEvalCoverage:
             captured_prompts.extend(prompts)
             return ["RELEVANT CONFIDENCE:4"] * len(prompts)
 
-        ns["llm_query_batched"] = tracking_batched
+        ns["_ctx"].llm_query_batched = tracking_batched
         hits = [
             {"id": i, "score": 1.0 - i * 0.01, "question": f"Q{i}", "answer": f"A{i}"}
             for i in range(20)
@@ -1342,7 +1353,7 @@ class TestResearchEvalCoverage:
         mock_resp.json.return_value = {"hits": hits, "total": 20}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["research"]("test question")
 
         assert len(captured_prompts) == 15
@@ -1354,11 +1365,11 @@ class TestDraftAnswer:
     def test_pass_on_first_try(self, capsys):
         ns = _make_sub_agent_ns()
         calls = []
-        ns["llm_query"] = lambda prompt, model=None: (
+        ns["_ctx"].llm_query = lambda prompt, model=None: (
             calls.append(prompt),
             "## Answer\nTest answer [Source: 1]\n## Evidence\n- [Source: 1]\n## Confidence\nHigh",
         )[1]
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "PASS — content ok",
             "PASS — citations ok",
         ]
@@ -1384,7 +1395,7 @@ class TestDraftAnswer:
                 return "Bad draft"
             return "## Answer\nRevised [Source: 1]\n## Evidence\n## Confidence\nHigh"
 
-        ns["llm_query"] = mock_llm
+        ns["_ctx"].llm_query = mock_llm
         critique_count = {"n": 0}
 
         def mock_batched(prompts, model=None):
@@ -1393,7 +1404,7 @@ class TestDraftAnswer:
                 return ["FAIL — missing citations", "FAIL — no sources cited"]
             return ["PASS — fixed", "PASS — citations ok"]
 
-        ns["llm_query_batched"] = mock_batched
+        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         out = ns["draft_answer"]("question", results)
@@ -1416,11 +1427,11 @@ class TestDraftAnswer:
     def test_instructions_included_in_prompt(self):
         ns = _make_sub_agent_ns()
         captured_prompt = []
-        ns["llm_query"] = lambda prompt, model=None: (
+        ns["_ctx"].llm_query = lambda prompt, model=None: (
             captured_prompt.append(prompt),
             "## Answer\nTest [Source: 1]",
         )[1]
-        ns["llm_query_batched"] = lambda prompts, model=None: ["PASS", "PASS"]
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["PASS", "PASS"]
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results, instructions="address all 4 scenarios")
@@ -1430,8 +1441,8 @@ class TestDraftAnswer:
     def test_dual_reviewer_both_pass(self, capsys):
         """Both reviewers PASS -> overall PASS, critique has CONTENT + CITATIONS."""
         ns = _make_sub_agent_ns()
-        ns["llm_query"] = lambda prompt, model=None: "## Answer\nTest [Source: 1]"
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query = lambda prompt, model=None: "## Answer\nTest [Source: 1]"
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "PASS — content ok",
             "PASS — citations ok",
         ]
@@ -1456,7 +1467,7 @@ class TestDraftAnswer:
                 return "Bad draft"
             return "## Answer\nRevised [Source: 1]"
 
-        ns["llm_query"] = mock_llm
+        ns["_ctx"].llm_query = mock_llm
         batch_count = {"n": 0}
 
         def mock_batched(prompts, model=None):
@@ -1465,7 +1476,7 @@ class TestDraftAnswer:
                 return ["FAIL — doesn't answer the question", "PASS — citations ok"]
             return ["PASS — fixed", "PASS — citations ok"]
 
-        ns["llm_query_batched"] = mock_batched
+        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         out = ns["draft_answer"]("question", results)
@@ -1485,7 +1496,7 @@ class TestDraftAnswer:
                 return "Bad draft"
             return "## Answer\nRevised [Source: 1]"
 
-        ns["llm_query"] = mock_llm
+        ns["_ctx"].llm_query = mock_llm
         batch_count = {"n": 0}
 
         def mock_batched(prompts, model=None):
@@ -1494,7 +1505,7 @@ class TestDraftAnswer:
                 return ["PASS — content ok", "FAIL — missing [Source: X] for key claim"]
             return ["PASS — fixed", "PASS — citations ok"]
 
-        ns["llm_query_batched"] = mock_batched
+        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         out = ns["draft_answer"]("question", results)
@@ -1516,7 +1527,7 @@ class TestDraftAnswer:
                 return "Bad draft"
             return "## Answer\nRevised [Source: 1]"
 
-        ns["llm_query"] = mock_llm
+        ns["_ctx"].llm_query = mock_llm
         batch_count = {"n": 0}
 
         def mock_batched(prompts, model=None):
@@ -1525,7 +1536,7 @@ class TestDraftAnswer:
                 return ["FAIL — content incomplete", "FAIL — missing citation for claim X"]
             return ["PASS", "PASS"]
 
-        ns["llm_query_batched"] = mock_batched
+        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results)
@@ -1540,12 +1551,11 @@ class TestToolCallsTracking:
 
     def _exec_ns(self):
         code = build_search_setup_code(api_url="http://api.test", api_key="k")
-        ns: dict = {}
+        ns: dict = {
+            "llm_query": lambda prompt, model=None: "",
+            "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
+        }
         exec(code, ns)  # noqa: S102
-        if "llm_query_batched" not in ns:
-            ns["llm_query_batched"] = lambda prompts, model=None: [
-                ns["llm_query"](p, model=model) for p in prompts
-            ]
         return ns
 
     def test_tool_calls_initialized_empty(self):
@@ -1565,7 +1575,7 @@ class TestToolCallsTracking:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["search"]("test query", top_k=5)
 
         assert len(ns["tool_calls"]) == 1
@@ -1593,7 +1603,7 @@ class TestToolCallsTracking:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["browse"](filters={"parent_code": "PT"})
 
         assert len(ns["tool_calls"]) == 1
@@ -1613,7 +1623,7 @@ class TestToolCallsTracking:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "get", return_value=mock_resp):
+        with patch(_API_GET, return_value=mock_resp):
             ns["fiqh_lookup"]("prayer")
 
         assert len(ns["tool_calls"]) == 1
@@ -1626,7 +1636,7 @@ class TestToolCallsTracking:
     def test_research_records_parent_children(self):
         """research() has children indices pointing to search + evaluate calls."""
         ns = self._exec_ns()
-        ns["llm_query_batched"] = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["RELEVANT CONFIDENCE:4"] * len(
             prompts
         )
         mock_resp = MagicMock()
@@ -1636,7 +1646,7 @@ class TestToolCallsTracking:
         }
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["research"]("test question")
 
         # research is the parent (idx 0), search is child (idx 1), evaluate is child (idx 2)
@@ -1653,10 +1663,10 @@ class TestToolCallsTracking:
     def test_draft_answer_records_parent_children(self):
         """draft_answer() is tracked as a parent tool call."""
         ns = self._exec_ns()
-        ns["llm_query"] = lambda prompt, model=None: (
+        ns["_ctx"].llm_query = lambda prompt, model=None: (
             "## Answer\nTest [Source: 1]\n## Evidence\n## Confidence\nHigh"
         )
-        ns["llm_query_batched"] = lambda prompts, model=None: [
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
             "PASS — good",
             "PASS — citations ok",
         ]
@@ -1673,7 +1683,7 @@ class TestToolCallsTracking:
         """Failed API call populates the error field."""
         ns = self._exec_ns()
 
-        with patch.object(ns["_requests"], "post", side_effect=Exception("Connection refused")):
+        with patch(_API_POST, side_effect=Exception("Connection refused")):
             try:
                 ns["search"]("test")
             except Exception:
@@ -1691,7 +1701,7 @@ class TestToolCallsTracking:
         mock_resp.json.return_value = {"hits": [], "total": 0}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch.object(ns["_requests"], "post", return_value=mock_resp):
+        with patch(_API_POST, return_value=mock_resp):
             ns["search"]("q1")
             ns["search"]("q2")
             ns["browse"]()

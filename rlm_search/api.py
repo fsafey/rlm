@@ -128,6 +128,39 @@ def _extract_sources(answer: str, registry: dict[str, dict] | None = None) -> li
     return sources
 
 
+def _backfill_tool_calls(iterations: list[dict]) -> None:
+    """Backfill top-level ``tool_calls`` for old log iterations that lack it.
+
+    Old log files wrote ``iteration.to_dict()`` which stores tool_calls inside
+    ``code_blocks[-1].result.locals.tool_calls``.  We extract delta tool_calls
+    per iteration (matching the live SSE logic) and inject them at the top level.
+    Mutates *iterations* in-place.
+    """
+    last_count = 0
+    for iteration in iterations:
+        if "tool_calls" in iteration:
+            # Already has top-level tool_calls — fast-forward the counter so
+            # subsequent old iterations (unlikely but safe) compute correct deltas.
+            last_count += len(iteration["tool_calls"])
+            continue
+
+        # Find the cumulative tool_calls list from any code block's locals.
+        # All blocks share the same list reference, so grab the last one found.
+        cumulative: list[dict] | None = None
+        code_blocks = iteration.get("code_blocks", [])
+        for block in code_blocks:
+            tc = block.get("result", {}).get("locals", {}).get("tool_calls")
+            if isinstance(tc, list):
+                cumulative = tc
+
+        # Compute delta once (not per-block) then advance the counter
+        if cumulative is not None:
+            iteration["tool_calls"] = cumulative[last_count:]
+            last_count = len(cumulative)
+        else:
+            iteration["tool_calls"] = []
+
+
 def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
     """Run an RLM completion in a thread. Pushes events to the StreamingLogger."""
     logger = _searches[search_id]
@@ -315,6 +348,10 @@ async def get_log(search_id: str) -> dict:
     iterations = [e for e in events if e.get("type") == "iteration"]
     done = next((e for e in events if e.get("type") == "done"), None)
     error = next((e for e in events if e.get("type") == "error"), None)
+
+    # Backfill tool_calls for old log files that lack top-level tool_calls
+    _backfill_tool_calls(iterations)
+
     return {
         "metadata": metadata,
         "iterations": iterations,

@@ -80,7 +80,9 @@ class StreamingLogger(RLMLogger):
         with self._lock:
             if self._cancelled:
                 raise SearchCancelled("Search cancelled by client")
-        super().log(iteration)
+
+        # Replicate super().log() — increment count (but write enriched event below)
+        self._iteration_count += 1
 
         # Accumulate source data from REPL's source_registry (populated by _normalize_hit)
         for block in iteration.code_blocks:
@@ -105,6 +107,12 @@ class StreamingLogger(RLMLogger):
             **iteration.to_dict(),
             "tool_calls": tool_calls_data,
         }
+
+        # Write enriched event (with tool_calls) to disk
+        with open(self.log_file_path, "a") as f:
+            json.dump(event, f)
+            f.write("\n")
+
         with self._lock:
             self.queue.append(event)
             print(

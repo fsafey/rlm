@@ -7,11 +7,12 @@ import { AnswerPanel } from "@/components/AnswerPanel";
 import { SourceCards } from "@/components/SourceCards";
 import { TracePanel } from "@/components/TracePanel";
 import { RecentSearches } from "@/components/RecentSearches";
-import { AlertCircle } from "lucide-react";
+import { ConversationHistory } from "@/components/ConversationHistory";
+import { AlertCircle, RotateCcw } from "lucide-react";
 import type { SearchSettings, SearchState } from "@/lib/types";
 
 function App() {
-  const { state, search, reset, setState } = useSearch();
+  const { state, search, reset, newSession, setState } = useSearch();
   const { recentLogs, loadLog, loadingLog } = useSearchHistory(
     setState as React.Dispatch<React.SetStateAction<SearchState>>,
   );
@@ -34,6 +35,15 @@ function App() {
     reset();
   }, [reset]);
 
+  const handleNewSession = useCallback(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("log");
+    window.history.replaceState({}, "", url.toString());
+    newSession();
+  }, [newSession]);
+
+  const isInSession = state.sessionId !== null && state.conversationHistory.length > 0;
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -45,9 +55,21 @@ function App() {
               Agentic search over Islamic jurisprudence
             </p>
           </div>
-          <span className="text-[10px] font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
-            v0.1.0
-          </span>
+          <div className="flex items-center gap-3">
+            {isInSession && (
+              <button
+                onClick={handleNewSession}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-lg transition-colors"
+                title="End session and start fresh"
+              >
+                <RotateCcw className="h-3 w-3" />
+                New Session
+              </button>
+            )}
+            <span className="text-[10px] font-mono text-muted-foreground bg-muted px-2 py-1 rounded">
+              v0.1.0
+            </span>
+          </div>
         </div>
       </header>
 
@@ -58,15 +80,21 @@ function App() {
           onSearch={handleSearch}
           onReset={handleReset}
           isSearching={state.status === "searching"}
+          isFollowUp={isInSession && state.status !== "searching"}
         />
 
-        {/* Recent searches — shown when idle */}
-        {state.status === "idle" && (
+        {/* Recent searches — shown when idle with no session */}
+        {state.status === "idle" && !isInSession && (
           <RecentSearches
             logs={recentLogs}
             onSelect={loadLog}
             loading={loadingLog}
           />
+        )}
+
+        {/* Conversation history — show previous turns */}
+        {state.conversationHistory.length > 0 && (
+          <ConversationHistory turns={state.conversationHistory} />
         )}
 
         {/* Progress indicator */}

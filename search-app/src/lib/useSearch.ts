@@ -6,6 +6,7 @@ export function useSearch() {
   const [state, setState] = useState<SearchState>(initialSearchState);
   const abortRef = useRef<AbortController | null>(null);
   const searchIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
 
   const search = useCallback(async (query: string, settings?: SearchSettings) => {
     // Abort any in-flight search
@@ -13,18 +14,29 @@ export function useSearch() {
     const abort = new AbortController();
     abortRef.current = abort;
 
-    setState({
+    // Preserve session context for follow-ups
+    setState((prev) => ({
       ...initialSearchState,
       status: "searching",
       query,
-    });
+      sessionId: prev.sessionId,
+      conversationHistory: prev.conversationHistory,
+    }));
 
     try {
-      // Start search
+      // Start search — pass session_id for follow-ups
+      const body: Record<string, unknown> = {
+        query,
+        settings: settings ?? defaultSettings,
+      };
+      if (sessionIdRef.current) {
+        body.session_id = sessionIdRef.current;
+      }
+
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, settings: settings ?? defaultSettings }),
+        body: JSON.stringify(body),
         signal: abort.signal,
       });
 
@@ -32,11 +44,15 @@ export function useSearch() {
         throw new Error(`Search failed: ${res.status}`);
       }
 
-      const { search_id } = (await res.json()) as { search_id: string };
-      console.log("[SEARCH] started:", search_id);
+      const { search_id, session_id } = (await res.json()) as {
+        search_id: string;
+        session_id: string;
+      };
+      console.log("[SEARCH] started:", search_id, "session:", session_id);
       searchIdRef.current = search_id;
+      sessionIdRef.current = session_id;
 
-      setState((s) => ({ ...s, searchId: search_id }));
+      setState((s) => ({ ...s, searchId: search_id, sessionId: session_id }));
 
       // Open SSE stream
       const stream = await fetch(`/api/search/${search_id}/stream`, {
@@ -76,7 +92,7 @@ export function useSearch() {
                 }));
                 break;
 
-              case "done":
+              case "done": {
                 console.log("[SSE] done | answer_len:", event.answer?.length, "time:", event.execution_time);
                 setState((s) => ({
                   ...s,
@@ -85,8 +101,19 @@ export function useSearch() {
                   sources: event.sources,
                   executionTime: event.execution_time,
                   usage: event.usage,
+                  conversationHistory: [
+                    ...s.conversationHistory,
+                    {
+                      query: s.query,
+                      answer: event.answer,
+                      sources: event.sources,
+                      searchId: s.searchId ?? "",
+                      executionTime: event.execution_time,
+                    },
+                  ],
                 }));
                 return;
+              }
 
               case "error":
                 console.error("[SSE] error:", event.message);
@@ -127,7 +154,21 @@ export function useSearch() {
   }, []);
 
   const reset = useCallback(() => {
-    // Signal the backend to cancel the running RLM completion
+    if (searchIdRef.current) {
+      fetch(`/api/search/${searchIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
+      searchIdRef.current = null;
+    }
+    sessionIdRef.current = null;
+    abortRef.current?.abort();
+    setState(initialSearchState);
+  }, []);
+
+  const newSession = useCallback(() => {
+    // Tear down persistent session on backend
+    if (sessionIdRef.current) {
+      fetch(`/api/session/${sessionIdRef.current}`, { method: "DELETE" }).catch(() => {});
+      sessionIdRef.current = null;
+    }
     if (searchIdRef.current) {
       fetch(`/api/search/${searchIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
       searchIdRef.current = null;
@@ -136,5 +177,5 @@ export function useSearch() {
     setState(initialSearchState);
   }, []);
 
-  return { state, search, reset, setState };
+  return { state, search, reset, newSession, setState };
 }

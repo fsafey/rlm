@@ -10,7 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from rlm.core.types import CodeBlock, REPLResult, RLMIteration
-from rlm_search.api import _extract_sources, _searches, app
+from rlm_search.api import _extract_sources, _searches, _sessions, app
 from rlm_search.streaming_logger import StreamingLogger
 
 
@@ -21,6 +21,7 @@ def client():
     Cascade health check is patched to avoid real network calls during lifespan.
     """
     _searches.clear()
+    _sessions.clear()
     with patch("rlm_search.api.httpx.AsyncClient") as mock_client_cls:
         mock_instance = AsyncMock()
         mock_instance.get = AsyncMock(side_effect=httpx.ConnectError("no cascade in test"))
@@ -87,6 +88,9 @@ class TestSearchEndpoint:
         assert "search_id" in data
         assert isinstance(data["search_id"], str)
         assert len(data["search_id"]) > 0
+        assert "session_id" in data
+        assert isinstance(data["session_id"], str)
+        assert len(data["session_id"]) > 0
 
     @patch("rlm_search.api._executor")
     def test_search_with_settings(self, mock_executor: MagicMock, client: TestClient):
@@ -105,11 +109,14 @@ class TestSearchEndpoint:
         )
         assert resp.status_code == 200
         call_args = mock_executor.submit.call_args
-        settings = call_args[0][3]  # settings dict (was [4] when collection existed)
+        settings = call_args[0][3]  # settings dict
         assert settings["backend"] == "openai"
         assert settings["model"] == "gpt-4o"
         assert settings["max_iterations"] == 5
         assert settings["max_depth"] == 2
+        session_id = call_args[0][4]  # session_id
+        assert isinstance(session_id, str)
+        assert len(session_id) > 0
 
     def test_search_missing_query(self, client: TestClient):
         resp = client.post("/api/search", json={})
@@ -306,6 +313,7 @@ class TestSubModelWiring:
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-1"
+        session_id = "test-session-1"
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
         _searches[search_id] = logger
 
@@ -313,18 +321,22 @@ class TestSubModelWiring:
         mock_instance.completion.return_value = MagicMock(
             response="answer", execution_time=1.0, usage_summary=None
         )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
         mock_rlm.return_value = mock_instance
 
         _run_search(
             search_id,
             "test query",
             {"model": "claude-opus-4-6", "sub_model": "claude-sonnet-4-5-20250929"},
+            session_id,
         )
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] == ["anthropic"]
         assert rlm_kwargs["other_backend_kwargs"] is not None
         assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-sonnet-4-5-20250929"
+        _sessions.clear()
 
     @patch("rlm_search.api.RLM")
     @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
@@ -334,6 +346,7 @@ class TestSubModelWiring:
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-2"
+        session_id = "test-session-2"
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
         _searches[search_id] = logger
 
@@ -341,17 +354,21 @@ class TestSubModelWiring:
         mock_instance.completion.return_value = MagicMock(
             response="answer", execution_time=1.0, usage_summary=None
         )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
         mock_rlm.return_value = mock_instance
 
         _run_search(
             search_id,
             "test query",
             {"model": "claude-opus-4-6", "sub_model": "claude-opus-4-6"},
+            session_id,
         )
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] is None
         assert rlm_kwargs["other_backend_kwargs"] is None
+        _sessions.clear()
 
     @patch("rlm_search.api.RLM")
     @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
@@ -361,6 +378,7 @@ class TestSubModelWiring:
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-3"
+        session_id = "test-session-3"
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
         _searches[search_id] = logger
 
@@ -368,13 +386,16 @@ class TestSubModelWiring:
         mock_instance.completion.return_value = MagicMock(
             response="answer", execution_time=1.0, usage_summary=None
         )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
         mock_rlm.return_value = mock_instance
 
-        _run_search(search_id, "test query", {"sub_model": ""})
+        _run_search(search_id, "test query", {"sub_model": ""}, session_id)
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] is None
         assert rlm_kwargs["other_backend_kwargs"] is None
+        _sessions.clear()
 
     @patch("rlm_search.api.RLM")
     @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
@@ -386,6 +407,7 @@ class TestSubModelWiring:
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-4"
+        session_id = "test-session-4"
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
         _searches[search_id] = logger
 
@@ -393,13 +415,16 @@ class TestSubModelWiring:
         mock_instance.completion.return_value = MagicMock(
             response="answer", execution_time=1.0, usage_summary=None
         )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
         mock_rlm.return_value = mock_instance
 
-        _run_search(search_id, "test query", {})
+        _run_search(search_id, "test query", {}, session_id)
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] == ["anthropic"]
         assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-haiku-4-5-20251001"
+        _sessions.clear()
 
     @patch("rlm_search.api.RLM")
     @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
@@ -410,6 +435,7 @@ class TestSubModelWiring:
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-5"
+        session_id = "test-session-5"
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
         _searches[search_id] = logger
 
@@ -417,18 +443,22 @@ class TestSubModelWiring:
         mock_instance.completion.return_value = MagicMock(
             response="answer", execution_time=1.0, usage_summary=None
         )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
         mock_rlm.return_value = mock_instance
 
         _run_search(
             search_id,
             "test query",
             {"sub_model": "claude-sonnet-4-5-20250929"},
+            session_id,
         )
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] == ["claude_cli"]
         assert rlm_kwargs["other_backend_kwargs"][0]["model"] == "claude-sonnet-4-5-20250929"
         assert "model_name" not in rlm_kwargs["other_backend_kwargs"][0]
+        _sessions.clear()
 
 
 class TestStreamingLoggerSourceRegistry:
@@ -437,6 +467,193 @@ class TestStreamingLoggerSourceRegistry:
     def test_source_registry_initialized_empty(self):
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name="test")
         assert logger.source_registry == {}
+
+
+class TestSessionLifecycle:
+    """Test persistent session creation, follow-up, and cleanup."""
+
+    @patch("rlm_search.api._executor")
+    def test_first_search_returns_session_id(self, mock_executor: MagicMock, client: TestClient):
+        """First search creates a new session_id."""
+        mock_executor.submit = MagicMock()
+        resp = client.post("/api/search", json={"query": "test"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "session_id" in data
+        assert isinstance(data["session_id"], str)
+        assert len(data["session_id"]) > 0
+
+    @patch("rlm_search.api._executor")
+    def test_follow_up_preserves_session_id(self, mock_executor: MagicMock, client: TestClient):
+        """Follow-up search with session_id reuses the same session."""
+        mock_executor.submit = MagicMock()
+
+        # Simulate an existing session
+        from rlm_search.api import SessionState, _sessions
+
+        mock_rlm = MagicMock()
+        mock_rlm.close = MagicMock()
+        import threading
+
+        session = SessionState(
+            session_id="existing-session",
+            rlm=mock_rlm,
+            lock=threading.Lock(),
+        )
+        _sessions["existing-session"] = session
+
+        resp = client.post(
+            "/api/search",
+            json={"query": "follow-up", "session_id": "existing-session"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["session_id"] == "existing-session"
+        _sessions.clear()
+
+    @patch("rlm_search.api._executor")
+    def test_follow_up_invalid_session_404(self, mock_executor: MagicMock, client: TestClient):
+        """Follow-up with non-existent session returns 404."""
+        mock_executor.submit = MagicMock()
+        resp = client.post(
+            "/api/search",
+            json={"query": "test", "session_id": "nonexistent"},
+        )
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+    @patch("rlm_search.api._executor")
+    def test_follow_up_busy_session_409(self, mock_executor: MagicMock, client: TestClient):
+        """Follow-up on a session with active search returns 409."""
+        import threading
+
+        from rlm_search.api import SessionState, _sessions
+
+        mock_rlm = MagicMock()
+        lock = threading.Lock()
+        lock.acquire()  # Simulate locked (active search)
+        session = SessionState(
+            session_id="busy-session",
+            rlm=mock_rlm,
+            lock=lock,
+        )
+        _sessions["busy-session"] = session
+
+        resp = client.post(
+            "/api/search",
+            json={"query": "test", "session_id": "busy-session"},
+        )
+        assert resp.status_code == 409
+        lock.release()
+        _sessions.clear()
+
+    def test_delete_session(self, client: TestClient):
+        """DELETE /api/session/{id} cleans up the session."""
+        import threading
+
+        from rlm_search.api import SessionState, _sessions
+
+        mock_rlm = MagicMock()
+        mock_rlm.close = MagicMock()
+        _sessions["del-session"] = SessionState(
+            session_id="del-session",
+            rlm=mock_rlm,
+            lock=threading.Lock(),
+        )
+
+        resp = client.request("DELETE", "/api/session/del-session")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        assert "del-session" not in _sessions
+        mock_rlm.close.assert_called_once()
+
+    def test_delete_nonexistent_session_404(self, client: TestClient):
+        resp = client.request("DELETE", "/api/session/nonexistent")
+        assert resp.status_code == 404
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    def test_run_search_creates_persistent_rlm(self, _mock_setup, mock_rlm):
+        """First _run_search in a session creates RLM with persistent=True."""
+        from rlm_search.api import _run_search, _searches, _sessions
+
+        search_id = "test-persist-1"
+        session_id = "test-persist-session"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
+        mock_rlm.return_value = mock_instance
+
+        _run_search(search_id, "test query", {}, session_id)
+
+        # Verify persistent=True was passed
+        rlm_kwargs = mock_rlm.call_args[1]
+        assert rlm_kwargs["persistent"] is True
+
+        # Verify session was registered
+        assert session_id in _sessions
+        assert _sessions[session_id].rlm is mock_instance
+        _sessions.clear()
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    def test_follow_up_reuses_rlm_instance(self, _mock_setup, mock_rlm):
+        """Follow-up _run_search reuses existing RLM, swaps logger."""
+        import threading
+
+        from rlm_search.api import SessionState, _run_search, _searches, _sessions
+
+        # Setup: create an existing session with a mock RLM
+        existing_rlm = MagicMock()
+        existing_rlm.completion.return_value = MagicMock(
+            response="follow-up answer", execution_time=0.5, usage_summary=None
+        )
+        existing_rlm._persistent_env = MagicMock()
+        existing_rlm._persistent_env.locals = {"tool_calls": [{"tool": "search"}]}
+        existing_rlm.backend_kwargs = {"model_name": "claude-opus-4-6"}
+        existing_rlm.max_depth = 1
+        existing_rlm.max_iterations = 15
+        existing_rlm.backend = "anthropic"
+        existing_rlm.environment_type = "local"
+        existing_rlm.environment_kwargs = {}
+        existing_rlm.other_backends = None
+
+        session_id = "follow-up-session"
+        _sessions[session_id] = SessionState(
+            session_id=session_id,
+            rlm=existing_rlm,
+            lock=threading.Lock(),
+        )
+
+        # Run follow-up search
+        search_id = "test-followup-1"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        _run_search(search_id, "follow-up query", {}, session_id)
+
+        # RLM constructor should NOT have been called (reused existing)
+        mock_rlm.assert_not_called()
+
+        # Existing RLM's completion() was called
+        existing_rlm.completion.assert_called_once_with("follow-up query", root_prompt="follow-up query")
+
+        # Logger was swapped
+        assert existing_rlm.logger is logger
+
+        # Session search_count incremented
+        assert _sessions[session_id].search_count == 1
+
+        # Tool call offset was synced from persistent env
+        assert logger._last_tool_call_count == 1
+
+        _sessions.clear()
 
 
 def _parse_sse_events(text: str) -> list[dict]:

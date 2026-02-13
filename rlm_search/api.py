@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import re
+import threading
 import time
 import traceback
 import uuid
@@ -20,6 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from rlm.core.rlm import RLM
+from rlm.core.types import RLMMetadata
+from rlm.utils.rlm_utils import filter_sensitive_keys
 from rlm_search.config import (
     _PROJECT_ROOT,
     ANTHROPIC_API_KEY,
@@ -30,6 +34,7 @@ from rlm_search.config import (
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
     RLM_SUB_MODEL,
+    SESSION_TIMEOUT,
 )
 from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
@@ -41,6 +46,30 @@ _log = logging.getLogger("rlm_search")
 
 # Cached KB overview — built once at startup, shared across searches
 _kb_overview_cache: dict | None = None
+
+
+# ---------------------------------------------------------------------------
+# Session state for persistent multi-turn RLM
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class SessionState:
+    """Persistent RLM session for multi-turn conversations."""
+
+    session_id: str
+    rlm: RLM
+    lock: threading.Lock
+    search_count: int = 0
+    last_active: float = dataclasses.field(default_factory=time.monotonic)
+
+
+_sessions: dict[str, SessionState] = {}
+
+
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
 
 
 async def _check_cascade_health(
@@ -63,7 +92,7 @@ async def _check_cascade_health(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Startup/shutdown lifecycle — Cascade health check + stale search cleanup."""
+    """Startup/shutdown lifecycle — Cascade health check + stale cleanup."""
 
     global _kb_overview_cache
 
@@ -90,9 +119,22 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     async def _cleanup_stale() -> None:
         while True:
             await asyncio.sleep(300)
+            # Clean completed searches
             stale = [sid for sid, lg in _searches.items() if lg.is_done]
             for sid in stale:
                 _searches.pop(sid, None)
+            # Clean expired sessions
+            now = time.monotonic()
+            expired = [
+                sid
+                for sid, ses in list(_sessions.items())
+                if now - ses.last_active > SESSION_TIMEOUT and not ses.lock.locked()
+            ]
+            for sid in expired:
+                ses = _sessions.pop(sid, None)
+                if ses:
+                    ses.rlm.close()
+                    print(f"[SESSION:{sid}] Expired after {SESSION_TIMEOUT}s idle")
 
     task = asyncio.create_task(_cleanup_stale())
     yield
@@ -162,69 +204,152 @@ def _backfill_tool_calls(iterations: list[dict]) -> None:
             iteration["tool_calls"] = []
 
 
-def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
-    """Run an RLM completion in a thread. Pushes events to the StreamingLogger."""
-    logger = _searches[search_id]
+def _build_rlm_kwargs(
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Build RLM constructor kwargs from search settings + config defaults."""
     backend = settings.get("backend") or RLM_BACKEND
     model = settings.get("model") or RLM_MODEL
     sub_model = settings.get("sub_model") or RLM_SUB_MODEL
     max_iterations = settings.get("max_iterations") or RLM_MAX_ITERATIONS
     max_depth = settings.get("max_depth") or RLM_MAX_DEPTH
-    print(
-        f"[SEARCH:{search_id}] Starting | query={query!r} backend={backend}"
-        f" model={model} sub_model={sub_model or '(same)'}"
+
+    if backend == "claude_cli":
+        backend_kwargs: dict[str, Any] = {"model": model}
+    else:
+        backend_kwargs = {"model_name": model}
+        if ANTHROPIC_API_KEY:
+            backend_kwargs["api_key"] = ANTHROPIC_API_KEY
+
+    # Build other_backends for sub-model routing (depth-1 calls)
+    other_backends_arg: list[str] | None = None
+    other_backend_kwargs_arg: list[dict[str, Any]] | None = None
+    if sub_model and sub_model not in ("", "same") and sub_model != model:
+        if backend == "claude_cli":
+            sub_kwargs: dict[str, Any] = {"model": sub_model}
+        else:
+            sub_kwargs = {"model_name": sub_model}
+            if ANTHROPIC_API_KEY:
+                sub_kwargs["api_key"] = ANTHROPIC_API_KEY
+        other_backends_arg = [backend]
+        other_backend_kwargs_arg = [sub_kwargs]
+
+    setup_code = build_search_setup_code(
+        api_url=CASCADE_API_URL,
+        api_key=CASCADE_API_KEY,
+        kb_overview_data=_kb_overview_cache,
     )
 
+    return {
+        "backend": backend,
+        "model": model,
+        "sub_model": sub_model,
+        "max_iterations": max_iterations,
+        "max_depth": max_depth,
+        "backend_kwargs": backend_kwargs,
+        "other_backends": other_backends_arg,
+        "other_backend_kwargs": other_backend_kwargs_arg,
+        "setup_code": setup_code,
+    }
+
+
+def _emit_metadata(logger: StreamingLogger, rlm: RLM) -> None:
+    """Emit RLM metadata to a logger (used for follow-up searches where __init__ already ran)."""
+    bk = rlm.backend_kwargs or {}
+    metadata = RLMMetadata(
+        root_model=bk.get("model_name") or bk.get("model", "unknown"),
+        max_depth=rlm.max_depth,
+        max_iterations=rlm.max_iterations,
+        backend=rlm.backend,
+        backend_kwargs=filter_sensitive_keys(bk),
+        environment_type=rlm.environment_type,
+        environment_kwargs=filter_sensitive_keys(rlm.environment_kwargs),
+        other_backends=rlm.other_backends,
+    )
+    logger.log_metadata(metadata)
+
+
+# ---------------------------------------------------------------------------
+# Core search orchestration
+# ---------------------------------------------------------------------------
+
+
+def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id: str) -> None:
+    """Run an RLM completion in a thread. Pushes events to the StreamingLogger."""
+    logger = _searches[search_id]
+    session = _sessions.get(session_id)
+
     try:
-        setup_code = build_search_setup_code(
-            api_url=CASCADE_API_URL,
-            api_key=CASCADE_API_KEY,
-            kb_overview_data=_kb_overview_cache,
-        )
+        if session is not None:
+            # ── Follow-up search: reuse persistent RLM ──
+            bk = session.rlm.backend_kwargs or {}
+            model = bk.get("model_name") or bk.get("model", "unknown")
+            model_short = model.rsplit("-", 1)[0] if len(model.split("-")) > 3 else model
 
-        if backend == "claude_cli":
-            backend_kwargs: dict[str, Any] = {"model": model}
+            with session.lock:
+                session.search_count += 1
+                session.last_active = time.monotonic()
+                rlm = session.rlm
+
+                # Swap logger for this search
+                rlm.logger = logger
+
+                # Manually emit metadata (since __init__ already ran)
+                _emit_metadata(logger, rlm)
+
+                # Sync tool_call offset so the new logger computes correct deltas
+                if rlm._persistent_env is not None:
+                    tc = rlm._persistent_env.locals.get("tool_calls", [])
+                    logger._last_tool_call_count = len(tc)
+
+                print(
+                    f"[SEARCH:{search_id}] Follow-up #{session.search_count} in session "
+                    f"{session_id} | query={query!r}"
+                )
+                logger.emit_progress("reasoning", f"Follow-up analysis with {model_short}")
+
+                result = rlm.completion(query, root_prompt=query)
+
         else:
-            backend_kwargs: dict[str, Any] = {"model_name": model}
-            if ANTHROPIC_API_KEY:
-                backend_kwargs["api_key"] = ANTHROPIC_API_KEY
+            # ── New session: create persistent RLM ──
+            kw = _build_rlm_kwargs(settings)
+            model_short = (
+                kw["model"].rsplit("-", 1)[0]
+                if len(kw["model"].split("-")) > 3
+                else kw["model"]
+            )
 
-        # Build other_backends for sub-model routing (depth-1 calls)
-        other_backends_arg: list[str] | None = None
-        other_backend_kwargs_arg: list[dict[str, Any]] | None = None
-        if sub_model and sub_model not in ("", "same") and sub_model != model:
-            if backend == "claude_cli":
-                sub_kwargs: dict[str, Any] = {"model": sub_model}
-            else:
-                sub_kwargs: dict[str, Any] = {"model_name": sub_model}
-                if ANTHROPIC_API_KEY:
-                    sub_kwargs["api_key"] = ANTHROPIC_API_KEY
-            other_backends_arg = [backend]
-            other_backend_kwargs_arg = [sub_kwargs]
+            print(
+                f"[SEARCH:{search_id}] New session {session_id} | query={query!r} "
+                f"backend={kw['backend']} model={kw['model']} sub_model={kw['sub_model'] or '(same)'}"
+            )
 
-        rlm = RLM(
-            backend=backend,
-            backend_kwargs=backend_kwargs,
-            other_backends=other_backends_arg,
-            other_backend_kwargs=other_backend_kwargs_arg,
-            environment="local",
-            environment_kwargs={"setup_code": setup_code},
-            max_iterations=max_iterations,
-            max_depth=max_depth,
-            custom_system_prompt=AGENTIC_SEARCH_SYSTEM_PROMPT,
-            logger=logger,
-        )
+            rlm = RLM(
+                backend=kw["backend"],
+                backend_kwargs=kw["backend_kwargs"],
+                other_backends=kw["other_backends"],
+                other_backend_kwargs=kw["other_backend_kwargs"],
+                environment="local",
+                environment_kwargs={"setup_code": kw["setup_code"]},
+                max_iterations=kw["max_iterations"],
+                max_depth=kw["max_depth"],
+                custom_system_prompt=AGENTIC_SEARCH_SYSTEM_PROMPT,
+                logger=logger,
+                persistent=True,
+            )
+
+            _sessions[session_id] = SessionState(
+                session_id=session_id,
+                rlm=rlm,
+                lock=threading.Lock(),
+            )
+
+            logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
+            result = rlm.completion(query, root_prompt=query)
+
         print(
-            f"[SEARCH:{search_id}] RLM initialized | max_iter={max_iterations} max_depth={max_depth}"
-        )
-
-        # Single progress event after all setup is done — the real wait is the LLM call next
-        model_short = model.rsplit("-", 1)[0] if len(model.split("-")) > 3 else model
-        logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
-
-        result = rlm.completion(query, root_prompt=query)
-        print(
-            f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} time={result.execution_time:.2f}s"
+            f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} "
+            f"time={result.execution_time:.2f}s"
         )
 
         sources = _extract_sources(result.response or "", logger.source_registry)
@@ -246,10 +371,32 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any]) -> None:
         logger.mark_error(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
 
 
+# ---------------------------------------------------------------------------
+# API endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.post("/api/search", response_model=SearchResponse)
 async def start_search(req: SearchRequest) -> SearchResponse:
+    session_id = req.session_id
+
+    # Validate existing session if provided
+    if session_id:
+        session = _sessions.get(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session.lock.locked():
+            raise HTTPException(status_code=409, detail="Session has an active search")
+    else:
+        # New session
+        session_id = str(uuid.uuid4())[:12]
+
     search_id = str(uuid.uuid4())[:12]
-    print(f"[API] POST /api/search | id={search_id} query={req.query!r}")
+    print(
+        f"[API] POST /api/search | search={search_id} session={session_id} "
+        f"follow_up={req.session_id is not None} query={req.query!r}"
+    )
+
     logger = StreamingLogger(
         log_dir=str(_PROJECT_ROOT / "rlm_logs"),
         file_name=f"search_{search_id}",
@@ -259,9 +406,9 @@ async def start_search(req: SearchRequest) -> SearchResponse:
     _searches[search_id] = logger
 
     settings = req.settings.model_dump() if req.settings else {}
-    _executor.submit(_run_search, search_id, req.query, settings)
+    _executor.submit(_run_search, search_id, req.query, settings, session_id)
 
-    return SearchResponse(search_id=search_id)
+    return SearchResponse(search_id=search_id, session_id=session_id)
 
 
 @app.post("/api/search/{search_id}/cancel")
@@ -272,6 +419,20 @@ async def cancel_search(search_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Search not found")
     logger.cancel()
     return {"status": "cancelled"}
+
+
+@app.delete("/api/session/{session_id}")
+async def delete_session(session_id: str) -> dict:
+    """Explicitly tear down a persistent session and free resources."""
+    session = _sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.lock.locked():
+        raise HTTPException(status_code=409, detail="Session has an active search")
+    _sessions.pop(session_id, None)
+    session.rlm.close()
+    print(f"[SESSION:{session_id}] Deleted (search_count={session.search_count})")
+    return {"status": "deleted"}
 
 
 @app.get("/api/search/{search_id}/stream")

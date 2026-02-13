@@ -19,6 +19,7 @@ RLM_MODEL = os.getenv("RLM_MODEL", "claude-opus-4-6")
 RLM_SUB_MODEL = os.getenv("RLM_SUB_MODEL", "")
 RLM_MAX_ITERATIONS = int(os.getenv("RLM_MAX_ITERATIONS", "15"))
 RLM_MAX_DEPTH = int(os.getenv("RLM_MAX_DEPTH", "1"))
+SESSION_TIMEOUT = int(os.getenv("SESSION_TIMEOUT", "1800"))  # 30 min default
 SEARCH_BACKEND_PORT = int(os.getenv("SEARCH_BACKEND_PORT", "8092"))
 SEARCH_FRONTEND_PORT = int(os.getenv("SEARCH_FRONTEND_PORT", "3002"))
 

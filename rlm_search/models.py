@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class SearchRequest(BaseModel):
     query: str
     settings: SearchSettings | None = None
+    session_id: str | None = None  # None = new session; set for follow-up
 
 
 class SearchSettings(BaseModel):
@@ -20,6 +21,7 @@ class SearchSettings(BaseModel):
 
 class SearchResponse(BaseModel):
     search_id: str
+    session_id: str
 
 
 class SearchSource(BaseModel):

@@ -19,9 +19,10 @@ interface SearchInputProps {
   onSearch: (query: string, settings: SearchSettings) => void;
   onReset: () => void;
   isSearching: boolean;
+  isFollowUp?: boolean;
 }
 
-export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps) {
+export function SearchInput({ onSearch, onReset, isSearching, isFollowUp }: SearchInputProps) {
   const [query, setQuery] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<SearchSettings>({ ...defaultSettings });
@@ -41,7 +42,7 @@ export function SearchInput({ onSearch, onReset, isSearching }: SearchInputProps
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Ask a question about Islamic jurisprudence..."
+            placeholder={isFollowUp ? "Ask a follow-up question..." : "Ask a question about Islamic jurisprudence..."}
             className="flex-1 bg-transparent outline-none text-sm placeholder:text-muted-foreground"
             disabled={isSearching}
           />

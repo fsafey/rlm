@@ -90,9 +90,18 @@ export interface ErrorEvent {
 
 export type SSEEvent = MetadataEvent | ProgressEvent | Iteration | DoneEvent | ErrorEvent;
 
+export interface ConversationTurn {
+  query: string;
+  answer: string | null;
+  sources: SearchSource[];
+  searchId: string;
+  executionTime: number | null;
+}
+
 export interface SearchState {
   status: "idle" | "searching" | "done" | "error";
   searchId: string | null;
+  sessionId: string | null;
   query: string;
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
@@ -102,6 +111,7 @@ export interface SearchState {
   executionTime: number | null;
   usage: Record<string, unknown> | null;
   error: string | null;
+  conversationHistory: ConversationTurn[];
 }
 
 export interface SearchSettings {
@@ -119,6 +129,7 @@ export const defaultSettings: SearchSettings = {
 export const initialSearchState: SearchState = {
   status: "idle",
   searchId: null,
+  sessionId: null,
   query: "",
   metadata: null,
   progressSteps: [],
@@ -128,6 +139,7 @@ export const initialSearchState: SearchState = {
   executionTime: null,
   usage: null,
   error: null,
+  conversationHistory: [],
 };
 
 export function extractFinalAnswer(answer: string | [string, string] | null): string | null {

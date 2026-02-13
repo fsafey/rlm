@@ -350,7 +350,7 @@ def kb_overview():
     code += '''
 
 def evaluate_results(question, results, top_n=5, model=None):
-    """Sub-agent: evaluate search result relevance and suggest next steps.
+    """Sub-agent: evaluate search result relevance with per-result confidence scores.
 
     Call after search() to check whether results match the question
     before spending a turn examining them in detail.
@@ -363,9 +363,9 @@ def evaluate_results(question, results, top_n=5, model=None):
 
     Returns:
         Dict with:
-          "ratings": [{"id": str, "rating": "RELEVANT"|"PARTIAL"|"OFF-TOPIC"}, ...]
-          "suggestion": str (next step recommendation)
-          "raw": str (full sub-LLM response)
+          "ratings": [{"id": str, "rating": "RELEVANT"|"PARTIAL"|"OFF-TOPIC", "confidence": int}, ...]
+          "suggestion": str (algorithmically derived next step)
+          "raw": str (all sub-LLM responses joined by --- separator)
         Use ratings to filter results before format_evidence().
     """
     if isinstance(results, dict):
@@ -373,55 +373,69 @@ def evaluate_results(question, results, top_n=5, model=None):
     if not results:
         return {"ratings": [], "suggestion": "No results to evaluate. Try a different query or remove filters.", "raw": ""}
     with _ToolCallTracker("evaluate_results", {"question": question[:100], "top_n": top_n}, parent_idx=_current_parent_idx) as tc:
-        evidence = []
+        prompts = []
         ids = []
         for r in results[:top_n]:
             rid = str(r.get("id", "?"))
             ids.append(rid)
             score = r.get("score", 0)
-            q = (r.get("question", "") or "")[:150]
-            evidence.append(f"[{rid}] score={score:.2f} Q: {q}")
-        result_block = "\\n".join(evidence)
-        prompt = (
-            f"Evaluate these search results for the question:\\n"
-            f"\\"{question}\\"\\n\\n"
-            f"Results:\\n{result_block}\\n\\n"
-            f"For each result, output exactly one line: <id> RELEVANT|PARTIAL|OFF-TOPIC\\n"
-            f"Then a blank line, then one line starting with SUGGESTION: stating whether to refine the query, change filters, or proceed to synthesis."
-        )
-        raw = llm_query(prompt, model=model)
-        # Parse structured ratings from response
+            q = (r.get("question", "") or "")[:300]
+            a = (r.get("answer", "") or "")[:1000]
+            prompt = (
+                f"Evaluate this search result for the question:\\n"
+                f"\\"{question}\\"\\n\\n"
+                f"Result [{rid}] score={score:.2f}\\n"
+                f"Q: {q}\\n"
+                f"A: {a}\\n\\n"
+                f"Respond with exactly one line: RELEVANT|PARTIAL|OFF-TOPIC followed by CONFIDENCE:<1-5>\\n"
+                f"RELEVANT = directly answers the question\\n"
+                f"PARTIAL = related but incomplete\\n"
+                f"OFF-TOPIC = not about this question"
+            )
+            prompts.append(prompt)
+        responses = llm_query_batched(prompts, model=model)
         ratings = []
-        suggestion = ""
-        # Sort IDs longest-first to prevent prefix collisions (e.g. "q1" matching "q10")
-        sorted_ids = sorted(ids, key=len, reverse=True)
-        for line in raw.strip().split("\\n"):
-            line = line.strip()
-            if line.upper().startswith("SUGGESTION:"):
-                suggestion = line.split(":", 1)[1].strip()
+        raw_parts = []
+        for i, resp in enumerate(responses):
+            rid = ids[i] if i < len(ids) else "?"
+            raw_parts.append(resp)
+            if resp.strip().startswith("Error:"):
+                ratings.append({"id": rid, "rating": "UNKNOWN", "confidence": 0})
                 continue
-            for rid in sorted_ids:
-                if rid in line:
-                    upper = line.upper()
-                    if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
-                        ratings.append({"id": rid, "rating": "OFF-TOPIC"})
-                    elif "PARTIAL" in upper:
-                        ratings.append({"id": rid, "rating": "PARTIAL"})
-                    elif "RELEVANT" in upper:
-                        ratings.append({"id": rid, "rating": "RELEVANT"})
-                    else:
-                        ratings.append({"id": rid, "rating": "UNKNOWN"})
-                    break
+            upper = resp.strip().upper()
+            if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
+                rating = "OFF-TOPIC"
+            elif "PARTIAL" in upper:
+                rating = "PARTIAL"
+            elif "RELEVANT" in upper:
+                rating = "RELEVANT"
+            else:
+                rating = "UNKNOWN"
+            confidence = 3
+            if "CONFIDENCE:" in upper:
+                try:
+                    conf_str = upper.split("CONFIDENCE:")[1].strip()[:1]
+                    confidence = int(conf_str)
+                    confidence = max(1, min(5, confidence))
+                except (ValueError, IndexError):
+                    confidence = 3
+            ratings.append({"id": rid, "rating": rating, "confidence": confidence})
+        raw = "\\n---\\n".join(raw_parts)
         relevant_count = sum(1 for r in ratings if r["rating"] == "RELEVANT")
         partial_count = sum(1 for r in ratings if r["rating"] == "PARTIAL")
         off_topic_count = sum(1 for r in ratings if r["rating"] == "OFF-TOPIC")
         unknown_count = sum(1 for r in ratings if r["rating"] == "UNKNOWN")
+        if relevant_count >= 3:
+            suggestion = "Proceed to synthesis"
+        elif relevant_count >= 1 or partial_count >= 2:
+            suggestion = "Consider examining partial matches or refining"
+        else:
+            suggestion = "Refine the query"
         summary = f"{relevant_count} relevant, {partial_count} partial, {off_topic_count} off-topic"
         if unknown_count:
             summary += f", {unknown_count} unknown"
         print(f"[evaluate_results] {len(ratings)} rated: {summary}")
-        if suggestion:
-            print(f"[evaluate_results] suggestion: {suggestion}")
+        print(f"[evaluate_results] suggestion: {suggestion}")
         tc.set_summary({"num_rated": len(ratings), "relevant": relevant_count, "partial": partial_count, "off_topic": off_topic_count})
         return {"ratings": ratings, "suggestion": suggestion, "raw": raw}
 
@@ -488,6 +502,52 @@ def critique_answer(question, draft, model=None):
         print(f"[critique_answer] verdict={status}")
         tc.set_summary({"verdict": status})
         return verdict
+
+
+def _batched_critique(question, draft, model=None):
+    """Internal: dual-reviewer critique via llm_query_batched.
+
+    Returns (combined_verdict: str, passed: bool).
+    """
+    _MAX_DRAFT_LEN = 8000
+    if len(draft) > _MAX_DRAFT_LEN:
+        draft = draft[:_MAX_DRAFT_LEN]
+    content_prompt = (
+        f"You are a content expert. Review this draft answer to the question:\\n"
+        f"\\"{question}\\"\\n\\n"
+        f"Draft:\\n{draft}\\n\\n"
+        f"Check:\\n"
+        f"1. Does it answer the actual question asked?\\n"
+        f"2. Are there unsupported claims or fabricated rulings?\\n"
+        f"3. Is anything important missing?\\n\\n"
+        f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
+    )
+    citation_prompt = (
+        f"You are a citation auditor. Review this draft answer to the question:\\n"
+        f"\\"{question}\\"\\n\\n"
+        f"Draft:\\n{draft}\\n\\n"
+        f"Check:\\n"
+        f"1. Are [Source: <id>] citations present for factual claims?\\n"
+        f"2. Are any cited IDs missing or fabricated?\\n"
+        f"3. Are there key claims without any citation?\\n\\n"
+        f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
+    )
+    responses = llm_query_batched([content_prompt, citation_prompt], model=model)
+    content_verdict = responses[0] if len(responses) > 0 else "Error: no response"
+    citation_verdict = responses[1] if len(responses) > 1 else "Error: no response"
+    content_passed = content_verdict.strip().strip("*").upper().startswith("PASS")
+    citation_passed = citation_verdict.strip().strip("*").upper().startswith("PASS")
+    passed = content_passed and citation_passed
+    failed_parts = []
+    if not content_passed:
+        failed_parts.append("content")
+    if not citation_passed:
+        failed_parts.append("citations")
+    verdict_str = "PASS" if passed else "FAIL"
+    failed_str = f" (failed: {', '.join(failed_parts)})" if failed_parts else ""
+    print(f"[critique_answer] dual-review verdict={verdict_str}{failed_str}")
+    combined = f"CONTENT: {content_verdict}\\n\\nCITATIONS: {citation_verdict}"
+    return combined, passed
 
 
 def classify_question(question, model=None):
@@ -625,7 +685,7 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
         # Evaluate top results
         ratings_map = {}
         try:
-            eval_out = evaluate_results(eval_question, deduped[:10], model=eval_model)
+            eval_out = evaluate_results(eval_question, deduped[:15], top_n=15, model=eval_model)
             for rt in eval_out["ratings"]:
                 ratings_map[rt["id"]] = rt["rating"]
         except Exception as e:
@@ -710,8 +770,7 @@ def draft_answer(question, results, instructions=None, model=None):
 
         answer = llm_query("".join(prompt_parts), model=model)
 
-        critique_text = critique_answer(question, answer)
-        passed = critique_text.strip().strip("*").upper().startswith("PASS")
+        critique_text, passed = _batched_critique(question, answer, model=model)
         revised = False
 
         if not passed:
@@ -723,8 +782,7 @@ def draft_answer(question, results, instructions=None, model=None):
                 "Fix flagged issues. Keep valid citations. Same format.\\n",
             ]
             answer = llm_query("".join(rev_parts), model=model)
-            critique_text = critique_answer(question, answer)
-            passed = critique_text.strip().strip("*").upper().startswith("PASS")
+            critique_text, passed = _batched_critique(question, answer, model=model)
             revised = True
 
         print(

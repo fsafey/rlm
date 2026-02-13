@@ -40,7 +40,7 @@ Pre-computed taxonomy overview. Call first to orient. Prints categories, cluster
 - `format_evidence(results, max_per_source)` — format as `[Source: <id>]` citation strings
 - `fiqh_lookup(query)` — Islamic terminology dictionary (for written answers, not search queries)
 - `llm_query(prompt, model)` — sub-LLM call for custom analysis (no tools, no history)
-- `evaluate_results(question, results, top_n, model)` — rate result relevance
+- `evaluate_results(question, results, top_n, model)` — rate result relevance (includes confidence 1-5)
 - `reformulate(question, query, top_score, model)` — generate alternative queries when scores < 0.3
 - `critique_answer(question, draft, model)` — PASS/FAIL review of draft answer
 - `classify_question(question, model)` — classify question and recommend search strategy

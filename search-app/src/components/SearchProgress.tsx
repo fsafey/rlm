@@ -25,6 +25,8 @@ interface SearchProgressProps {
 
 const PHASE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   reasoning: Brain,
+  classifying: Tag,
+  classified: Tag,
 };
 
 // --- Iteration activity detection ---
@@ -90,6 +92,16 @@ function detectActivityFromStdout(iteration: Iteration): IterationActivity {
   }
 
   if (stdout.includes("[critique_answer]")) {
+    const dualMatch = stdout.match(/\[critique_answer\] dual-review verdict=(\w+)(.*)/);
+    if (dualMatch) {
+      const dualVerdict = dualMatch[1];
+      const failedParts = dualMatch[2]; // e.g., " (failed: content, citations)"
+      return {
+        label: "Critiquing",
+        metric: `Dual-review: ${dualVerdict}${failedParts || ""}`,
+        icon: ShieldCheck,
+      };
+    }
     const verdict = extractMetric(stdout, /\[critique_answer\] verdict=(\w+)/);
     return {
       label: "Critiquing",
@@ -208,6 +220,20 @@ function detectActivityFromToolCalls(iteration: Iteration): IterationActivity {
         metric: verdict ? `Verdict: ${verdict}` : "Reviewed draft",
         icon: ShieldCheck,
       };
+    }
+    case "batched_critique": {
+      const s = primary.result_summary;
+      const verdict = s.verdict as string | undefined;
+      const contentOk = s.content_passed as boolean | undefined;
+      const citationOk = s.citation_passed as boolean | undefined;
+      let metric = verdict ? `Dual-review: ${verdict}` : "Dual-reviewer critique";
+      if (verdict === "FAIL" && contentOk !== undefined && citationOk !== undefined) {
+        const failed = [];
+        if (!contentOk) failed.push("content");
+        if (!citationOk) failed.push("citations");
+        metric = `Dual-review FAIL (${failed.join(", ")})`;
+      }
+      return { label: "Critiquing", metric, icon: ShieldCheck };
     }
     case "reformulate": {
       const count = primary.result_summary.num_queries as number | undefined;
@@ -502,6 +528,7 @@ export function SearchProgress({
                   key={`p-${idx}`}
                   icon={Icon}
                   label={item.step.detail}
+                  duration={item.step.duration_ms ? `${item.step.duration_ms}ms` : undefined}
                 />
               );
             }

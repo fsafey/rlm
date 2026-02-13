@@ -658,6 +658,47 @@ class TestSessionLifecycle:
         _sessions.clear()
 
 
+class TestPreClassifyTimingInProgress:
+    """Test that pre-classification emits a 'classified' progress event with duration_ms."""
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api._pre_classify")
+    @patch("rlm_search.api._kb_overview_cache", {"categories": {}, "total_documents": 0})
+    def test_pre_classify_timing_emitted(self, mock_classify, _mock_setup, mock_rlm):
+        """_run_search emits a 'classified' progress event with duration_ms."""
+        from rlm_search.api import _run_search, _searches, _sessions
+
+        mock_classify.return_value = "test\n\n--- Pre-Classification ---\nCATEGORY: PT"
+
+        search_id = "test-classify-timing"
+        session_id = "test-classify-session"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
+        mock_rlm.return_value = mock_instance
+
+        _run_search(search_id, "test query", {}, session_id)
+
+        events = logger.drain()
+        classified_events = [
+            e for e in events if e.get("type") == "progress" and e.get("phase") == "classified"
+        ]
+        assert len(classified_events) == 1
+        ev = classified_events[0]
+        assert "duration_ms" in ev
+        assert isinstance(ev["duration_ms"], int)
+        assert ev["duration_ms"] >= 0
+        assert ev["classification"] == "CATEGORY: PT"
+        _sessions.clear()
+
+
 class TestPreClassify:
     """Test _pre_classify() enrichment and fallback behavior."""
 

@@ -1661,7 +1661,7 @@ class TestToolCallsTracking:
         assert research_tc["result_summary"]["search_count"] == 1
 
     def test_draft_answer_records_parent_children(self):
-        """draft_answer() is tracked as a parent tool call."""
+        """draft_answer() has batched_critique as child."""
         ns = self._exec_ns()
         ns["_ctx"].llm_query = lambda prompt, model=None: (
             "## Answer\nTest [Source: 1]\n## Evidence\n## Confidence\nHigh"
@@ -1674,10 +1674,32 @@ class TestToolCallsTracking:
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results)
 
-        assert len(ns["tool_calls"]) >= 1
+        assert len(ns["tool_calls"]) >= 2
         draft_tc = ns["tool_calls"][0]
         assert draft_tc["tool"] == "draft_answer"
         assert draft_tc["result_summary"]["passed"] is True
+        assert len(draft_tc["children"]) >= 1
+        child_tools = [ns["tool_calls"][i]["tool"] for i in draft_tc["children"]]
+        assert "batched_critique" in child_tools
+
+    def test_batched_critique_tracked(self):
+        """_batched_critique records tool call with dual-verdict summary."""
+        ns = self._exec_ns()
+        ns["_ctx"].llm_query = lambda prompt, model=None: "## Answer\nTest [Source: 1]"
+        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
+            "PASS — content ok",
+            "FAIL — missing citation",
+        ]
+        results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
+        ns["draft_answer"]("question", results)
+
+        critique_entries = [tc for tc in ns["tool_calls"] if tc["tool"] == "batched_critique"]
+        assert len(critique_entries) >= 1
+        tc = critique_entries[0]
+        assert tc["result_summary"]["content_passed"] is True
+        assert tc["result_summary"]["citation_passed"] is False
+        assert tc["result_summary"]["verdict"] == "FAIL"
+        assert tc["duration_ms"] >= 0
 
     def test_tool_call_captures_error(self):
         """Failed API call populates the error field."""

@@ -74,6 +74,7 @@ export interface DoneEvent {
   sources: SearchSource[];
   execution_time: number;
   usage: Record<string, unknown>;
+  tool_summary?: Record<string, { count: number; total_ms: number; errors: number }>;
 }
 
 export interface ProgressEvent {
@@ -81,6 +82,8 @@ export interface ProgressEvent {
   phase: string;
   detail: string;
   timestamp: string;
+  duration_ms?: number;
+  classification?: string;
 }
 
 export interface ErrorEvent {

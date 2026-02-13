@@ -397,7 +397,22 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
             )
 
             logger.emit_progress("classifying", f"Pre-classifying with {RLM_CLASSIFY_MODEL}")
+
+            t0 = time.monotonic()
             enriched_query = _pre_classify(query, _kb_overview_cache)
+            classify_ms = int((time.monotonic() - t0) * 1000)
+
+            # Extract classification text if it was appended
+            classification = None
+            if "\n\n--- Pre-Classification ---\n" in enriched_query:
+                classification = enriched_query.split("\n\n--- Pre-Classification ---\n", 1)[1]
+
+            logger.emit_progress(
+                "classified",
+                f"Pre-classified in {classify_ms}ms",
+                duration_ms=classify_ms,
+                **({"classification": classification} if classification else {}),
+            )
 
             logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
             result = rlm.completion(enriched_query, root_prompt=query)

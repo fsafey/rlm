@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import datetime
+from typing import Any
 
 from rlm.core.types import RLMIteration, RLMMetadata
 from rlm.logger.rlm_logger import RLMLogger
@@ -33,14 +34,21 @@ class StreamingLogger(RLMLogger):
         self._cancelled = False
         self.source_registry: dict[str, dict] = {}
         self._last_tool_call_count = 0
+        self._tool_stats: dict[str, dict] = {}  # {tool_name: {count, total_ms, errors}}
 
-    def emit_progress(self, phase: str, detail: str = "") -> None:
+    _RESERVED_PROGRESS_KEYS = frozenset({"type", "phase", "detail", "timestamp"})
+
+    def emit_progress(self, phase: str, detail: str = "", **kwargs: Any) -> None:
         """Emit a lightweight progress event for frontend initialization display."""
+        assert not (self._RESERVED_PROGRESS_KEYS & set(kwargs)), (
+            f"kwargs must not override reserved keys: {self._RESERVED_PROGRESS_KEYS & set(kwargs)}"
+        )
         event = {
             "type": "progress",
             "phase": phase,
             "detail": detail,
             "timestamp": datetime.now().isoformat(),
+            **kwargs,
         }
         with self._lock:
             self.queue.append(event)
@@ -100,6 +108,16 @@ class StreamingLogger(RLMLogger):
                 tool_calls_data = tc[self._last_tool_call_count :]
                 self._last_tool_call_count = len(tc)
 
+        # Accumulate tool stats for done event summary
+        for tc in tool_calls_data:
+            name = tc.get("tool", "unknown")
+            if name not in self._tool_stats:
+                self._tool_stats[name] = {"count": 0, "total_ms": 0, "errors": 0}
+            self._tool_stats[name]["count"] += 1
+            self._tool_stats[name]["total_ms"] += tc.get("duration_ms", 0)
+            if tc.get("error"):
+                self._tool_stats[name]["errors"] += 1
+
         event = {
             "type": "iteration",
             "iteration": self._iteration_count,
@@ -128,6 +146,7 @@ class StreamingLogger(RLMLogger):
             "sources": sources,
             "execution_time": execution_time,
             "usage": usage,
+            "tool_summary": self._tool_stats,
         }
         with open(self.log_file_path, "a") as f:
             json.dump(event, f)

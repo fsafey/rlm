@@ -32,9 +32,12 @@ function getIterationStats(iteration: Iteration) {
   // Estimate output tokens from response length (no prompt field available)
   const estimatedOutputTokens = Math.round(iteration.response.length / 4);
 
+  const toolCallCount = (iteration.tool_calls ?? []).length;
+
   return {
     codeBlocks: iteration.code_blocks.length,
     subCalls: totalSubCalls,
+    toolCalls: toolCallCount,
     execTime: iterTime,
     hasError,
     hasFinal: iteration.final_answer !== null,
@@ -141,6 +144,11 @@ export function IterationTimeline({
                       {stats.subCalls > 0 && (
                         <span className="text-[10px] text-fuchsia-600 dark:text-fuchsia-400">
                           &#x2941; {stats.subCalls} sub
+                        </span>
+                      )}
+                      {stats.toolCalls > 0 && (
+                        <span className="text-[10px] text-cyan-600 dark:text-cyan-400">
+                          {stats.toolCalls} tool{stats.toolCalls !== 1 ? "s" : ""}
                         </span>
                       )}
                       <span className="text-[10px] text-muted-foreground ml-auto">

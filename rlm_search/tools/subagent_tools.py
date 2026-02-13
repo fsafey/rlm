@@ -224,44 +224,57 @@ def batched_critique(
     Returns:
         Tuple of (combined_verdict, passed).
     """
-    if len(draft) > MAX_DRAFT_LEN:
-        draft = draft[:MAX_DRAFT_LEN]
-    content_prompt = (
-        f"You are a content expert. Review this draft answer to the question:\n"
-        f'"{question}"\n\n'
-        f"Draft:\n{draft}\n\n"
-        f"Check:\n"
-        f"1. Does it answer the actual question asked?\n"
-        f"2. Are there unsupported claims or fabricated rulings?\n"
-        f"3. Is anything important missing?\n\n"
-        f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
-    )
-    citation_prompt = (
-        f"You are a citation auditor. Review this draft answer to the question:\n"
-        f'"{question}"\n\n'
-        f"Draft:\n{draft}\n\n"
-        f"Check:\n"
-        f"1. Are [Source: <id>] citations present for factual claims?\n"
-        f"2. Are any cited IDs missing or fabricated?\n"
-        f"3. Are there key claims without any citation?\n\n"
-        f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
-    )
-    responses = ctx.llm_query_batched([content_prompt, citation_prompt], model=model)
-    content_verdict = responses[0] if len(responses) > 0 else "Error: no response"
-    citation_verdict = responses[1] if len(responses) > 1 else "Error: no response"
-    content_passed = content_verdict.strip().strip("*").upper().startswith("PASS")
-    citation_passed = citation_verdict.strip().strip("*").upper().startswith("PASS")
-    passed = content_passed and citation_passed
-    failed_parts = []
-    if not content_passed:
-        failed_parts.append("content")
-    if not citation_passed:
-        failed_parts.append("citations")
-    verdict_str = "PASS" if passed else "FAIL"
-    failed_str = f" (failed: {', '.join(failed_parts)})" if failed_parts else ""
-    print(f"[critique_answer] dual-review verdict={verdict_str}{failed_str}")
-    combined = f"CONTENT: {content_verdict}\n\nCITATIONS: {citation_verdict}"
-    return combined, passed
+    with tool_call_tracker(
+        ctx,
+        "batched_critique",
+        {"question": question[:100]},
+        parent_idx=ctx.current_parent_idx,
+    ) as tc:
+        if len(draft) > MAX_DRAFT_LEN:
+            draft = draft[:MAX_DRAFT_LEN]
+        content_prompt = (
+            f"You are a content expert. Review this draft answer to the question:\n"
+            f'"{question}"\n\n'
+            f"Draft:\n{draft}\n\n"
+            f"Check:\n"
+            f"1. Does it answer the actual question asked?\n"
+            f"2. Are there unsupported claims or fabricated rulings?\n"
+            f"3. Is anything important missing?\n\n"
+            f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
+        )
+        citation_prompt = (
+            f"You are a citation auditor. Review this draft answer to the question:\n"
+            f'"{question}"\n\n'
+            f"Draft:\n{draft}\n\n"
+            f"Check:\n"
+            f"1. Are [Source: <id>] citations present for factual claims?\n"
+            f"2. Are any cited IDs missing or fabricated?\n"
+            f"3. Are there key claims without any citation?\n\n"
+            f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
+        )
+        responses = ctx.llm_query_batched([content_prompt, citation_prompt], model=model)
+        content_verdict = responses[0] if len(responses) > 0 else "Error: no response"
+        citation_verdict = responses[1] if len(responses) > 1 else "Error: no response"
+        content_passed = content_verdict.strip().strip("*").upper().startswith("PASS")
+        citation_passed = citation_verdict.strip().strip("*").upper().startswith("PASS")
+        passed = content_passed and citation_passed
+        failed_parts = []
+        if not content_passed:
+            failed_parts.append("content")
+        if not citation_passed:
+            failed_parts.append("citations")
+        verdict_str = "PASS" if passed else "FAIL"
+        failed_str = f" (failed: {', '.join(failed_parts)})" if failed_parts else ""
+        print(f"[critique_answer] dual-review verdict={verdict_str}{failed_str}")
+        combined = f"CONTENT: {content_verdict}\n\nCITATIONS: {citation_verdict}"
+        tc.set_summary(
+            {
+                "verdict": verdict_str,
+                "content_passed": content_passed,
+                "citation_passed": citation_passed,
+            }
+        )
+        return combined, passed
 
 
 def classify_question(

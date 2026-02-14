@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useSearch } from "@/lib/useSearch";
 import { useSearchHistory } from "@/lib/useSearchHistory";
 import { SearchInput } from "@/components/SearchInput";
@@ -41,6 +41,28 @@ function App() {
     window.history.replaceState({}, "", url.toString());
     newSession();
   }, [newSession]);
+
+  const answerRef = useRef<HTMLDivElement>(null);
+  const prevStatusRef = useRef(state.status);
+
+  // Scroll to answer when search completes or a log is loaded
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = state.status;
+
+    if (!state.answer) return;
+
+    // Search just finished, or a log was loaded (idle/done with new answer)
+    const justFinished = prev === "searching" && state.status !== "searching";
+    const logLoaded = prev !== state.status && (state.status === "done" || state.status === "idle");
+
+    if (justFinished || logLoaded) {
+      const t = setTimeout(() => {
+        answerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+      return () => clearTimeout(t);
+    }
+  }, [state.answer, state.status]);
 
   const isInSession = state.sessionId !== null && state.conversationHistory.length > 0;
 
@@ -136,11 +158,13 @@ function App() {
 
         {/* Answer */}
         {state.answer && (
+          <div ref={answerRef}>
           <AnswerPanel
             answer={state.answer}
             sources={state.sources}
             executionTime={state.executionTime}
           />
+          </div>
         )}
 
         {/* Sources */}

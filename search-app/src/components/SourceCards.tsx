@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { SearchSource } from "@/lib/types";
-import { ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronUp, FileText } from "lucide-react";
 
 interface SourceCardsProps {
   sources: SearchSource[];
@@ -16,17 +17,29 @@ const PARENT_CODE_LABELS: Record<string, string> = {
 };
 
 export function SourceCards({ sources }: SourceCardsProps) {
+  const [sectionOpen, setSectionOpen] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   if (sources.length === 0) return null;
 
   return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-medium flex items-center gap-2">
-        <FileText className="h-4 w-4" />
-        Sources ({sources.length})
-      </h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <Collapsible open={sectionOpen} onOpenChange={setSectionOpen}>
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <CollapsibleTrigger asChild>
+          <button className="w-full flex items-center justify-between px-5 py-3 border-b border-border bg-muted hover:bg-accent transition-colors text-sm font-medium text-left">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Sources
+              <span className="text-xs text-muted-foreground">
+                ({sources.length})
+              </span>
+            </div>
+            {sectionOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent>
+          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
         {sources.map((source) => {
           const parentCode = (source.metadata?.parent_code as string) ?? "";
           const label = PARENT_CODE_LABELS[parentCode] ?? parentCode;
@@ -121,8 +134,10 @@ export function SourceCards({ sources }: SourceCardsProps) {
             </div>
           );
         })}
+          </div>
+        </CollapsibleContent>
       </div>
-    </div>
+    </Collapsible>
   );
 }
 

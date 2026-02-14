@@ -2121,3 +2121,105 @@ class TestRlmQuery:
             assert "research" in repl.locals
         finally:
             repl.cleanup()
+
+
+# Mock target for _run_child_rlm
+_CHILD_RLM = "rlm_search.tools.delegation_tools._run_child_rlm"
+
+
+class _FakeResult:
+    """Minimal stand-in for RLMChatCompletion."""
+
+    def __init__(self, response: str = "test answer"):
+        self.response = response
+
+
+class TestRlmQueryDelegation:
+    """Tests for rlm_query() delegation with mocked _run_child_rlm."""
+
+    def _make_ctx(self):
+        """Build a ToolContext at depth=0 with rlm_model set."""
+        from rlm_search.tools.context import ToolContext
+
+        return ToolContext(
+            api_url="http://api.test", api_key="k", _rlm_model="test-model", _depth=0
+        )
+
+    def test_happy_path(self, capsys):
+        """Successful delegation returns structured result with stdout tags."""
+        from rlm_search.tools.delegation_tools import rlm_query
+
+        ctx = self._make_ctx()
+        child_sources = {"src1": {"title": "Source 1"}}
+        with patch(_CHILD_RLM, return_value=(_FakeResult("answer"), child_sources, 2)):
+            result = rlm_query(ctx, "test question")
+
+        assert result["answer"] == "answer"
+        assert result["sub_question"] == "test question"
+        assert result["searches_run"] == 2
+        assert result["sources_merged"] == 1
+        captured = capsys.readouterr()
+        assert "[rlm_query] Delegating" in captured.out
+        assert "[rlm_query] Complete" in captured.out
+
+    def test_source_merging(self):
+        """Child sources are merged into parent source_registry."""
+        from rlm_search.tools.delegation_tools import rlm_query
+
+        ctx = self._make_ctx()
+        child_sources = {"src_a": {"title": "A"}, "src_b": {"title": "B"}}
+        with patch(_CHILD_RLM, return_value=(_FakeResult(), child_sources, 1)):
+            rlm_query(ctx, "q")
+
+        assert "src_a" in ctx.source_registry
+        assert "src_b" in ctx.source_registry
+
+    def test_duplicate_source_not_overwritten(self):
+        """Pre-existing parent source must not be overwritten by child."""
+        from rlm_search.tools.delegation_tools import rlm_query
+
+        ctx = self._make_ctx()
+        ctx.source_registry["src_a"] = {"original": True}
+        child_sources = {"src_a": {"original": False}, "src_b": {"title": "B"}}
+        with patch(_CHILD_RLM, return_value=(_FakeResult(), child_sources, 1)):
+            result = rlm_query(ctx, "q")
+
+        assert ctx.source_registry["src_a"]["original"] is True
+        assert "src_b" in ctx.source_registry
+        assert result["sources_merged"] == 1  # only src_b counted
+
+    def test_child_failure_returns_error(self):
+        """_run_child_rlm exception is caught and returned as error dict."""
+        from rlm_search.tools.delegation_tools import rlm_query
+
+        ctx = self._make_ctx()
+        with patch(_CHILD_RLM, side_effect=RuntimeError("API timeout")):
+            result = rlm_query(ctx, "failing question")
+
+        assert "error" in result
+        assert "API timeout" in result["error"]
+        assert result["searches_run"] == 0
+        assert result["sources_merged"] == 0
+
+    def test_child_failure_tracked_in_tool_calls(self):
+        """Error handled inside with-block so tracker entry has error=None."""
+        from rlm_search.tools.delegation_tools import rlm_query
+
+        ctx = self._make_ctx()
+        with patch(_CHILD_RLM, side_effect=RuntimeError("boom")):
+            rlm_query(ctx, "q")
+
+        assert len(ctx.tool_calls) >= 1
+        assert ctx.tool_calls[-1]["error"] is None
+
+    def test_empty_response_handled(self):
+        """Empty child response does not crash."""
+        from rlm_search.tools.delegation_tools import rlm_query
+
+        ctx = self._make_ctx()
+        with patch(_CHILD_RLM, return_value=(_FakeResult(""), {}, 0)):
+            result = rlm_query(ctx, "q")
+
+        assert result["answer"] == ""
+        assert result["searches_run"] == 0
+        assert result["sources_merged"] == 0

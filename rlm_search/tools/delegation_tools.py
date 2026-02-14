@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from rlm.core.types import RLMChatCompletion
     from rlm_search.tools.context import ToolContext
 
-SUB_AGENT_PROMPT = """You are a focused research sub-agent with access to an Islamic Q&A knowledge base.
+SUB_AGENT_PROMPT = """You are a focused research sub-agent with access to a specialized knowledge base.
 
 Your job: Research ONE specific sub-question and provide a grounded answer.
 
@@ -60,7 +60,18 @@ def rlm_query(
 
         print(f'[rlm_query] Delegating: "{sub_question}"')
 
-        result, child_sources, searches_run = _run_child_rlm(ctx, sub_question, instructions)
+        try:
+            result, child_sources, searches_run = _run_child_rlm(ctx, sub_question, instructions)
+        except Exception as exc:
+            error_msg = f"{type(exc).__name__}: {exc}"
+            print(f"[rlm_query] FAILED: {error_msg}")
+            tc.set_summary({"sub_question": sub_question, "error": error_msg})
+            return {
+                "error": error_msg,
+                "sub_question": sub_question,
+                "searches_run": 0,
+                "sources_merged": 0,
+            }
 
         # Merge child sources into parent registry
         n_merged = 0
@@ -112,7 +123,7 @@ def _run_child_rlm(
     )
     from rlm_search.repl_tools import build_search_setup_code
 
-    child_model = RLM_SUB_MODEL or RLM_MODEL
+    child_model = RLM_SUB_MODEL or ctx._rlm_model or RLM_MODEL
 
     # Build backend kwargs (same pattern as api._build_rlm_kwargs)
     if RLM_BACKEND == "claude_cli":

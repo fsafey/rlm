@@ -78,11 +78,11 @@ function App() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {isInSession && (
+            {(isInSession || state.status === "done" || state.status === "error") && (
               <button
                 onClick={handleNewSession}
                 className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/80 px-3 py-1.5 rounded-lg transition-colors"
-                title="End session and start fresh"
+                title="Clear results and start a fresh search session"
               >
                 <RotateCcw className="h-3 w-3" />
                 New Session

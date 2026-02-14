@@ -35,6 +35,7 @@ from rlm_search.config import (
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
+    RLM_SUB_ITERATIONS,
     RLM_SUB_MODEL,
     SESSION_TIMEOUT,
 )
@@ -214,8 +215,18 @@ def _build_rlm_kwargs(
     backend = settings.get("backend") or RLM_BACKEND
     model = settings.get("model") or RLM_MODEL
     sub_model = settings.get("sub_model") or RLM_SUB_MODEL
-    max_iterations = settings.get("max_iterations") or RLM_MAX_ITERATIONS
-    max_depth = settings.get("max_depth") or RLM_MAX_DEPTH
+    max_iterations = settings.get("max_iterations")
+    if max_iterations is None:
+        max_iterations = RLM_MAX_ITERATIONS
+    max_depth = settings.get("max_depth")
+    if max_depth is None:
+        max_depth = RLM_MAX_DEPTH
+    sub_iterations = settings.get("sub_iterations")
+    if sub_iterations is None:
+        sub_iterations = RLM_SUB_ITERATIONS
+    max_delegation_depth = settings.get("max_delegation_depth")
+    if max_delegation_depth is None:
+        max_delegation_depth = RLM_MAX_DELEGATION_DEPTH
 
     if backend == "claude_cli":
         backend_kwargs: dict[str, Any] = {"model": model}
@@ -244,7 +255,8 @@ def _build_rlm_kwargs(
         rlm_model=model,
         rlm_backend=backend,
         depth=0,
-        max_delegation_depth=RLM_MAX_DELEGATION_DEPTH,
+        max_delegation_depth=max_delegation_depth,
+        sub_iterations=sub_iterations,
     )
 
     return {

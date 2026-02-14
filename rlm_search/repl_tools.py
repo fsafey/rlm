@@ -15,6 +15,7 @@ def build_search_setup_code(
     rlm_backend: str = "",
     depth: int = 0,
     max_delegation_depth: int = 1,
+    sub_iterations: int = 3,
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
@@ -50,6 +51,7 @@ _ctx._rlm_model = {rlm_model!r}
 _ctx._rlm_backend = {rlm_backend!r}
 _ctx._depth = {depth!r}
 _ctx._max_delegation_depth = {max_delegation_depth!r}
+_ctx._sub_iterations = {sub_iterations!r}
 _ctx._parent_logger = globals().get("_parent_logger_ref")
 """
 

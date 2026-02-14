@@ -37,6 +37,7 @@ class ToolContext:
     _rlm_backend: str = ""
     _depth: int = 0
     _max_delegation_depth: int = 1
+    _sub_iterations: int | None = None
     _parent_logger: Any = None
 
     def __post_init__(self) -> None:

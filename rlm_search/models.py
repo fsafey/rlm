@@ -17,6 +17,8 @@ class SearchSettings(BaseModel):
     sub_model: str | None = None
     max_iterations: int | None = None
     max_depth: int | None = None
+    sub_iterations: int | None = None
+    max_delegation_depth: int | None = None
 
 
 class SearchResponse(BaseModel):

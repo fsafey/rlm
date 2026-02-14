@@ -15,6 +15,12 @@ const SUB_MODEL_OPTIONS = [
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
 
+const BACKEND_OPTIONS = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "claude_cli", label: "Claude CLI" },
+];
+
 interface SearchInputProps {
   onSearch: (query: string, settings: SearchSettings) => void;
   onReset: () => void;
@@ -83,44 +89,49 @@ export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFo
       </form>
 
       {showSettings && (
-        <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground">
-                Model
-              </label>
+        <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Model</label>
               <select
                 value={settings.model}
                 onChange={(e) => setSettings((s) => ({ ...s, model: e.target.value }))}
                 className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none"
               >
                 {MODEL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
+              <span className="text-[10px] text-muted-foreground/70">Smarter models give better answers but cost more</span>
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground">
-                Sub-Model
-              </label>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Sub-Model</label>
               <select
                 value={settings.sub_model}
                 onChange={(e) => setSettings((s) => ({ ...s, sub_model: e.target.value }))}
                 className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none"
               >
                 {SUB_MODEL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
+              <span className="text-[10px] text-muted-foreground/70">Use a cheaper model for sub-tasks to save cost</span>
             </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-muted-foreground">
-                Max Iterations
-              </label>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Backend</label>
+              <select
+                value={settings.backend}
+                onChange={(e) => setSettings((s) => ({ ...s, backend: e.target.value }))}
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none"
+              >
+                {BACKEND_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <span className="text-[10px] text-muted-foreground/70">Which API provider handles LLM calls</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Max Iterations</label>
               <input
                 type="number"
                 min={1}
@@ -132,8 +143,62 @@ export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFo
                     max_iterations: Math.max(1, Math.min(50, Number(e.target.value) || 1)),
                   }))
                 }
-                className="w-16 text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
               />
+              <span className="text-[10px] text-muted-foreground/70">More iterations = deeper research, higher cost</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Max Depth</label>
+              <input
+                type="number"
+                min={1}
+                max={5}
+                value={settings.max_depth}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    max_depth: Math.max(1, Math.min(5, Number(e.target.value) || 1)),
+                  }))
+                }
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
+              />
+              <span className="text-[10px] text-muted-foreground/70">Higher = more thorough decomposition of complex questions</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Sub-Iterations</label>
+              <input
+                type="number"
+                min={1}
+                max={10}
+                value={settings.sub_iterations}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    sub_iterations: Math.max(1, Math.min(10, Number(e.target.value) || 1)),
+                  }))
+                }
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
+              />
+              <span className="text-[10px] text-muted-foreground/70">How much work each sub-agent can do</span>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Delegation Depth</label>
+              <input
+                type="number"
+                min={0}
+                max={3}
+                value={settings.max_delegation_depth}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    max_delegation_depth: Math.max(0, Math.min(3, Number(e.target.value) || 0)),
+                  }))
+                }
+                className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
+              />
+              <span className="text-[10px] text-muted-foreground/70">Allow sub-agents to spawn their own sub-agents (0 = off)</span>
             </div>
           </div>
         </div>

@@ -128,7 +128,8 @@ def _run_child_rlm(
     child_model = RLM_SUB_MODEL or ctx._rlm_model or RLM_MODEL
     child_depth = ctx._depth + 1
     # Reduce iteration budget at deeper delegation levels
-    child_iterations = RLM_SUB_ITERATIONS if child_depth <= 1 else max(2, RLM_SUB_ITERATIONS - 1)
+    sub_iters = ctx._sub_iterations if ctx._sub_iterations is not None else RLM_SUB_ITERATIONS
+    child_iterations = sub_iters if child_depth <= 1 else max(2, sub_iters - 1)
 
     # Build backend kwargs (same pattern as api._build_rlm_kwargs)
     if backend == "claude_cli":
@@ -146,6 +147,7 @@ def _run_child_rlm(
         rlm_backend=backend,
         depth=child_depth,
         max_delegation_depth=ctx._max_delegation_depth,
+        sub_iterations=sub_iters,
     )
 
     prompt = sub_question

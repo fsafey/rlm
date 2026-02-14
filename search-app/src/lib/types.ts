@@ -153,13 +153,21 @@ export interface SearchState {
 export interface SearchSettings {
   model: string;
   sub_model: string;
+  backend: string;
   max_iterations: number;
+  max_depth: number;
+  sub_iterations: number;
+  max_delegation_depth: number;
 }
 
 export const defaultSettings: SearchSettings = {
   model: "claude-opus-4-6",
   sub_model: "",
+  backend: "claude_cli",
   max_iterations: 15,
+  max_depth: 1,
+  sub_iterations: 3,
+  max_delegation_depth: 1,
 };
 
 export const initialSearchState: SearchState = {

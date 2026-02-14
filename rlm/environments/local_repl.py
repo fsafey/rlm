@@ -129,6 +129,7 @@ class LocalREPL(NonIsolatedEnv):
         persistent: bool = False,
         depth: int = 1,
         progress_callback: Any | None = None,
+        _parent_logger_ref: Any | None = None,
         **kwargs,
     ):
         super().__init__(persistent=persistent, depth=depth, **kwargs)
@@ -146,6 +147,10 @@ class LocalREPL(NonIsolatedEnv):
         # Inject progress callback into REPL globals (for tool-level streaming)
         if progress_callback is not None:
             self.globals["_progress_callback"] = progress_callback
+
+        # Inject parent logger ref for child SSE streaming (used by ChildStreamingLogger)
+        if _parent_logger_ref is not None:
+            self.globals["_parent_logger_ref"] = _parent_logger_ref
 
         # Load context if provided
         if context_payload is not None:

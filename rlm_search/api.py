@@ -370,10 +370,16 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
 
                         rlm._persistent_env.globals["_progress_callback"] = logger.emit_tool_event
                         rlm._persistent_env.globals["_parent_logger_ref"] = logger
-                        ctx = rlm._persistent_env.locals.get("_ctx")
-                        if ctx is not None:
-                            ctx.progress_callback = logger.emit_tool_event
-                            ctx._parent_logger = logger
+
+                        # _ctx starts with underscore so it's excluded from self.locals
+                        # by LocalREPL's filter — access it through wrapper function closures
+                        _ctx = None
+                        search_fn = rlm._persistent_env.locals.get("search")
+                        if search_fn and hasattr(search_fn, "__globals__"):
+                            _ctx = search_fn.__globals__.get("_ctx")
+                        if _ctx is not None:
+                            _ctx.progress_callback = logger.emit_tool_event
+                            _ctx._parent_logger = logger
 
                     print(
                         f"[SEARCH:{search_id}] Follow-up #{session.search_count} in session "
@@ -406,6 +412,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                     environment_kwargs={
                         "setup_code": kw["setup_code"],
                         "progress_callback": logger.emit_tool_event,
+                        "_parent_logger_ref": logger,
                     },
                     max_iterations=kw["max_iterations"],
                     max_depth=kw["max_depth"],
@@ -413,13 +420,6 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                     logger=logger,
                     persistent=True,
                 )
-
-                # Inject parent logger ref into REPL globals so setup_code can wire it
-                if rlm._persistent_env is not None:
-                    rlm._persistent_env.globals["_parent_logger_ref"] = logger
-                    _ctx = rlm._persistent_env.locals.get("_ctx")
-                    if _ctx is not None:
-                        _ctx._parent_logger = logger
 
                 _sessions[session_id] = SessionState(
                     session_id=session_id,

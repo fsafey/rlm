@@ -30,6 +30,7 @@ class ToolContext:
     # Callables injected from LocalREPL globals
     llm_query: Any = None
     llm_query_batched: Any = None
+    progress_callback: Any = None
 
     def __post_init__(self) -> None:
         if not self.headers:

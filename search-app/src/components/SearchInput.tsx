@@ -19,10 +19,11 @@ interface SearchInputProps {
   onSearch: (query: string, settings: SearchSettings) => void;
   onReset: () => void;
   isSearching: boolean;
+  isCancelling?: boolean;
   isFollowUp?: boolean;
 }
 
-export function SearchInput({ onSearch, onReset, isSearching, isFollowUp }: SearchInputProps) {
+export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFollowUp }: SearchInputProps) {
   const [query, setQuery] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [settings, setSettings] = useState<SearchSettings>({ ...defaultSettings });
@@ -62,10 +63,11 @@ export function SearchInput({ onSearch, onReset, isSearching, isFollowUp }: Sear
             <button
               type="button"
               onClick={onReset}
-              className="flex items-center gap-1.5 rounded-lg bg-destructive text-destructive-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
+              disabled={isCancelling}
+              className="flex items-center gap-1.5 rounded-lg bg-destructive text-destructive-foreground px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               <X className="h-4 w-4" />
-              Stop
+              {isCancelling ? "Cancelling..." : "Stop"}
             </button>
           ) : (
             <button

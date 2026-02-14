@@ -84,6 +84,42 @@ class StreamingLogger(RLMLogger):
         with self._lock:
             return self._cancelled
 
+    def raise_if_cancelled(self) -> None:
+        """Check-and-raise hook called by RLM core via duck-typing."""
+        with self._lock:
+            if self._cancelled:
+                raise SearchCancelled("Search cancelled by client")
+
+    # ------------------------------------------------------------------
+    # Sub-iteration lifecycle hooks
+    # ------------------------------------------------------------------
+
+    def on_environment_ready(self) -> None:
+        self.emit_progress("env_ready", "Search tools loaded")
+
+    def on_llm_start(self, iteration: int) -> None:
+        self.emit_tool_event("_llm", "start", {"iteration": iteration})
+
+    def on_code_executing(self, iteration: int, num_blocks: int) -> None:
+        self.emit_tool_event("_code", "start", {"iteration": iteration, "num_blocks": num_blocks})
+
+    # ------------------------------------------------------------------
+    # Tool-level progress (called from within exec'd code via callback)
+    # ------------------------------------------------------------------
+
+    def emit_tool_event(self, tool: str, phase: str, data: dict, *, duration_ms: int = 0) -> None:
+        """Emit a tool_progress SSE event — called mid-execution by tool_call_tracker."""
+        event = {
+            "type": "tool_progress",
+            "tool": tool,
+            "phase": phase,
+            "data": data,
+            "duration_ms": duration_ms,
+            "timestamp": datetime.now().isoformat(),
+        }
+        with self._lock:
+            self.queue.append(event)
+
     def log(self, iteration: RLMIteration) -> None:
         with self._lock:
             if self._cancelled:
@@ -148,6 +184,16 @@ class StreamingLogger(RLMLogger):
             "usage": usage,
             "tool_summary": self._tool_stats,
         }
+        with open(self.log_file_path, "a") as f:
+            json.dump(event, f)
+            f.write("\n")
+        with self._lock:
+            self.queue.append(event)
+            self._done = True
+
+    def mark_cancelled(self) -> None:
+        """Emit a terminal 'cancelled' event (distinct from 'done')."""
+        event = {"type": "cancelled"}
         with open(self.log_file_path, "a") as f:
             json.dump(event, f)
             f.write("\n")

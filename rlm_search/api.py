@@ -63,6 +63,7 @@ class SessionState:
     lock: threading.Lock
     search_count: int = 0
     last_active: float = dataclasses.field(default_factory=time.monotonic)
+    active_search_id: str | None = None
 
 
 _sessions: dict[str, SessionState] = {}
@@ -129,7 +130,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             expired = [
                 sid
                 for sid, ses in list(_sessions.items())
-                if now - ses.last_active > SESSION_TIMEOUT and not ses.lock.locked()
+                if now - ses.last_active > SESSION_TIMEOUT and ses.active_search_id is None
             ]
             for sid in expired:
                 ses = _sessions.pop(sid, None)
@@ -333,112 +334,134 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
     logger = _searches[search_id]
     session = _sessions.get(session_id)
 
+    # Track active search for race-free busy detection
+    if session is not None:
+        session.active_search_id = search_id
+
     try:
-        if session is not None:
-            # ── Follow-up search: reuse persistent RLM ──
-            bk = session.rlm.backend_kwargs or {}
-            model = bk.get("model_name") or bk.get("model", "unknown")
-            model_short = model.rsplit("-", 1)[0] if len(model.split("-")) > 3 else model
+        try:
+            if session is not None:
+                # ── Follow-up search: reuse persistent RLM ──
+                bk = session.rlm.backend_kwargs or {}
+                model = bk.get("model_name") or bk.get("model", "unknown")
+                model_short = model.rsplit("-", 1)[0] if len(model.split("-")) > 3 else model
 
-            with session.lock:
-                session.search_count += 1
-                session.last_active = time.monotonic()
-                rlm = session.rlm
+                with session.lock:
+                    session.search_count += 1
+                    session.last_active = time.monotonic()
+                    rlm = session.rlm
 
-                # Swap logger for this search
-                rlm.logger = logger
+                    # Swap logger for this search
+                    rlm.logger = logger
 
-                # Manually emit metadata (since __init__ already ran)
-                _emit_metadata(logger, rlm)
+                    # Manually emit metadata (since __init__ already ran)
+                    _emit_metadata(logger, rlm)
 
-                # Sync tool_call offset so the new logger computes correct deltas
-                if rlm._persistent_env is not None:
-                    tc = rlm._persistent_env.locals.get("tool_calls", [])
-                    logger._last_tool_call_count = len(tc)
+                    # Sync tool_call offset so the new logger computes correct deltas
+                    # and update the progress callback to point at the new logger
+                    if rlm._persistent_env is not None:
+                        tc = rlm._persistent_env.locals.get("tool_calls", [])
+                        logger._last_tool_call_count = len(tc)
+
+                        rlm._persistent_env.globals["_progress_callback"] = logger.emit_tool_event
+                        ctx = rlm._persistent_env.locals.get("_ctx")
+                        if ctx is not None:
+                            ctx.progress_callback = logger.emit_tool_event
+
+                    print(
+                        f"[SEARCH:{search_id}] Follow-up #{session.search_count} in session "
+                        f"{session_id} | query={query!r}"
+                    )
+                    logger.emit_progress("reasoning", f"Follow-up analysis with {model_short}")
+
+                    result = rlm.completion(query, root_prompt=query)
+
+            else:
+                # ── New session: create persistent RLM ──
+                kw = _build_rlm_kwargs(settings)
+                model_short = (
+                    kw["model"].rsplit("-", 1)[0]
+                    if len(kw["model"].split("-")) > 3
+                    else kw["model"]
+                )
 
                 print(
-                    f"[SEARCH:{search_id}] Follow-up #{session.search_count} in session "
-                    f"{session_id} | query={query!r}"
+                    f"[SEARCH:{search_id}] New session {session_id} | query={query!r} "
+                    f"backend={kw['backend']} model={kw['model']} sub_model={kw['sub_model'] or '(same)'}"
                 )
-                logger.emit_progress("reasoning", f"Follow-up analysis with {model_short}")
 
-                result = rlm.completion(query, root_prompt=query)
+                rlm = RLM(
+                    backend=kw["backend"],
+                    backend_kwargs=kw["backend_kwargs"],
+                    other_backends=kw["other_backends"],
+                    other_backend_kwargs=kw["other_backend_kwargs"],
+                    environment="local",
+                    environment_kwargs={
+                        "setup_code": kw["setup_code"],
+                        "progress_callback": logger.emit_tool_event,
+                    },
+                    max_iterations=kw["max_iterations"],
+                    max_depth=kw["max_depth"],
+                    custom_system_prompt=build_system_prompt(kw["max_iterations"]),
+                    logger=logger,
+                    persistent=True,
+                )
 
-        else:
-            # ── New session: create persistent RLM ──
-            kw = _build_rlm_kwargs(settings)
-            model_short = (
-                kw["model"].rsplit("-", 1)[0] if len(kw["model"].split("-")) > 3 else kw["model"]
-            )
+                _sessions[session_id] = SessionState(
+                    session_id=session_id,
+                    rlm=rlm,
+                    lock=threading.Lock(),
+                    active_search_id=search_id,
+                )
+                session = _sessions[session_id]  # update local ref for finally block
+
+                logger.emit_progress("classifying", f"Pre-classifying with {RLM_CLASSIFY_MODEL}")
+
+                t0 = time.monotonic()
+                enriched_query = _pre_classify(query, _kb_overview_cache)
+                classify_ms = int((time.monotonic() - t0) * 1000)
+
+                # Extract classification text if it was appended
+                classification = None
+                if "\n\n--- Pre-Classification ---\n" in enriched_query:
+                    classification = enriched_query.split("\n\n--- Pre-Classification ---\n", 1)[1]
+
+                logger.emit_progress(
+                    "classified",
+                    f"Pre-classified in {classify_ms}ms",
+                    duration_ms=classify_ms,
+                    **({"classification": classification} if classification else {}),
+                )
+
+                logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
+                result = rlm.completion(enriched_query, root_prompt=query)
 
             print(
-                f"[SEARCH:{search_id}] New session {session_id} | query={query!r} "
-                f"backend={kw['backend']} model={kw['model']} sub_model={kw['sub_model'] or '(same)'}"
+                f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} "
+                f"time={result.execution_time:.2f}s"
             )
 
-            rlm = RLM(
-                backend=kw["backend"],
-                backend_kwargs=kw["backend_kwargs"],
-                other_backends=kw["other_backends"],
-                other_backend_kwargs=kw["other_backend_kwargs"],
-                environment="local",
-                environment_kwargs={"setup_code": kw["setup_code"]},
-                max_iterations=kw["max_iterations"],
-                max_depth=kw["max_depth"],
-                custom_system_prompt=build_system_prompt(kw["max_iterations"]),
-                logger=logger,
-                persistent=True,
+            sources = _extract_sources(result.response or "", logger.source_registry)
+            usage = result.usage_summary.to_dict() if result.usage_summary else {}
+
+            logger.mark_done(
+                answer=result.response,
+                sources=sources,
+                execution_time=result.execution_time,
+                usage=usage,
             )
 
-            _sessions[session_id] = SessionState(
-                session_id=session_id,
-                rlm=rlm,
-                lock=threading.Lock(),
-            )
+        except SearchCancelled:
+            print(f"[SEARCH:{search_id}] Cancelled by client")
+            logger.mark_cancelled()
 
-            logger.emit_progress("classifying", f"Pre-classifying with {RLM_CLASSIFY_MODEL}")
+        except Exception as e:
+            print(f"[SEARCH:{search_id}] ERROR | {type(e).__name__}: {e}")
+            logger.mark_error(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
 
-            t0 = time.monotonic()
-            enriched_query = _pre_classify(query, _kb_overview_cache)
-            classify_ms = int((time.monotonic() - t0) * 1000)
-
-            # Extract classification text if it was appended
-            classification = None
-            if "\n\n--- Pre-Classification ---\n" in enriched_query:
-                classification = enriched_query.split("\n\n--- Pre-Classification ---\n", 1)[1]
-
-            logger.emit_progress(
-                "classified",
-                f"Pre-classified in {classify_ms}ms",
-                duration_ms=classify_ms,
-                **({"classification": classification} if classification else {}),
-            )
-
-            logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
-            result = rlm.completion(enriched_query, root_prompt=query)
-
-        print(
-            f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} "
-            f"time={result.execution_time:.2f}s"
-        )
-
-        sources = _extract_sources(result.response or "", logger.source_registry)
-        usage = result.usage_summary.to_dict() if result.usage_summary else {}
-
-        logger.mark_done(
-            answer=result.response,
-            sources=sources,
-            execution_time=result.execution_time,
-            usage=usage,
-        )
-
-    except SearchCancelled:
-        print(f"[SEARCH:{search_id}] Cancelled by client")
-        logger.mark_done(answer=None, sources=[], execution_time=0.0, usage={})
-
-    except Exception as e:
-        print(f"[SEARCH:{search_id}] ERROR | {type(e).__name__}: {e}")
-        logger.mark_error(f"{type(e).__name__}: {e}\n{traceback.format_exc()}")
+    finally:
+        if session is not None:
+            session.active_search_id = None
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +478,7 @@ async def start_search(req: SearchRequest) -> SearchResponse:
         session = _sessions.get(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        if session.lock.locked():
+        if session.active_search_id is not None:
             raise HTTPException(status_code=409, detail="Session has an active search")
     else:
         # New session
@@ -497,7 +520,7 @@ async def delete_session(session_id: str) -> dict:
     session = _sessions.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.lock.locked():
+    if session.active_search_id is not None:
         raise HTTPException(status_code=409, detail="Session has an active search")
     _sessions.pop(session_id, None)
     session.rlm.close()
@@ -506,7 +529,7 @@ async def delete_session(session_id: str) -> dict:
 
 
 @app.get("/api/search/{search_id}/stream")
-async def stream_search(search_id: str) -> StreamingResponse:
+async def stream_search(search_id: str, request: Request) -> StreamingResponse:
     print(f"[API] GET /api/search/{search_id}/stream | found={search_id in _searches}")
     if search_id not in _searches:
         raise HTTPException(status_code=404, detail="Search not found")
@@ -517,11 +540,16 @@ async def stream_search(search_id: str) -> StreamingResponse:
         deadline = time.monotonic() + 600  # 10 minute max
         last_sent = time.monotonic()
         while time.monotonic() < deadline:
+            # Detect client disconnect before draining to avoid losing events
+            if await request.is_disconnected():
+                logger.cancel()
+                _searches.pop(search_id, None)
+                return
             events = logger.drain()
             for event in events:
                 yield f"data: {json.dumps(event)}\n\n"
                 last_sent = time.monotonic()
-                if event.get("type") in ("done", "error"):
+                if event.get("type") in ("done", "error", "cancelled"):
                     _searches.pop(search_id, None)
                     return
             if time.monotonic() - last_sent >= 15:

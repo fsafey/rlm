@@ -13,13 +13,14 @@ import {
   Tag,
   Gauge,
 } from "lucide-react";
-import type { Iteration, MetadataEvent, ProgressEvent } from "@/lib/types";
+import type { Iteration, MetadataEvent, ProgressEvent, ToolProgressEvent } from "@/lib/types";
 
 interface SearchProgressProps {
   query: string;
   iterations: Iteration[];
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
+  toolProgress: ToolProgressEvent[];
 }
 
 // --- Confidence ring ---
@@ -69,7 +70,110 @@ const PHASE_ICON: Record<string, React.ComponentType<{ className?: string }>> = 
   reasoning: Brain,
   classifying: Tag,
   classified: Tag,
+  env_ready: Sparkles,
 };
+
+// --- Tool progress formatting (live events from tool_call_tracker) ---
+
+const TOOL_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  search: Search,
+  browse: Search,
+  fiqh_lookup: BookOpen,
+  evaluate_results: ShieldCheck,
+  critique_answer: ShieldCheck,
+  batched_critique: ShieldCheck,
+  reformulate: RefreshCw,
+  classify_question: Tag,
+  check_progress: Gauge,
+  research: Search,
+  draft_answer: MessageSquare,
+  kb_overview: BookOpen,
+  _llm: Brain,
+  _code: Sparkles,
+};
+
+function formatToolProgress(events: ToolProgressEvent[]): { label: string; detail: string } | null {
+  if (events.length === 0) return null;
+
+  const latest = events[events.length - 1];
+  const { tool, phase, data } = latest;
+
+  // Synthetic lifecycle events from RLM core
+  if (tool === "_llm") {
+    return { label: "Waiting for model", detail: "This is usually the longest step..." };
+  }
+  if (tool === "_code") {
+    const n = data.num_blocks as number | undefined;
+    return {
+      label: "Executing code",
+      detail: n ? `Model responded — ${n} block${n !== 1 ? "s" : ""}` : "Model responded",
+    };
+  }
+
+  // Real tool events
+  if (phase === "start") {
+    const query = data.query as string | undefined;
+    const truncated = query && query.length > 35 ? `${query.slice(0, 35)}...` : query;
+    switch (tool) {
+      case "search":
+        return { label: "Searching", detail: truncated ? `'${truncated}'` : "Querying KB" };
+      case "browse":
+        return { label: "Browsing", detail: "Scanning knowledge base" };
+      case "evaluate_results":
+        return { label: "Evaluating", detail: "Rating result relevance" };
+      case "research":
+        return { label: "Researching", detail: truncated ? `'${truncated}'` : "Multi-search" };
+      case "draft_answer":
+        return { label: "Drafting", detail: "Synthesizing answer from evidence" };
+      case "critique_answer":
+      case "batched_critique":
+        return { label: "Critiquing", detail: "Reviewing draft quality" };
+      case "reformulate":
+        return { label: "Reformulating", detail: "Generating alternative queries" };
+      case "classify_question":
+        return { label: "Classifying", detail: "Identifying category and strategy" };
+      case "check_progress":
+        return { label: "Checking progress", detail: "Assessing search confidence" };
+      case "fiqh_lookup":
+        return { label: "Terminology", detail: truncated ? `'${truncated}'` : "Looking up terms" };
+      default:
+        return { label: `Running ${tool}`, detail: "" };
+    }
+  }
+
+  if (phase === "end") {
+    const dur = latest.duration_ms ? ` (${latest.duration_ms}ms)` : "";
+    switch (tool) {
+      case "search": {
+        const n = data.num_results as number | undefined;
+        return { label: "Searching", detail: `${n ?? "?"} results found${dur}` };
+      }
+      case "evaluate_results": {
+        const r = data.relevant as number | undefined;
+        const p = data.partial as number | undefined;
+        return { label: "Evaluating", detail: `${r ?? 0} relevant, ${p ?? 0} partial${dur}` };
+      }
+      case "research": {
+        const sc = data.search_count as number | undefined;
+        const f = data.filtered as number | undefined;
+        return { label: "Researching", detail: `${sc ?? "?"} searches, ${f ?? "?"} filtered${dur}` };
+      }
+      case "draft_answer": {
+        const passed = data.passed as boolean | undefined;
+        return { label: "Drafting", detail: passed ? `Critique passed${dur}` : `Critique failed${dur}` };
+      }
+      case "critique_answer":
+      case "batched_critique": {
+        const v = data.verdict as string | undefined;
+        return { label: "Critiquing", detail: `${v ?? "Done"}${dur}` };
+      }
+      default:
+        return { label: tool, detail: `Done${dur}` };
+    }
+  }
+
+  return null;
+}
 
 // --- Iteration activity detection ---
 
@@ -491,6 +595,7 @@ export function SearchProgress({
   iterations,
   metadata,
   progressSteps,
+  toolProgress,
 }: SearchProgressProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -551,16 +656,19 @@ export function SearchProgress({
       ? allCompleted.slice(-MAX_VISIBLE)
       : allCompleted;
 
-  // Contextual active step
-  const activeText = activeProgress
-    ? {
-        label: activeProgress.detail,
-        detail:
-          activeProgress.phase === "reasoning"
-            ? "This may take a moment..."
-            : "",
-      }
-    : getActiveText(activities, iterations.length, maxIterations);
+  // Contextual active step — priority: tool progress > init progress > prediction
+  const toolText = formatToolProgress(toolProgress);
+  const activeText = toolText
+    ? toolText
+    : activeProgress
+      ? {
+          label: activeProgress.detail,
+          detail:
+            activeProgress.phase === "reasoning"
+              ? "This may take a moment..."
+              : "",
+        }
+      : getActiveText(activities, iterations.length, maxIterations);
 
   return (
     <div className="w-full max-w-2xl mx-auto">

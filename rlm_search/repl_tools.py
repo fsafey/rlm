@@ -41,6 +41,7 @@ _ctx = _ToolContext(
 # Wire LLM callables from LocalREPL globals (None when exec'd standalone in tests)
 _ctx.llm_query = globals().get("llm_query")
 _ctx.llm_query_batched = globals().get("llm_query_batched")
+_ctx.progress_callback = globals().get("_progress_callback")
 """
 
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)

@@ -79,7 +79,8 @@ function App() {
         <SearchInput
           onSearch={handleSearch}
           onReset={handleReset}
-          isSearching={state.status === "searching"}
+          isSearching={state.status === "searching" || state.status === "cancelling"}
+          isCancelling={state.status === "cancelling"}
           isFollowUp={isInSession && state.status !== "searching"}
         />
 
@@ -105,7 +106,17 @@ function App() {
               iterations={state.iterations}
               metadata={state.metadata}
               progressSteps={state.progressSteps}
+              toolProgress={state.toolProgress}
             />
+          </div>
+        )}
+
+        {/* Cancelling indicator */}
+        {state.status === "cancelling" && (
+          <div className="flex justify-center">
+            <div className="text-sm text-muted-foreground animate-pulse">
+              Cancelling search...
+            </div>
           </div>
         )}
 

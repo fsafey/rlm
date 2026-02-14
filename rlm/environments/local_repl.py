@@ -128,6 +128,7 @@ class LocalREPL(NonIsolatedEnv):
         setup_code: str | None = None,
         persistent: bool = False,
         depth: int = 1,
+        progress_callback: Any | None = None,
         **kwargs,
     ):
         super().__init__(persistent=persistent, depth=depth, **kwargs)
@@ -141,6 +142,10 @@ class LocalREPL(NonIsolatedEnv):
 
         # Setup globals, locals, and modules in environment.
         self.setup()
+
+        # Inject progress callback into REPL globals (for tool-level streaming)
+        if progress_callback is not None:
+            self.globals["_progress_callback"] = progress_callback
 
         # Load context if provided
         if context_payload is not None:

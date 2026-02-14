@@ -530,12 +530,11 @@ class TestSessionLifecycle:
         from rlm_search.api import SessionState, _sessions
 
         mock_rlm = MagicMock()
-        lock = threading.Lock()
-        lock.acquire()  # Simulate locked (active search)
         session = SessionState(
             session_id="busy-session",
             rlm=mock_rlm,
-            lock=lock,
+            lock=threading.Lock(),
+            active_search_id="some-active-search",
         )
         _sessions["busy-session"] = session
 
@@ -544,7 +543,6 @@ class TestSessionLifecycle:
             json={"query": "test", "session_id": "busy-session"},
         )
         assert resp.status_code == 409
-        lock.release()
         _sessions.clear()
 
     def test_delete_session(self, client: TestClient):

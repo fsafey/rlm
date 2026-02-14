@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { Iteration, MetadataEvent, ProgressEvent, SearchSettings, SearchState, SSEEvent } from "./types";
+import type { Iteration, MetadataEvent, ProgressEvent, SearchSettings, SearchState, SSEEvent, ToolProgressEvent } from "./types";
 import { defaultSettings, initialSearchState } from "./types";
 
 export function useSearch() {
@@ -7,8 +7,12 @@ export function useSearch() {
   const abortRef = useRef<AbortController | null>(null);
   const searchIdRef = useRef<string | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const cancellingRef = useRef(false);
 
   const search = useCallback(async (query: string, settings?: SearchSettings) => {
+    // Block if still cancelling
+    if (cancellingRef.current) return;
+
     // Abort any in-flight search
     abortRef.current?.abort();
     const abort = new AbortController();
@@ -89,6 +93,14 @@ export function useSearch() {
                 setState((s) => ({
                   ...s,
                   iterations: [...s.iterations, event as Iteration],
+                  toolProgress: [],  // clear — iteration supersedes tool events
+                }));
+                break;
+
+              case "tool_progress":
+                setState((s) => ({
+                  ...s,
+                  toolProgress: [...s.toolProgress, event as ToolProgressEvent],
                 }));
                 break;
 
@@ -124,6 +136,15 @@ export function useSearch() {
                 }));
                 return;
 
+              case "cancelled":
+                console.log("[SSE] cancelled by server");
+                setState((s) => ({
+                  ...initialSearchState,
+                  sessionId: s.sessionId,
+                  conversationHistory: s.conversationHistory,
+                }));
+                return;
+
               case "progress":
                 console.log("[SSE] progress:", (event as ProgressEvent).phase, (event as ProgressEvent).detail);
                 setState((s) => ({
@@ -154,26 +175,53 @@ export function useSearch() {
   }, []);
 
   const reset = useCallback(() => {
+    // 1. Abort SSE connection immediately
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    // 2. Transition to "cancelling" state
+    cancellingRef.current = true;
+    setState((prev) => ({
+      ...prev,
+      status: "cancelling",
+    }));
+
+    // 3. Fire cancel POST (fire-and-forget)
     if (searchIdRef.current) {
       fetch(`/api/search/${searchIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
       searchIdRef.current = null;
     }
-    sessionIdRef.current = null;
-    abortRef.current?.abort();
-    setState(initialSearchState);
+
+    // 4. Timeout — force idle after 800ms if still cancelling
+    setTimeout(() => {
+      cancellingRef.current = false;
+      setState((prev) => {
+        if (prev.status === "cancelling") {
+          return { ...initialSearchState, sessionId: prev.sessionId, conversationHistory: prev.conversationHistory };
+        }
+        return prev;
+      });
+    }, 800);
   }, []);
 
   const newSession = useCallback(() => {
-    // Tear down persistent session on backend
+    // 1. Abort SSE
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    // 2. Cancel active search
+    if (searchIdRef.current) {
+      fetch(`/api/search/${searchIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
+      searchIdRef.current = null;
+    }
+
+    // 3. Tear down persistent session
     if (sessionIdRef.current) {
       fetch(`/api/session/${sessionIdRef.current}`, { method: "DELETE" }).catch(() => {});
       sessionIdRef.current = null;
     }
-    if (searchIdRef.current) {
-      fetch(`/api/search/${searchIdRef.current}/cancel`, { method: "POST" }).catch(() => {});
-      searchIdRef.current = null;
-    }
-    abortRef.current?.abort();
+
+    cancellingRef.current = false;
     setState(initialSearchState);
   }, []);
 

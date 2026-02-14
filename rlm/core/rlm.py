@@ -214,9 +214,14 @@ class RLM:
             return self._fallback_answer(prompt)
 
         with self._spawn_completion_context(prompt) as (lm_handler, environment):
+            if self.logger:
+                self.logger.on_environment_ready()
+
             message_history = self._setup_prompt(prompt)
 
             for i in range(self.max_iterations):
+                self._check_cancelled()
+
                 # Current prompt = message history + additional prompt suffix
                 context_count = (
                     environment.get_context_count()
@@ -236,6 +241,7 @@ class RLM:
                     prompt=current_prompt,
                     lm_handler=lm_handler,
                     environment=environment,
+                    iteration_num=i + 1,
                 )
 
                 # Check if RLM is done and has a final answer.
@@ -301,20 +307,32 @@ class RLM:
         prompt: str | dict[str, Any],
         lm_handler: LMHandler,
         environment: BaseEnv,
+        iteration_num: int = 1,
     ) -> RLMIteration:
         """
         Perform a single iteration of the RLM, including prompting the model
         and code execution + tool execution.
         """
         iter_start = time.perf_counter()
+        self._check_cancelled()
+
+        if self.logger:
+            self.logger.on_llm_start(iteration_num)
+
         response = lm_handler.completion(prompt)
+        self._check_cancelled()
         code_block_strs = find_code_blocks(response)
+
+        if self.logger and code_block_strs:
+            self.logger.on_code_executing(iteration_num, len(code_block_strs))
+
         code_blocks = []
 
         skip_reason: str | None = None
         consecutive_errors = 0
         _MAX_CONSECUTIVE_ERRORS = 2
         for code_block_str in code_block_strs:
+            self._check_cancelled()
             if skip_reason is not None:
                 code_blocks.append(
                     CodeBlock(
@@ -423,6 +441,12 @@ class RLM:
     def _env_supports_persistence(env: BaseEnv) -> bool:
         """Check if an environment instance supports persistent mode methods."""
         return isinstance(env, SupportsPersistence)
+
+    def _check_cancelled(self) -> None:
+        """Check if logger signals cancellation; raise if so (duck-typed)."""
+        hook = getattr(self.logger, "raise_if_cancelled", None)
+        if hook is not None:
+            hook()
 
     def close(self) -> None:
         """Clean up persistent environment. Call when done with multi-turn conversations."""

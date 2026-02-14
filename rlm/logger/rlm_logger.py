@@ -58,6 +58,19 @@ class RLMLogger:
             json.dump(entry, f)
             f.write("\n")
 
+    # ------------------------------------------------------------------
+    # Sub-iteration lifecycle hooks (no-op defaults)
+    # ------------------------------------------------------------------
+
+    def on_environment_ready(self) -> None:
+        """Called once the REPL environment is set up and tools are loaded."""
+
+    def on_llm_start(self, iteration: int) -> None:
+        """Called before each LLM API call. *iteration* is 1-indexed."""
+
+    def on_code_executing(self, iteration: int, num_blocks: int) -> None:
+        """Called after LLM responds, before code blocks are executed."""
+
     @property
     def iteration_count(self) -> int:
         return self._iteration_count

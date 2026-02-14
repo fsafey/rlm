@@ -86,12 +86,32 @@ export interface ProgressEvent {
   classification?: string;
 }
 
+export interface ToolProgressEvent {
+  type: "tool_progress";
+  tool: string;
+  phase: "start" | "end" | "error";
+  data: Record<string, unknown>;
+  duration_ms: number;
+  timestamp: string;
+}
+
 export interface ErrorEvent {
   type: "error";
   message: string;
 }
 
-export type SSEEvent = MetadataEvent | ProgressEvent | Iteration | DoneEvent | ErrorEvent;
+export interface CancelledEvent {
+  type: "cancelled";
+}
+
+export type SSEEvent =
+  | MetadataEvent
+  | ProgressEvent
+  | ToolProgressEvent
+  | Iteration
+  | DoneEvent
+  | ErrorEvent
+  | CancelledEvent;
 
 export interface ConversationTurn {
   query: string;
@@ -102,12 +122,13 @@ export interface ConversationTurn {
 }
 
 export interface SearchState {
-  status: "idle" | "searching" | "done" | "error";
+  status: "idle" | "searching" | "cancelling" | "done" | "error";
   searchId: string | null;
   sessionId: string | null;
   query: string;
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
+  toolProgress: ToolProgressEvent[];
   iterations: Iteration[];
   answer: string | null;
   sources: SearchSource[];
@@ -136,6 +157,7 @@ export const initialSearchState: SearchState = {
   query: "",
   metadata: null,
   progressSteps: [],
+  toolProgress: [],
   iterations: [],
   answer: null,
   sources: [],

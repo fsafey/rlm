@@ -11,6 +11,8 @@ def build_search_setup_code(
     api_key: str = "",
     timeout: int = 30,
     kb_overview_data: dict[str, Any] | None = None,
+    rlm_model: str = "",
+    depth: int = 0,
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
@@ -42,6 +44,8 @@ _ctx = _ToolContext(
 _ctx.llm_query = globals().get("llm_query")
 _ctx.llm_query_batched = globals().get("llm_query_batched")
 _ctx.progress_callback = globals().get("_progress_callback")
+_ctx._rlm_model = {rlm_model!r}
+_ctx._depth = {depth!r}
 """
 
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)
@@ -93,6 +97,15 @@ def draft_answer(question, results, instructions=None, model=None):
 search_log = _ctx.search_log
 source_registry = _ctx.source_registry
 tool_calls = _ctx.tool_calls
+"""
+
+    # Conditionally emit rlm_query wrapper only at root depth
+    if depth == 0:
+        code += """
+from rlm_search.tools import delegation_tools as _deleg
+
+def rlm_query(sub_question, instructions=""):
+    return _deleg.rlm_query(_ctx, sub_question, instructions=instructions)
 """
 
     return code

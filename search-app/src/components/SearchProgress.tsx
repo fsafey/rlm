@@ -88,6 +88,7 @@ const TOOL_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   research: Search,
   draft_answer: MessageSquare,
   kb_overview: BookOpen,
+  rlm_query: Brain,
   _llm: Brain,
   _code: Sparkles,
 };
@@ -132,6 +133,10 @@ function formatToolProgress(events: ToolProgressEvent[]): { label: string; detai
         return { label: "Reformulating", detail: "Generating alternative queries" };
       case "classify_question":
         return { label: "Classifying", detail: "Identifying category and strategy" };
+      case "rlm_query": {
+        const sub = data.sub_question as string | undefined;
+        return { label: "Delegating", detail: sub ? `Researching: "${sub.slice(0, 40)}"` : "Sub-agent research" };
+      }
       case "check_progress":
         return { label: "Checking progress", detail: "Assessing search confidence" };
       case "fiqh_lookup":
@@ -152,6 +157,11 @@ function formatToolProgress(events: ToolProgressEvent[]): { label: string; detai
         const r = data.relevant as number | undefined;
         const p = data.partial as number | undefined;
         return { label: "Evaluating", detail: `${r ?? 0} relevant, ${p ?? 0} partial${dur}` };
+      }
+      case "rlm_query": {
+        const sc = data.searches_run as number | undefined;
+        const merged = data.sources_merged as number | undefined;
+        return { label: "Delegating", detail: `${sc ?? "?"} searches, ${merged ?? 0} sources merged${dur}` };
       }
       case "research": {
         const sc = data.search_count as number | undefined;
@@ -203,6 +213,14 @@ function detectActivityFromStdout(iteration: Iteration): IterationActivity {
   // --- Final answer (check first — takes priority) ---
   if (iteration.final_answer) {
     return { label: "Answer", metric: "Synthesized final answer", icon: MessageSquare };
+  }
+
+  // --- Delegation (check before composite tools) ---
+
+  if (stdout.includes("[rlm_query]")) {
+    const sub = stdout.match(/Delegating: "(.+?)"/)?.[1];
+    const metric = sub ?? "Delegating sub-question to research agent";
+    return { label: "Delegating", metric, icon: Brain };
   }
 
   // --- Composite tools (check before their sub-tools) ---
@@ -339,6 +357,13 @@ function detectActivityFromToolCalls(iteration: Iteration): IterationActivity {
   const primary = topLevel[topLevel.length - 1] ?? calls[calls.length - 1];
 
   switch (primary.tool) {
+    case "rlm_query": {
+      const s = primary.result_summary;
+      const sub = (s?.sub_question as string) ?? "Sub-question";
+      const sc = s?.searches_run as number;
+      const metric = sc != null ? `${sub} (${sc} searches)` : sub;
+      return { label: "Delegating", metric, icon: Brain };
+    }
     case "draft_answer": {
       const s = primary.result_summary;
       const passed = s.passed as boolean | undefined;
@@ -485,6 +510,8 @@ function getActiveText(
       return { label: "Planning", detail: "Deciding next step based on progress..." };
     case "Terminology":
       return { label: "Applying", detail: "Incorporating terminology..." };
+    case "Delegating":
+      return { label: "Researching", detail: "Sub-agent researching independently..." };
     case "Drafting":
       return { label: "Finalizing", detail: "Preparing final answer..." };
     case "Critiquing":

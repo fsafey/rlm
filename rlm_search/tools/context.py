@@ -32,6 +32,10 @@ class ToolContext:
     llm_query_batched: Any = None
     progress_callback: Any = None
 
+    # Delegation support (set via build_search_setup_code params)
+    _rlm_model: str = ""
+    _depth: int = 0
+
     def __post_init__(self) -> None:
         if not self.headers:
             self.headers = {"Content-Type": "application/json"}

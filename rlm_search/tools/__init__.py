@@ -8,6 +8,7 @@ from rlm_search.tools.api_tools import browse, fiqh_lookup, search
 from rlm_search.tools.composite_tools import draft_answer, research
 from rlm_search.tools.constants import MAX_DRAFT_LEN, MAX_QUERY_LEN, META_FIELDS
 from rlm_search.tools.context import ToolContext
+from rlm_search.tools.delegation_tools import rlm_query
 from rlm_search.tools.format_tools import format_evidence
 from rlm_search.tools.kb import kb_overview
 from rlm_search.tools.normalize import normalize_hit
@@ -41,4 +42,5 @@ __all__ = [
     "draft_answer",
     "kb_overview",
     "check_progress",
+    "rlm_query",
 ]

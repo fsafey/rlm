@@ -2020,3 +2020,104 @@ class TestCheckProgress:
 
         assert result["phase"] == "continue"
         assert "broader search terms" in result["guidance"]
+
+
+class TestRlmQuery:
+    """Tests for the rlm_query() delegation tool."""
+
+    def _exec_ns(self, depth=0):
+        """Build namespace with depth=0 (root) to get rlm_query wrapper."""
+        code = build_search_setup_code(
+            api_url="http://api.test",
+            api_key="k",
+            rlm_model="test-model",
+            depth=depth,
+        )
+        ns: dict = {
+            "llm_query": lambda prompt, model=None: "",
+            "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
+        }
+        exec(code, ns)  # noqa: S102
+        return ns
+
+    def test_wrapper_emitted_at_depth_0(self):
+        """rlm_query wrapper must be defined at depth=0."""
+        code = build_search_setup_code(api_url="http://api.test", rlm_model="m", depth=0)
+        assert "rlm_query" in code
+        assert "delegation_tools" in code
+
+    def test_wrapper_not_emitted_at_depth_1(self):
+        """rlm_query wrapper must NOT be emitted at depth=1."""
+        code = build_search_setup_code(api_url="http://api.test", rlm_model="m", depth=1)
+        assert "rlm_query" not in code
+        assert "delegation_tools" not in code
+
+    def test_context_fields_set(self):
+        """_rlm_model and _depth must be set on ToolContext."""
+        ns = self._exec_ns(depth=0)
+        assert ns["_ctx"]._rlm_model == "test-model"
+        assert ns["_ctx"]._depth == 0
+
+    def test_context_fields_depth_1(self):
+        """depth=1 context fields are set correctly (no rlm_query wrapper)."""
+        code = build_search_setup_code(api_url="http://api.test", rlm_model="child-model", depth=1)
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        assert ns["_ctx"]._rlm_model == "child-model"
+        assert ns["_ctx"]._depth == 1
+
+    def test_depth_guard(self):
+        """rlm_query at depth>=1 must return error dict."""
+        ns = self._exec_ns(depth=0)
+        # Override depth to simulate child calling rlm_query
+        ns["_ctx"]._depth = 1
+        result = ns["rlm_query"]("test sub-question")
+        assert "error" in result
+        assert "Cannot delegate" in result["error"]
+
+    def test_tool_call_tracked(self):
+        """Depth-guarded rlm_query call must be tracked in tool_calls."""
+        ns = self._exec_ns(depth=0)
+        ns["_ctx"]._depth = 1
+        ns["rlm_query"]("test")
+        assert len(ns["tool_calls"]) >= 1
+        assert ns["tool_calls"][-1]["tool"] == "rlm_query"
+
+    def test_stdout_tag(self, capsys):
+        """rlm_query output must contain [rlm_query] tag."""
+        ns = self._exec_ns(depth=0)
+        ns["_ctx"]._depth = 1  # trigger guard path
+        ns["rlm_query"]("test")
+        captured = capsys.readouterr()
+        assert "[rlm_query]" in captured.out
+
+    def test_rlm_query_callable_at_depth_0(self):
+        """rlm_query must be defined and callable in the namespace at depth=0."""
+        ns = self._exec_ns(depth=0)
+        assert "rlm_query" in ns
+        assert callable(ns["rlm_query"])
+
+    def test_names_available_in_repl_depth_0(self):
+        """All standard tools + rlm_query must exist at depth=0."""
+        code = build_search_setup_code(api_url="http://localhost:8091", rlm_model="m", depth=0)
+        repl = LocalREPL(setup_code=code)
+        try:
+            assert "rlm_query" in repl.locals
+            assert callable(repl.locals["rlm_query"])
+            # Standard tools still present
+            assert "search" in repl.locals
+            assert "research" in repl.locals
+        finally:
+            repl.cleanup()
+
+    def test_names_not_in_repl_depth_1(self):
+        """rlm_query must NOT exist in namespace at depth=1."""
+        code = build_search_setup_code(api_url="http://localhost:8091", rlm_model="m", depth=1)
+        repl = LocalREPL(setup_code=code)
+        try:
+            assert "rlm_query" not in repl.locals
+            # Standard tools still present
+            assert "search" in repl.locals
+            assert "research" in repl.locals
+        finally:
+            repl.cleanup()

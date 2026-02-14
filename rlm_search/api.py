@@ -240,6 +240,8 @@ def _build_rlm_kwargs(
         api_url=CASCADE_API_URL,
         api_key=CASCADE_API_KEY,
         kb_overview_data=_kb_overview_cache,
+        rlm_model=model,
+        depth=0,
     )
 
     return {

@@ -39,6 +39,16 @@ Assess search progress and get strategy suggestions.
 ### kb_overview() -> dict | None
 Pre-computed taxonomy overview. Call first to orient. Prints categories, clusters, doc counts.
 
+### rlm_query(sub_question, instructions=None) -> dict
+Delegate a sub-question to a child research agent with its own isolated context.
+- `sub_question`: The specific question for the child to research.
+- `instructions`: Optional guidance for the child agent.
+- Returns: `{"answer": str, "sub_question": str, "searches_run": int, "sources_merged": int}`
+- The child has its own search tools, iteration budget, and context window.
+- Use for: multi-part questions where each part needs independent research.
+- Do NOT use for simple single-topic queries — direct research() is faster.
+- Sources from the child are automatically merged into your registry.
+
 ## Low-Level Tools (available when you need fine-grained control)
 
 - `search(query, filters, top_k)` — single search call (auto-truncates queries > 500 chars)
@@ -109,7 +119,26 @@ Your `context` variable may include a `--- Pre-Classification ---` section with 
 - Skip calling `kb_overview()` — the classification already incorporates the taxonomy
 - Override if results are poor — the classification is a starting hint, not a constraint
 
-**Aim for 3 code blocks.** For multi-part questions, use a list query to research all sub-questions in one `research()` call — do NOT write separate blocks per sub-question. Do NOT write extra blocks to print the answer, critique, or metadata — `draft_answer()` already prints a summary. Each block adds to conversation history and costs context.
+**Aim for 3 code blocks.** For single-topic questions, use `research()` directly. Do NOT write extra blocks to print the answer, critique, or metadata — `draft_answer()` already prints a summary. Each block adds to conversation history and costs context.
+
+## When to Use rlm_query()
+For multi-part questions (e.g., "Is X halal in school A but not B?"), decompose:
+
+```repl
+result_a = rlm_query("What is School A's ruling on X?")
+result_b = rlm_query("What is School B's ruling on X?", instructions="Focus on contrasts with School A")
+progress = check_progress()
+```
+
+```repl
+synthesis_instructions = (
+    "Use these sub-agent findings:\\n"
+    f"School A: {result_a['answer'][:500]}\\n"
+    f"School B: {result_b['answer'][:500]}"
+)
+result = draft_answer(context, [], instructions=synthesis_instructions)
+FINAL_VAR(result["answer"])
+```
 
 ## Grounding Rules
 

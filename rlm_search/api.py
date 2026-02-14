@@ -39,7 +39,7 @@ from rlm_search.config import (
 )
 from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
-from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
+from rlm_search.prompts import build_system_prompt
 from rlm_search.repl_tools import build_search_setup_code
 from rlm_search.streaming_logger import SearchCancelled, StreamingLogger
 
@@ -385,7 +385,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                 environment_kwargs={"setup_code": kw["setup_code"]},
                 max_iterations=kw["max_iterations"],
                 max_depth=kw["max_depth"],
-                custom_system_prompt=AGENTIC_SEARCH_SYSTEM_PROMPT,
+                custom_system_prompt=build_system_prompt(kw["max_iterations"]),
                 logger=logger,
                 persistent=True,
             )

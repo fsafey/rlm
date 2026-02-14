@@ -777,6 +777,31 @@ class TestPreClassify:
         assert parts[1] == "CATEGORY: PT"
 
 
+class TestBuildSystemPrompt:
+    """Test build_system_prompt() generates correct budget text."""
+
+    def test_includes_budget_section(self):
+        from rlm_search.prompts import build_system_prompt
+
+        prompt = build_system_prompt(10)
+        assert "10 iterations" in prompt
+        assert "iteration 7" in prompt  # max_iterations - 3
+        assert "check_progress()" in prompt
+
+    def test_default_iterations(self):
+        from rlm_search.prompts import build_system_prompt
+
+        prompt = build_system_prompt()
+        assert "15 iterations" in prompt
+        assert "iteration 12" in prompt  # 15 - 3
+
+    def test_base_prompt_preserved(self):
+        from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT, build_system_prompt
+
+        prompt = build_system_prompt(15)
+        assert prompt.startswith(AGENTIC_SEARCH_SYSTEM_PROMPT)
+
+
 def _parse_sse_events(text: str) -> list[dict]:
     """Parse SSE text into a list of JSON event dicts."""
     events = []

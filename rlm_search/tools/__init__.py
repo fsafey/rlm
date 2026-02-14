@@ -11,6 +11,7 @@ from rlm_search.tools.context import ToolContext
 from rlm_search.tools.format_tools import format_evidence
 from rlm_search.tools.kb import kb_overview
 from rlm_search.tools.normalize import normalize_hit
+from rlm_search.tools.progress_tools import check_progress
 from rlm_search.tools.subagent_tools import (
     batched_critique,
     classify_question,
@@ -39,4 +40,5 @@ __all__ = [
     "research",
     "draft_answer",
     "kb_overview",
+    "check_progress",
 ]

@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Tag,
+  Gauge,
 } from "lucide-react";
 import type { Iteration, MetadataEvent, ProgressEvent } from "@/lib/types";
 
@@ -19,6 +20,47 @@ interface SearchProgressProps {
   iterations: Iteration[];
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
+}
+
+// --- Confidence ring ---
+
+function ConfidenceRing({ value, size = 40 }: { value: number; size?: number }) {
+  const radius = (size - 4) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value / 100) * circumference;
+  const color =
+    value >= 60 ? "text-emerald-500" : value >= 30 ? "text-amber-500" : "text-rose-400";
+
+  return (
+    <div
+      className="relative inline-flex items-center justify-center"
+      style={{ width: size, height: size }}
+    >
+      <svg className="transform -rotate-90" width={size} height={size}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          className="stroke-muted"
+          strokeWidth={3}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          className={`${color} transition-all duration-700 ease-out`}
+          stroke="currentColor"
+          strokeWidth={3}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+        />
+      </svg>
+      <span className={`absolute text-[10px] font-bold ${color}`}>{value}%</span>
+    </div>
+  );
 }
 
 // --- Progress phase rendering ---
@@ -121,6 +163,14 @@ function detectActivityFromStdout(iteration: Iteration): IterationActivity {
 
   if (stdout.includes("[classify_question]")) {
     return { label: "Classifying", metric: "Identified category and strategy", icon: Tag };
+  }
+
+  if (stdout.includes("[check_progress]")) {
+    const confidence = extractMetric(stdout, /confidence=(\d+)%/);
+    const guidance = extractMetric(stdout, /\[check_progress\] \w+ — (.+)/);
+    let metric = guidance ?? "Assessed search progress";
+    if (confidence) metric = `${confidence}% confidence — ${metric}`;
+    return { label: "Checking Progress", metric, icon: Gauge };
   }
 
   // --- Primary tools ---
@@ -245,6 +295,16 @@ function detectActivityFromToolCalls(iteration: Iteration): IterationActivity {
     }
     case "classify_question":
       return { label: "Classifying", metric: "Identified category and strategy", icon: Tag };
+    case "check_progress": {
+      const s = primary.result_summary;
+      const confidence = s.confidence as number | undefined;
+      const relevant = s.relevant as number | undefined;
+      const metric =
+        confidence != null
+          ? `${confidence}% confidence — ${relevant ?? 0} relevant sources`
+          : (s.phase as string) ?? "Assessed progress";
+      return { label: "Checking Progress", metric, icon: Gauge };
+    }
     case "search": {
       const s = primary.result_summary;
       const numResults = s.num_results as number | undefined;
@@ -317,6 +377,8 @@ function getActiveText(
       return { label: "Analyzing", detail: "Deciding next step..." };
     case "Reformulating":
       return { label: "Searching", detail: "Retrying with new queries..." };
+    case "Checking Progress":
+      return { label: "Planning", detail: "Deciding next step based on progress..." };
     case "Terminology":
       return { label: "Applying", detail: "Incorporating terminology..." };
     case "Drafting":
@@ -448,6 +510,18 @@ export function SearchProgress({
   );
 
   const maxIterations = metadata?.max_iterations ?? 15;
+
+  const latestConfidence = useMemo(() => {
+    for (let i = iterations.length - 1; i >= 0; i--) {
+      const calls = iterations[i].tool_calls ?? [];
+      const cp = calls.find((c) => c.tool === "check_progress");
+      if (cp?.result_summary?.confidence != null) {
+        return cp.result_summary.confidence as number;
+      }
+    }
+    return null;
+  }, [iterations]);
+
   const hasIterations = iterations.length > 0;
 
   // Progress steps: during init they animate in; once iterations flow, all are "completed"
@@ -552,10 +626,11 @@ export function SearchProgress({
         </div>
 
         {/* Footer stats */}
-        <div className="px-6 py-3 bg-muted/50 border-t border-border flex justify-between text-xs text-muted-foreground">
+        <div className="px-6 py-3 bg-muted/50 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
           <span>
             {iterations.length}/{maxIterations} iterations
           </span>
+          {latestConfidence != null && <ConfidenceRing value={latestConfidence} size={36} />}
           <span>{(elapsedMs / 1000).toFixed(1)}s elapsed</span>
         </div>
       </div>

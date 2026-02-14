@@ -30,6 +30,12 @@ Synthesize, critique, and revise an answer from search results.
 - Returns: `{"answer": str, "critique": str, "passed": bool, "revised": bool}`
 - Handles format_evidence, synthesis, critique, and one revision automatically.
 
+### check_progress() -> dict
+Assess search progress and get strategy suggestions.
+- Returns: `{"phase": str, "confidence": int, "guidance": str, ...}`
+- Call after each `research()` to decide next step.
+- Phases: `continue` (keep searching), `ready` (proceed to draft), `stalled`/`repeating` (change strategy), `finalize` (emit answer).
+
 ### kb_overview() -> dict | None
 Pre-computed taxonomy overview. Call first to orient. Prints categories, clusters, doc counts.
 
@@ -70,6 +76,7 @@ results = research(context, filters={"parent_code": "FN"}, extra_queries=[
     {"query": "specific angle one", "filters": {"parent_code": "FN"}},
     {"query": "specific angle two"},
 ])
+progress = check_progress()  # Check if we have enough evidence
 # Multi-topic (pass a list — merged, deduped, evaluated together):
 # results = research([
 #     {"query": "sub-question 1", "filters": {"parent_code": "FN"}, "extra_queries": [
@@ -118,3 +125,25 @@ When done, provide your answer with one of:
 
 Both MUST appear at the START of a line, OUTSIDE of code blocks.
 """
+
+
+def build_system_prompt(max_iterations: int = 15) -> str:
+    """Build the full system prompt with iteration budget and progress guidance."""
+    budget_section = f"""
+
+## Iteration Budget & Progress
+
+You have **{max_iterations} iterations** total. Each ```repl``` block costs one iteration.
+
+- **Iterations 1-3**: Research — kb_overview(), research(), check_progress()
+- **Iterations 4-5**: Draft — draft_answer(), FINAL_VAR
+- **Iterations 6+**: Only if check_progress() says "continue"
+
+**Call `check_progress()` after each `research()` call.** It returns:
+- A confidence score (0-100%) — proceed to draft_answer() when ≥60%
+- Concrete strategy suggestions when evidence is insufficient
+- An audit trail of searches tried (to avoid repeating queries)
+
+After iteration {max_iterations - 3}, you MUST draft and finalize regardless of evidence quality."""
+
+    return AGENTIC_SEARCH_SYSTEM_PROMPT + budget_section

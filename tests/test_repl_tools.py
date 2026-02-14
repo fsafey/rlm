@@ -1732,3 +1732,291 @@ class TestToolCallsTracking:
         assert ns["tool_calls"][0]["tool"] == "search"
         assert ns["tool_calls"][1]["tool"] == "search"
         assert ns["tool_calls"][2]["tool"] == "browse"
+
+
+# --- KB fixture with categories and clusters for progress tests ---
+
+_KB_PROGRESS = {
+    "collection": "test",
+    "total_documents": 5000,
+    "categories": {
+        "FN": {
+            "name": "Finance & Transactions",
+            "document_count": 2000,
+            "clusters": {"Zakat": "How to calculate zakat?"},
+            "facets": {
+                "clusters": [
+                    {"value": "Zakat", "count": 500},
+                    {"value": "Banking", "count": 300},
+                ]
+            },
+        },
+        "PT": {
+            "name": "Prayer & Tahara",
+            "document_count": 2500,
+            "clusters": {"Ghusl": "How to perform ghusl?"},
+            "facets": {
+                "clusters": [
+                    {"value": "Ghusl", "count": 400},
+                    {"value": "Wudu", "count": 350},
+                ]
+            },
+        },
+        "BE": {
+            "name": "Beliefs & Ethics",
+            "document_count": 500,
+            "clusters": {"Iman": "What is iman?"},
+            "facets": {
+                "clusters": [
+                    {"value": "Iman", "count": 200},
+                ]
+            },
+        },
+    },
+}
+
+
+_UNSET = object()
+
+
+class TestCheckProgress:
+    """Tests for the check_progress() progress advisor."""
+
+    def _exec_ns(self, kb_data=_UNSET):
+        data = _KB_PROGRESS if kb_data is _UNSET else kb_data
+        code = build_search_setup_code(
+            api_url="http://api.test", api_key="k", kb_overview_data=data
+        )
+        ns: dict = {
+            "llm_query": lambda prompt, model=None: "",
+            "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
+        }
+        exec(code, ns)  # noqa: S102
+        return ns
+
+    def test_empty_state(self, capsys):
+        """No mutations → phase=continue, confidence<30."""
+        ns = self._exec_ns()
+        result = ns["check_progress"]()
+
+        assert result["phase"] == "continue"
+        assert result["confidence"] < 30
+        assert result["searches_run"] == 0
+        assert result["unique_sources"] == 0
+        captured = capsys.readouterr()
+        assert "[check_progress]" in captured.out
+        assert "continue" in captured.out
+
+    def test_ready_with_relevant_results(self):
+        """3 relevant sources with good scores → phase=ready, confidence≥60."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        # Simulate 3 sources with good scores
+        for i in range(3):
+            ctx.source_registry[str(i)] = {"id": str(i), "score": 0.6}
+        # Simulate search_log
+        ctx.search_log.append({"type": "search", "query": "q1", "filters": {}, "num_results": 3})
+        # Simulate evaluate_results tool call
+        ctx.tool_calls.append(
+            {
+                "tool": "evaluate_results",
+                "args": {},
+                "result_summary": {"relevant": 3, "partial": 1, "off_topic": 0},
+                "duration_ms": 100,
+                "children": [],
+                "error": None,
+            }
+        )
+
+        result = ns["check_progress"]()
+        assert result["phase"] == "ready"
+        assert result["confidence"] >= 60
+
+    def test_stalled_many_searches(self):
+        """6+ searches with <2 relevant → phase=stalled."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        for i in range(6):
+            ctx.search_log.append(
+                {
+                    "type": "search",
+                    "query": f"query_{i}",
+                    "filters": {"parent_code": "FN"},
+                    "num_results": 2,
+                }
+            )
+        ctx.tool_calls.append(
+            {
+                "tool": "evaluate_results",
+                "args": {},
+                "result_summary": {"relevant": 1, "partial": 0, "off_topic": 5},
+                "duration_ms": 50,
+                "children": [],
+                "error": None,
+            }
+        )
+
+        result = ns["check_progress"]()
+        assert result["phase"] == "stalled"
+        assert "Unexplored" in result["guidance"]
+
+    def test_repeating_low_diversity(self):
+        """3 identical queries → phase=repeating."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        for _ in range(3):
+            ctx.search_log.append(
+                {
+                    "type": "search",
+                    "query": "same query",
+                    "filters": {},
+                    "num_results": 3,
+                }
+            )
+
+        result = ns["check_progress"]()
+        assert result["phase"] == "repeating"
+        assert "Low query diversity" in result["guidance"]
+
+    def test_finalize_after_draft(self):
+        """draft_answer tool_call present → phase=finalize, includes draft bonus."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        ctx.tool_calls.append(
+            {
+                "tool": "draft_answer",
+                "args": {},
+                "result_summary": {"passed": True, "revised": False},
+                "duration_ms": 500,
+                "children": [],
+                "error": None,
+            }
+        )
+
+        result = ns["check_progress"]()
+        assert result["phase"] == "finalize"
+        assert result["confidence"] >= 20  # draft bonus alone is 20
+
+    def test_confidence_scoring(self):
+        """Verify score ranges match thresholds with controlled inputs."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        # Setup: 2 relevant, 2 partial, top_score=0.4, 1 category, no draft
+        for i in range(4):
+            ctx.source_registry[str(i)] = {"id": str(i), "score": 0.4}
+        ctx.search_log.append(
+            {
+                "type": "search",
+                "query": "q",
+                "filters": {"parent_code": "FN"},
+                "num_results": 4,
+            }
+        )
+        ctx.tool_calls.append(
+            {
+                "tool": "evaluate_results",
+                "args": {},
+                "result_summary": {"relevant": 2, "partial": 2, "off_topic": 0},
+                "duration_ms": 50,
+                "children": [],
+                "error": None,
+            }
+        )
+
+        result = ns["check_progress"]()
+        # evidence: min(2/3,1)*35=23.3, quality: min(0.4/0.5,1)*25=20, breadth: min(2/2,1)*10=10,
+        # diversity: min(1/2,1)*10=5, draft=0 → total ~58
+        assert 30 <= result["confidence"] < 60  # moderate range
+
+    def test_strategy_suggests_unexplored_category(self):
+        """Only FN searched, KB has PT with 2500 docs → suggestion mentions PT."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        ctx.search_log.append(
+            {
+                "type": "search",
+                "query": "q",
+                "filters": {"parent_code": "FN"},
+                "num_results": 3,
+            }
+        )
+
+        result = ns["check_progress"]()
+        # PT has the most docs (2500) and is unexplored
+        assert "Prayer & Tahara" in result["guidance"]
+        assert "parent_code" in result["guidance"]
+
+    def test_strategy_suggests_unexplored_cluster(self):
+        """All categories searched, some clusters unused → suggests specific cluster."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        # Mark all categories as explored
+        for code in ["FN", "PT", "BE"]:
+            ctx.search_log.append(
+                {
+                    "type": "search",
+                    "query": f"q_{code}",
+                    "filters": {"parent_code": code},
+                    "num_results": 3,
+                }
+            )
+
+        result = ns["check_progress"]()
+        # Should suggest a specific cluster since all categories are explored
+        assert "cluster" in result["guidance"].lower() or "Draft" in result["guidance"]
+
+    def test_audit_trail_printed(self, capsys):
+        """3 searches → capsys contains numbered list and diversity ratio."""
+        ns = self._exec_ns()
+        ctx = ns["_ctx"]
+        ctx.search_log.extend(
+            [
+                {
+                    "type": "search",
+                    "query": "zakat crypto",
+                    "filters": {"parent_code": "FN"},
+                    "num_results": 5,
+                },
+                {
+                    "type": "search",
+                    "query": "bitcoin halal",
+                    "filters": {"parent_code": "FN"},
+                    "num_results": 4,
+                },
+                {"type": "search", "query": "digital currency", "filters": None, "num_results": 6},
+            ]
+        )
+
+        ns["check_progress"]()
+        captured = capsys.readouterr()
+        assert '1. "zakat crypto"' in captured.out
+        assert '2. "bitcoin halal"' in captured.out
+        assert '3. "digital currency"' in captured.out
+        assert "Diversity: 3/3" in captured.out
+
+    def test_stdout_tag(self, capsys):
+        """Output contains [check_progress] tag."""
+        ns = self._exec_ns()
+        ns["check_progress"]()
+        captured = capsys.readouterr()
+        assert "[check_progress]" in captured.out
+
+    def test_tool_call_tracked(self):
+        """tool_calls entry has tool=check_progress with phase and confidence."""
+        ns = self._exec_ns()
+        ns["check_progress"]()
+
+        tc = ns["tool_calls"][-1]
+        assert tc["tool"] == "check_progress"
+        assert "phase" in tc["result_summary"]
+        assert "confidence" in tc["result_summary"]
+        assert tc["duration_ms"] >= 0
+        assert tc["error"] is None
+
+    def test_no_kb_data_graceful(self):
+        """kb_overview_data=None → still works, strategy is generic fallback."""
+        ns = self._exec_ns(kb_data=None)
+        result = ns["check_progress"]()
+
+        assert result["phase"] == "continue"
+        assert "broader search terms" in result["guidance"]

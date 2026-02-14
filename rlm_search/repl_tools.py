@@ -30,6 +30,7 @@ from rlm_search.tools import subagent_tools as _sub
 from rlm_search.tools import composite_tools as _comp
 from rlm_search.tools import format_tools as _fmt
 from rlm_search.tools import kb as _kb_mod
+from rlm_search.tools import progress_tools as _prog
 
 _ctx = _ToolContext(
     api_url={api_url!r},
@@ -76,6 +77,9 @@ def critique_answer(question, draft, model=None):
 
 def classify_question(question, model=None):
     return _sub.classify_question(_ctx, question, model=model)
+
+def check_progress():
+    return _prog.check_progress(_ctx)
 
 def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None):
     return _comp.research(_ctx, query, filters=filters, top_k=top_k, extra_queries=extra_queries, eval_model=eval_model)

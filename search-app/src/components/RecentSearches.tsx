@@ -1,15 +1,17 @@
 import type { LogEntry } from "@/lib/useSearchHistory";
-import { Clock, Loader2 } from "lucide-react";
+import { Clock, Loader2, X } from "lucide-react";
 
 interface RecentSearchesProps {
   logs: LogEntry[];
   onSelect: (searchId: string) => void;
+  onDelete: (searchId: string) => void;
   loading: boolean;
 }
 
 export function RecentSearches({
   logs,
   onSelect,
+  onDelete,
   loading,
 }: RecentSearchesProps) {
   if (logs.length === 0) return null;
@@ -26,29 +28,44 @@ export function RecentSearches({
       </h3>
       <div className="space-y-2">
         {logs.map((log) => (
-          <button
+          <div
             key={log.filename}
-            onClick={() => onSelect(log.search_id)}
-            disabled={loading}
-            className="w-full text-left rounded-lg border border-border bg-card p-3 hover:border-foreground/20 transition-colors cursor-pointer disabled:opacity-50"
+            className="group relative w-full text-left rounded-lg border border-border bg-card p-3 hover:border-foreground/20 transition-colors"
           >
-            <p className="text-sm line-clamp-2">{log.query}</p>
-            <div className="flex items-center gap-2 mt-1.5">
-              <span className="text-[10px] text-muted-foreground font-mono">
-                {log.search_id}
-              </span>
-              {log.timestamp && (
-                <span className="text-[10px] text-muted-foreground">
-                  {formatTimestamp(log.timestamp)}
+            <button
+              onClick={() => onSelect(log.search_id)}
+              disabled={loading}
+              className="w-full text-left cursor-pointer disabled:opacity-50"
+            >
+              <p className="text-sm line-clamp-2 pr-6">{log.query}</p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {log.search_id}
                 </span>
-              )}
-              {log.root_model && (
-                <span className="text-[10px] rounded-full px-1.5 py-0.5 bg-secondary text-secondary-foreground">
-                  {log.root_model}
-                </span>
-              )}
-            </div>
-          </button>
+                {log.timestamp && (
+                  <span className="text-[10px] text-muted-foreground">
+                    {formatTimestamp(log.timestamp)}
+                  </span>
+                )}
+                {log.root_model && (
+                  <span className="text-[10px] rounded-full px-1.5 py-0.5 bg-secondary text-secondary-foreground">
+                    {log.root_model}
+                  </span>
+                )}
+              </div>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(log.search_id);
+              }}
+              disabled={loading}
+              className="absolute top-2 right-2 p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all disabled:opacity-0"
+              aria-label="Delete search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         ))}
       </div>
     </div>

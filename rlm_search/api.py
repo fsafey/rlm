@@ -160,6 +160,7 @@ _searches: dict[str, StreamingLogger] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
 
 _SOURCE_PATTERN = re.compile(r"\[Source:\s*(\d+)\]")
+_SEARCH_ID_RE = re.compile(r"^[a-f0-9-]{1,36}$")
 
 
 def _extract_sources(answer: str, registry: dict[str, dict] | None = None) -> list[dict]:
@@ -626,9 +627,25 @@ async def list_recent_logs(limit: int = 20) -> list[dict]:
     return results
 
 
+@app.delete("/api/logs/{search_id}")
+async def delete_log(search_id: str) -> dict:
+    """Delete a search log by search_id prefix match."""
+    if not _SEARCH_ID_RE.match(search_id):
+        raise HTTPException(status_code=400, detail="Invalid search_id format")
+    log_dir = _PROJECT_ROOT / "rlm_logs"
+    matches = list(log_dir.glob(f"search_{search_id}*.jsonl"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Log not found")
+    for f in matches:
+        f.unlink()
+    return {"deleted": search_id}
+
+
 @app.get("/api/logs/{search_id}")
 async def get_log(search_id: str) -> dict:
     """Load a completed search log by search_id prefix match."""
+    if not _SEARCH_ID_RE.match(search_id):
+        raise HTTPException(status_code=400, detail="Invalid search_id format")
     log_dir = _PROJECT_ROOT / "rlm_logs"
     if not log_dir.exists():
         raise HTTPException(status_code=404, detail="No logs directory")

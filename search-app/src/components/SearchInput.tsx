@@ -150,7 +150,7 @@ export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFo
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Max Depth</label>
+              <label className="text-xs font-medium text-muted-foreground">RLM Recursion</label>
               <input
                 type="number"
                 min={1}
@@ -164,10 +164,10 @@ export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFo
                 }
                 className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
               />
-              <span className="text-[10px] text-muted-foreground/70">Higher = more thorough decomposition of complex questions</span>
+              <span className="text-[10px] text-muted-foreground/70">Self-calls for problem decomposition (1 = no recursion)</span>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Sub-Iterations</label>
+              <label className="text-xs font-medium text-muted-foreground">Sub-Agent Budget</label>
               <input
                 type="number"
                 min={1}
@@ -181,10 +181,10 @@ export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFo
                 }
                 className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
               />
-              <span className="text-[10px] text-muted-foreground/70">How much work each sub-agent can do</span>
+              <span className="text-[10px] text-muted-foreground/70">Steps each sub-agent gets to research its question</span>
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Delegation Depth</label>
+              <label className="text-xs font-medium text-muted-foreground">Sub-Agent Depth</label>
               <input
                 type="number"
                 min={0}
@@ -198,7 +198,7 @@ export function SearchInput({ onSearch, onReset, isSearching, isCancelling, isFo
                 }
                 className="text-xs bg-secondary text-secondary-foreground rounded-lg px-2 py-1.5 outline-none border-none text-center"
               />
-              <span className="text-[10px] text-muted-foreground/70">Allow sub-agents to spawn their own sub-agents (0 = off)</span>
+              <span className="text-[10px] text-muted-foreground/70">Layers of sub-agents that can be spawned (0 = none)</span>
             </div>
           </div>
         </div>

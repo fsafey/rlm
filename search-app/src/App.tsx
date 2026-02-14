@@ -13,7 +13,7 @@ import type { SearchSettings, SearchState } from "@/lib/types";
 
 function App() {
   const { state, search, reset, newSession, setState } = useSearch();
-  const { recentLogs, loadLog, loadingLog } = useSearchHistory(
+  const { recentLogs, loadLog, deleteLog, loadingLog } = useSearchHistory(
     setState as React.Dispatch<React.SetStateAction<SearchState>>,
   );
 
@@ -111,6 +111,7 @@ function App() {
           <RecentSearches
             logs={recentLogs}
             onSelect={loadLog}
+            onDelete={deleteLog}
             loading={loadingLog}
           />
         )}

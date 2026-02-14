@@ -211,6 +211,7 @@ def _backfill_tool_calls(iterations: list[dict]) -> None:
 
 def _build_rlm_kwargs(
     settings: dict[str, Any],
+    query: str = "",
 ) -> dict[str, Any]:
     """Build RLM constructor kwargs from search settings + config defaults."""
     backend = settings.get("backend") or RLM_BACKEND
@@ -258,6 +259,8 @@ def _build_rlm_kwargs(
         depth=0,
         max_delegation_depth=max_delegation_depth,
         sub_iterations=sub_iterations,
+        query=query,
+        classify_model=RLM_CLASSIFY_MODEL,
     )
 
     return {
@@ -271,59 +274,6 @@ def _build_rlm_kwargs(
         "other_backend_kwargs": other_backend_kwargs_arg,
         "setup_code": setup_code,
     }
-
-
-def _pre_classify(query: str, kb_overview: dict | None) -> str:
-    """Classify query via cheap LM call and return enriched context string.
-
-    Returns the original query with appended classification metadata.
-    Falls back to plain query on any failure (no-op degradation).
-    """
-    if not kb_overview:
-        return query
-
-    # Build category + cluster summary from cached KB overview
-    cat_lines = []
-    for code, cat in kb_overview.get("categories", {}).items():
-        name = cat.get("name", code)
-        clusters = list(cat.get("clusters", {}).keys())[:10]
-        cat_lines.append(f"{code} — {name}: {', '.join(clusters)}")
-    cat_info = "\n".join(cat_lines)
-
-    prompt = [
-        {
-            "role": "user",
-            "content": (
-                "Classify this Islamic Q&A question into one of these categories"
-                " and suggest search filters.\n\n"
-                f'Question: "{query}"\n\n'
-                f"Categories and their clusters:\n{cat_info}\n\n"
-                "Respond with exactly (no other text):\n"
-                "CATEGORY: <code>\n"
-                "CLUSTERS: <comma-separated relevant cluster labels>\n"
-                'FILTERS: <json dict, e.g. {"parent_code": "BE"}>\n'
-                "STRATEGY: <1 sentence search plan>"
-            ),
-        },
-    ]
-
-    try:
-        from rlm.clients import get_client
-
-        # Use the configured backend — claude_cli for tunnel, anthropic for direct API
-        if RLM_BACKEND == "claude_cli":
-            classify_kwargs: dict[str, Any] = {"model": RLM_CLASSIFY_MODEL}
-        else:
-            classify_kwargs = {"model_name": RLM_CLASSIFY_MODEL}
-            if ANTHROPIC_API_KEY:
-                classify_kwargs["api_key"] = ANTHROPIC_API_KEY
-
-        client = get_client(RLM_BACKEND, classify_kwargs)
-        classification = client.completion(prompt)
-        return f"{query}\n\n--- Pre-Classification ---\n{classification}"
-    except Exception as e:
-        _log.warning("Pre-classification failed, proceeding without: %s", e)
-        return query
 
 
 def _emit_metadata(logger: StreamingLogger, rlm: RLM) -> None:
@@ -404,7 +354,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
 
             else:
                 # ── New session: create persistent RLM ──
-                kw = _build_rlm_kwargs(settings)
+                kw = _build_rlm_kwargs(settings, query=query)
                 model_short = (
                     kw["model"].rsplit("-", 1)[0]
                     if len(kw["model"].split("-")) > 3
@@ -416,6 +366,7 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                     f"backend={kw['backend']} model={kw['model']} sub_model={kw['sub_model'] or '(same)'}"
                 )
 
+                # Classification happens inside setup_code via init_classify()
                 rlm = RLM(
                     backend=kw["backend"],
                     backend_kwargs=kw["backend_kwargs"],
@@ -442,26 +393,8 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                 )
                 session = _sessions[session_id]  # update local ref for finally block
 
-                logger.emit_progress("classifying", f"Pre-classifying with {RLM_CLASSIFY_MODEL}")
-
-                t0 = time.monotonic()
-                enriched_query = _pre_classify(query, _kb_overview_cache)
-                classify_ms = int((time.monotonic() - t0) * 1000)
-
-                # Extract classification text if it was appended
-                classification = None
-                if "\n\n--- Pre-Classification ---\n" in enriched_query:
-                    classification = enriched_query.split("\n\n--- Pre-Classification ---\n", 1)[1]
-
-                logger.emit_progress(
-                    "classified",
-                    f"Pre-classified in {classify_ms}ms",
-                    duration_ms=classify_ms,
-                    **({"classification": classification} if classification else {}),
-                )
-
                 logger.emit_progress("reasoning", f"Analyzing your question with {model_short}")
-                result = rlm.completion(enriched_query, root_prompt=query)
+                result = rlm.completion(query, root_prompt=query)
 
             print(
                 f"[SEARCH:{search_id}] Completed | answer_len={len(result.response or '')} "

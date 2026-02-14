@@ -277,46 +277,140 @@ def batched_critique(
         return combined, passed
 
 
-def classify_question(
+def init_classify(
     ctx: ToolContext,
     question: str,
-    model: str | None = None,
-) -> str:
-    """Sub-agent: classify question and recommend search strategy.
+    model: str = "",
+) -> None:
+    """Pre-classify query at setup_code time (zero iteration cost).
 
-    Optional — use if unsure which category fits after reviewing ``kb_overview()``.
-    Uses the taxonomy data to pick category, clusters, and search plan.
+    Creates its own LM client for model flexibility, parses the raw LLM
+    output into a structured dict, and stores it on ``ctx.classification``.
+    Emits ``classifying`` / ``classified`` progress events via
+    ``ctx._parent_logger``.
 
-    Args:
-        ctx: Per-session tool context.
-        question: The user's question.
-
-    Returns:
-        String with CATEGORY code, relevant CLUSTERS, and search STRATEGY.
+    On any failure, sets ``ctx.classification = None`` and logs a warning.
     """
+    import json as _json
+    import logging
+    import time
+
+    _log = logging.getLogger("rlm_search")
+
+    if not ctx.kb_overview_data:
+        ctx.classification = None
+        return
+
+    # Resolve model
+    if not model:
+        from rlm_search.config import RLM_CLASSIFY_MODEL
+
+        model = RLM_CLASSIFY_MODEL
+
+    # Emit progress: classifying
+    if ctx._parent_logger is not None:
+        ctx._parent_logger.emit_progress("classifying", f"Pre-classifying with {model}")
+
+    # Build category + cluster summary
+    cat_lines = []
+    for code, cat in ctx.kb_overview_data.get("categories", {}).items():
+        name = cat.get("name", code)
+        clusters = list(cat.get("clusters", {}).keys())[:10]
+        cat_lines.append(f"{code} — {name}: {', '.join(clusters)}")
+    cat_info = "\n".join(cat_lines)
+
+    prompt = [
+        {
+            "role": "user",
+            "content": (
+                "Classify this Islamic Q&A question into one of these categories"
+                " and suggest search filters.\n\n"
+                f'Question: "{question}"\n\n'
+                f"Categories and their clusters:\n{cat_info}\n\n"
+                "Respond with exactly (no other text):\n"
+                "CATEGORY: <code>\n"
+                "CLUSTERS: <comma-separated relevant cluster labels>\n"
+                'FILTERS: <json dict, e.g. {"parent_code": "BE"}>\n'
+                "STRATEGY: <1 sentence search plan>"
+            ),
+        },
+    ]
+
+    t0 = time.monotonic()
+
     with tool_call_tracker(
         ctx,
-        "classify_question",
-        {"question": question[:100]},
+        "init_classify",
+        {"question": question[:100], "model": model},
         parent_idx=ctx.current_parent_idx,
     ) as tc:
-        cat_info = ""
-        if ctx.kb_overview_data is not None:
-            for cat_code, cat in ctx.kb_overview_data.get("categories", {}).items():
-                name = cat.get("name", cat_code)
-                clusters = cat.get("clusters", {})
-                labels = ", ".join(list(clusters.keys())[:10])
-                cat_info += f"{cat_code} — {name}: {labels}\n"
-        prompt = (
-            f"Classify this Islamic Q&A question and recommend a search strategy.\n\n"
-            f'Question: "{question}"\n\n'
-            f"Categories and clusters:\n{cat_info}\n"
-            f"Respond with exactly:\n"
-            f"CATEGORY: <code>\n"
-            f"CLUSTERS: <comma-separated relevant cluster labels>\n"
-            f"STRATEGY: <1-2 sentence search plan>"
-        )
-        classification = ctx.llm_query(prompt, model=model)
-        print("[classify_question] done")
-        tc.set_summary({"raw_length": len(classification)})
-        return classification
+        try:
+            from rlm.clients import get_client
+            from rlm_search.config import ANTHROPIC_API_KEY, RLM_BACKEND
+
+            if RLM_BACKEND == "claude_cli":
+                client_kwargs: dict = {"model": model}
+            else:
+                client_kwargs = {"model_name": model}
+                if ANTHROPIC_API_KEY:
+                    client_kwargs["api_key"] = ANTHROPIC_API_KEY
+
+            client = get_client(RLM_BACKEND, client_kwargs)
+            raw = client.completion(prompt)
+
+            # Parse structured fields from raw output
+            parsed: dict = {
+                "raw": raw,
+                "category": "",
+                "clusters": "",
+                "filters": {},
+                "strategy": "",
+            }
+            for line in raw.strip().split("\n"):
+                line_s = line.strip()
+                if line_s.upper().startswith("CATEGORY:"):
+                    parsed["category"] = line_s.split(":", 1)[1].strip()
+                elif line_s.upper().startswith("CLUSTERS:"):
+                    parsed["clusters"] = line_s.split(":", 1)[1].strip()
+                elif line_s.upper().startswith("FILTERS:"):
+                    try:
+                        parsed["filters"] = _json.loads(line_s.split(":", 1)[1].strip())
+                    except (_json.JSONDecodeError, ValueError):
+                        parsed["filters"] = {}
+                elif line_s.upper().startswith("STRATEGY:"):
+                    parsed["strategy"] = line_s.split(":", 1)[1].strip()
+
+            ctx.classification = parsed
+            classify_ms = int((time.monotonic() - t0) * 1000)
+            print(f"[classify] category={parsed['category']} time={classify_ms}ms")
+            tc.set_summary(
+                {
+                    "category": parsed["category"],
+                    "clusters": parsed["clusters"],
+                    "duration_ms": classify_ms,
+                }
+            )
+
+            # Emit progress: classified
+            if ctx._parent_logger is not None:
+                ctx._parent_logger.emit_progress(
+                    "classified",
+                    f"Pre-classified in {classify_ms}ms",
+                    duration_ms=classify_ms,
+                    classification=parsed,
+                )
+
+        except Exception as e:
+            _log.warning("Pre-classification failed, proceeding without: %s", e)
+            ctx.classification = None
+            classify_ms = int((time.monotonic() - t0) * 1000)
+            print(f"[classify] FAILED: {e}")
+            tc.set_summary({"error": str(e), "duration_ms": classify_ms})
+
+            # Emit classified with no classification on failure
+            if ctx._parent_logger is not None:
+                ctx._parent_logger.emit_progress(
+                    "classified",
+                    f"Classification skipped ({classify_ms}ms)",
+                    duration_ms=classify_ms,
+                )

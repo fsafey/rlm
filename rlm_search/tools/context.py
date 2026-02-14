@@ -20,6 +20,7 @@ class ToolContext:
     timeout: int = 30
     headers: dict[str, str] = dataclasses.field(default_factory=dict)
     kb_overview_data: dict | None = None
+    classification: dict | None = None
 
     # Mutable per-session state
     search_log: list = dataclasses.field(default_factory=list)

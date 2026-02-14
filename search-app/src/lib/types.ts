@@ -93,7 +93,7 @@ export interface ProgressEvent {
   detail: string;
   timestamp: string;
   duration_ms?: number;
-  classification?: string;
+  classification?: Record<string, unknown>;
 }
 
 export interface ToolProgressEvent {
@@ -130,6 +130,14 @@ export interface ConversationTurn {
   sources: SearchSource[];
   searchId: string;
   executionTime: number | null;
+  // Full fidelity
+  status: "done" | "error";
+  iterations: Iteration[];
+  metadata: MetadataEvent | null;
+  subIterations: SubIterationEvent[];
+  toolProgress: ToolProgressEvent[];
+  usage: Record<string, unknown> | null;
+  error: string | null;
 }
 
 export interface SearchState {

@@ -4,9 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
-import { extractTokens } from '@/lib/types';
 import type { CodeBlock as CodeBlockType } from '@/lib/types';
 import { CodeWithLineNumbers } from './CodeWithLineNumbers';
+import { SubLMCallCard } from './SubLMCallCard';
 
 interface CodeBlockProps {
   block: CodeBlockType;
@@ -146,43 +146,9 @@ export function CodeBlock({ block, index }: CodeBlockProps) {
                   </span>
                 </div>
                 <div className="p-4 space-y-3">
-                  {block.result.rlm_calls.map((call, i) => {
-                    const tokens = extractTokens(call);
-                    return (
-                    <Collapsible key={i}>
-                      <div className="border border-fuchsia-500/30 dark:border-fuchsia-400/30 rounded-lg bg-background overflow-hidden">
-                        <CollapsibleTrigger asChild>
-                          <div className="flex items-center justify-between p-3 cursor-pointer hover:bg-fuchsia-500/10 dark:hover:bg-fuchsia-400/10 transition-colors">
-                            <Badge className="bg-fuchsia-500 text-white dark:bg-fuchsia-400 dark:text-fuchsia-950 text-xs">
-                              llm_query #{i + 1}{call.root_model ? ` (${call.root_model})` : ''}
-                            </Badge>
-                            <div className="flex gap-2 text-xs text-muted-foreground">
-                              <span>{tokens.input.toLocaleString()} in</span>
-                              <span>&bull;</span>
-                              <span>{tokens.output.toLocaleString()} out</span>
-                              <span>&bull;</span>
-                              <span>{(call.execution_time ?? 0).toFixed(2)}s</span>
-                            </div>
-                          </div>
-                        </CollapsibleTrigger>
-                        <CollapsibleContent>
-                          <div className="px-3 pb-3 space-y-2 border-t border-fuchsia-500/20 dark:border-fuchsia-400/20">
-                            <div className="text-xs text-muted-foreground mt-2">Prompt:</div>
-                            <div className="text-sm bg-muted rounded p-2 max-h-40 overflow-y-auto border border-border">
-                              {typeof call.prompt === 'string'
-                                ? call.prompt
-                                : JSON.stringify(call.prompt, null, 2)}
-                            </div>
-                            <div className="text-xs text-muted-foreground">Response:</div>
-                            <div className="text-sm bg-muted rounded p-2 max-h-40 overflow-y-auto border border-border">
-                              {call.response}
-                            </div>
-                          </div>
-                        </CollapsibleContent>
-                      </div>
-                    </Collapsible>
-                    );
-                  })}
+                  {block.result.rlm_calls.map((call, i) => (
+                    <SubLMCallCard key={i} call={call} index={i} />
+                  ))}
                 </div>
               </div>
             )}

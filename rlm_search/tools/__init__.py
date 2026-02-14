@@ -15,9 +15,9 @@ from rlm_search.tools.normalize import normalize_hit
 from rlm_search.tools.progress_tools import check_progress
 from rlm_search.tools.subagent_tools import (
     batched_critique,
-    classify_question,
     critique_answer,
     evaluate_results,
+    init_classify,
     reformulate,
 )
 from rlm_search.tools.tracker import tool_call_tracker
@@ -37,7 +37,7 @@ __all__ = [
     "reformulate",
     "critique_answer",
     "batched_critique",
-    "classify_question",
+    "init_classify",
     "research",
     "draft_answer",
     "kb_overview",

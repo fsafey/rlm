@@ -10,7 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from rlm.core.types import CodeBlock, REPLResult, RLMIteration
-from rlm_search.api import _extract_sources, _pre_classify, _searches, _sessions, app
+from rlm_search.api import _extract_sources, _searches, _sessions, app
 from rlm_search.streaming_logger import StreamingLogger
 
 
@@ -656,20 +656,16 @@ class TestSessionLifecycle:
         _sessions.clear()
 
 
-class TestPreClassifyTimingInProgress:
-    """Test that pre-classification emits a 'classified' progress event with duration_ms."""
+class TestClassificationInSetupCode:
+    """Test that classification happens via init_classify inside setup_code."""
 
     @patch("rlm_search.api.RLM")
     @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
-    @patch("rlm_search.api._pre_classify")
-    @patch("rlm_search.api._kb_overview_cache", {"categories": {}, "total_documents": 0})
-    def test_pre_classify_timing_emitted(self, mock_classify, _mock_setup, mock_rlm):
-        """_run_search emits a 'classified' progress event with duration_ms."""
+    def test_query_passed_to_setup_code(self, mock_setup, mock_rlm):
+        """_build_rlm_kwargs passes query to build_search_setup_code."""
         from rlm_search.api import _run_search, _searches, _sessions
 
-        mock_classify.return_value = "test\n\n--- Pre-Classification ---\nCATEGORY: PT"
-
-        search_id = "test-classify-timing"
+        search_id = "test-classify-setup"
         session_id = "test-classify-session"
         logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
         _searches[search_id] = logger
@@ -684,21 +680,40 @@ class TestPreClassifyTimingInProgress:
 
         _run_search(search_id, "test query", {}, session_id)
 
-        events = logger.drain()
-        classified_events = [
-            e for e in events if e.get("type") == "progress" and e.get("phase") == "classified"
-        ]
-        assert len(classified_events) == 1
-        ev = classified_events[0]
-        assert "duration_ms" in ev
-        assert isinstance(ev["duration_ms"], int)
-        assert ev["duration_ms"] >= 0
-        assert ev["classification"] == "CATEGORY: PT"
+        # Verify query was passed to build_search_setup_code
+        setup_kwargs = mock_setup.call_args[1]
+        assert setup_kwargs["query"] == "test query"
+        assert "classify_model" in setup_kwargs
+        _sessions.clear()
+
+    @patch("rlm_search.api.RLM")
+    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    def test_plain_query_passed_to_completion(self, _mock_setup, mock_rlm):
+        """_run_search passes plain query (not enriched) to rlm.completion."""
+        from rlm_search.api import _run_search, _searches, _sessions
+
+        search_id = "test-plain-query"
+        session_id = "test-plain-session"
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name=f"test_{search_id}")
+        _searches[search_id] = logger
+
+        mock_instance = MagicMock()
+        mock_instance.completion.return_value = MagicMock(
+            response="answer", execution_time=1.0, usage_summary=None
+        )
+        mock_instance._persistent_env = None
+        mock_instance.close = MagicMock()
+        mock_rlm.return_value = mock_instance
+
+        _run_search(search_id, "test query", {}, session_id)
+
+        # Verify plain query (not enriched) was passed
+        mock_instance.completion.assert_called_once_with("test query", root_prompt="test query")
         _sessions.clear()
 
 
-class TestPreClassify:
-    """Test _pre_classify() enrichment and fallback behavior."""
+class TestInitClassify:
+    """Test init_classify() in the tool layer."""
 
     _KB_OVERVIEW = {
         "categories": {
@@ -709,9 +724,13 @@ class TestPreClassify:
     }
 
     @patch("rlm.clients.get_client")
-    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
-    def test_happy_path_claude_cli(self, mock_get_client):
-        """Classification via claude_cli backend uses 'model' key."""
+    @patch("rlm_search.config.RLM_BACKEND", "claude_cli")
+    @patch("rlm_search.config.ANTHROPIC_API_KEY", "")
+    def test_happy_path_structured_output(self, mock_get_client):
+        """init_classify parses raw LLM output into structured dict on ctx."""
+        from rlm_search.tools.context import ToolContext
+        from rlm_search.tools.subagent_tools import init_classify
+
         mock_client = MagicMock()
         mock_client.completion.return_value = (
             "CATEGORY: FN\nCLUSTERS: Riba, Zakat\n"
@@ -720,59 +739,83 @@ class TestPreClassify:
         )
         mock_get_client.return_value = mock_client
 
-        result = _pre_classify("Is riba haram?", self._KB_OVERVIEW)
+        ctx = ToolContext(api_url="http://test", kb_overview_data=self._KB_OVERVIEW)
+        init_classify(ctx, "Is riba haram?", model="test-model")
 
-        assert result.startswith("Is riba haram?")
-        assert "\n\n--- Pre-Classification ---\n" in result
-        assert "CATEGORY: FN" in result
-        mock_get_client.assert_called_once_with(
-            "claude_cli",
-            {"model": "claude-haiku-4-5-20251001"},
-        )
+        assert ctx.classification is not None
+        assert ctx.classification["category"] == "FN"
+        assert "Riba" in ctx.classification["clusters"]
+        assert ctx.classification["filters"] == {"parent_code": "FN"}
+        assert "riba" in ctx.classification["strategy"].lower()
+        assert "raw" in ctx.classification
+
+    def test_no_kb_overview_sets_none(self):
+        """Without KB overview, classification is None."""
+        from rlm_search.tools.context import ToolContext
+        from rlm_search.tools.subagent_tools import init_classify
+
+        ctx = ToolContext(api_url="http://test", kb_overview_data=None)
+        init_classify(ctx, "test query")
+        assert ctx.classification is None
 
     @patch("rlm.clients.get_client")
-    @patch("rlm_search.api.RLM_BACKEND", "anthropic")
-    @patch("rlm_search.api.ANTHROPIC_API_KEY", "test-key")
-    def test_happy_path_anthropic(self, mock_get_client):
-        """Classification via anthropic backend uses 'model_name' + api_key."""
+    @patch("rlm_search.config.RLM_BACKEND", "anthropic")
+    @patch("rlm_search.config.ANTHROPIC_API_KEY", "test-key")
+    def test_anthropic_backend_uses_model_name(self, mock_get_client):
+        """Anthropic backend uses model_name + api_key."""
+        from rlm_search.tools.context import ToolContext
+        from rlm_search.tools.subagent_tools import init_classify
+
         mock_client = MagicMock()
         mock_client.completion.return_value = "CATEGORY: PT"
         mock_get_client.return_value = mock_client
 
-        result = _pre_classify("wudu question", self._KB_OVERVIEW)
+        ctx = ToolContext(api_url="http://test", kb_overview_data=self._KB_OVERVIEW)
+        init_classify(ctx, "wudu question", model="test-model")
 
-        assert "\n\n--- Pre-Classification ---\n" in result
         mock_get_client.assert_called_once_with(
             "anthropic",
-            {"model_name": "claude-haiku-4-5-20251001", "api_key": "test-key"},
+            {"model_name": "test-model", "api_key": "test-key"},
         )
 
-    def test_no_kb_overview_returns_plain_query(self):
-        """Without KB overview, returns query unchanged."""
-        assert _pre_classify("test query", None) == "test query"
-
     @patch("rlm.clients.get_client")
-    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
-    def test_client_exception_returns_plain_query(self, mock_get_client):
-        """Client error falls back to plain query."""
+    @patch("rlm_search.config.RLM_BACKEND", "claude_cli")
+    @patch("rlm_search.config.ANTHROPIC_API_KEY", "")
+    def test_client_exception_sets_none(self, mock_get_client):
+        """Client error falls back gracefully — ctx.classification = None."""
+        from rlm_search.tools.context import ToolContext
+        from rlm_search.tools.subagent_tools import init_classify
+
         mock_get_client.side_effect = RuntimeError("model unavailable")
 
-        result = _pre_classify("test query", self._KB_OVERVIEW)
-        assert result == "test query"
+        ctx = ToolContext(api_url="http://test", kb_overview_data=self._KB_OVERVIEW)
+        init_classify(ctx, "test query", model="test-model")
+        assert ctx.classification is None
 
     @patch("rlm.clients.get_client")
-    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
-    def test_enriched_format(self, mock_get_client):
-        """Verify the exact separator format."""
+    @patch("rlm_search.config.RLM_BACKEND", "claude_cli")
+    @patch("rlm_search.config.ANTHROPIC_API_KEY", "")
+    def test_emits_progress_events(self, mock_get_client):
+        """init_classify emits classifying + classified progress events."""
+        from rlm_search.tools.context import ToolContext
+        from rlm_search.tools.subagent_tools import init_classify
+
         mock_client = MagicMock()
         mock_client.completion.return_value = "CATEGORY: PT"
         mock_get_client.return_value = mock_client
 
-        result = _pre_classify("wudu question", self._KB_OVERVIEW)
-        parts = result.split("\n\n--- Pre-Classification ---\n")
-        assert len(parts) == 2
-        assert parts[0] == "wudu question"
-        assert parts[1] == "CATEGORY: PT"
+        mock_logger = MagicMock()
+        ctx = ToolContext(api_url="http://test", kb_overview_data=self._KB_OVERVIEW)
+        ctx._parent_logger = mock_logger
+        init_classify(ctx, "test", model="test-model")
+
+        # Should have called emit_progress twice: classifying + classified
+        calls = mock_logger.emit_progress.call_args_list
+        assert len(calls) == 2
+        assert calls[0][0][0] == "classifying"
+        assert calls[1][0][0] == "classified"
+        assert "duration_ms" in calls[1][1]
+        assert "classification" in calls[1][1]
 
 
 class TestBuildSystemPrompt:

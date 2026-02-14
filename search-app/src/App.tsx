@@ -9,12 +9,13 @@ import { TracePanel } from "@/components/TracePanel";
 import { RecentSearches } from "@/components/RecentSearches";
 import { ConversationHistory } from "@/components/ConversationHistory";
 import { AlertCircle, RotateCcw } from "lucide-react";
-import type { SearchSettings, SearchState } from "@/lib/types";
+import type { SearchSettings } from "@/lib/types";
 
 function App() {
-  const { state, search, reset, newSession, setState } = useSearch();
+  const { state, dispatch, search, reset, newSession } = useSearch();
   const { recentLogs, loadLog, deleteLog, loadingLog } = useSearchHistory(
-    setState as React.Dispatch<React.SetStateAction<SearchState>>,
+    dispatch,
+    state.searchId,
   );
 
   const handleSearch = useCallback(
@@ -57,10 +58,10 @@ function App() {
     const logLoaded = prev !== state.status && (state.status === "done" || state.status === "idle");
 
     if (justFinished || logLoaded) {
-      const t = setTimeout(() => {
+      const raf = requestAnimationFrame(() => {
         answerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 100);
-      return () => clearTimeout(t);
+      });
+      return () => cancelAnimationFrame(raf);
     }
   }, [state.answer, state.status]);
 

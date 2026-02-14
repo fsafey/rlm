@@ -49,6 +49,7 @@ export function SourceCards({ sources }: SourceCardsProps) {
           return (
             <div
               key={source.id}
+              id={`source-${source.id}`}
               className={`rounded-lg border border-border bg-card p-4 transition-all ${
                 hasContent ? "cursor-pointer hover:border-foreground/20" : ""
               } ${isExpanded ? "md:col-span-2" : ""}`}

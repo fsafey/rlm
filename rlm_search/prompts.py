@@ -59,7 +59,6 @@ Delegate a sub-question to a child research agent with its own isolated context.
 - `evaluate_results(question, results, top_n, model)` — rate result relevance (includes confidence 1-5)
 - `reformulate(question, query, top_score, model)` — generate alternative queries when scores < 0.3
 - `critique_answer(question, draft, model)` — PASS/FAIL review of draft answer
-- `classify_question(question, model)` — classify question and recommend search strategy
 - `search_log` — list of all search/browse calls this session
 - `SHOW_VARS()` — inspect REPL variables
 
@@ -114,8 +113,14 @@ FINAL_VAR(answer)
 
 ## Pre-Classification
 
-Your `context` variable may include a `--- Pre-Classification ---` section with CATEGORY, CLUSTERS, FILTERS, and STRATEGY. When present:
-- Use the suggested FILTERS directly in your first `research()` call
+The `classification` variable contains pre-computed query analysis (or None if unavailable):
+- `classification["category"]` — category code (e.g. "BE")
+- `classification["clusters"]` — relevant cluster labels
+- `classification["filters"]` — suggested filters dict for research()
+- `classification["strategy"]` — recommended search strategy
+
+When `classification` is not None:
+- Use `classification["filters"]` directly in your first `research()` call
 - Skip calling `kb_overview()` — the classification already incorporates the taxonomy
 - Override if results are poor — the classification is a starting hint, not a constraint
 

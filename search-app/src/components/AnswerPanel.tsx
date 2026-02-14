@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import Markdown from "react-markdown";
-import { parseCitations } from "@/lib/parseCitations";
+import { parseCitations, injectCitationLinks } from "@/lib/parseCitations";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { SearchSource } from "@/lib/types";
 import { BookOpen, ChevronDown, ChevronRight, Clock } from "lucide-react";
@@ -14,6 +14,10 @@ interface AnswerPanelProps {
 export function AnswerPanel({ answer, executionTime }: AnswerPanelProps) {
   const [expanded, setExpanded] = useState(true);
   const citations = useMemo(() => parseCitations(answer), [answer]);
+  const processedAnswer = useMemo(
+    () => injectCitationLinks(answer, citations),
+    [answer, citations],
+  );
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded}>
@@ -45,7 +49,7 @@ export function AnswerPanel({ answer, executionTime }: AnswerPanelProps) {
         <CollapsibleContent>
           {/* Markdown body */}
           <div className="p-5 prose prose-sm max-w-none dark:prose-invert prose-headings:text-base prose-headings:font-semibold prose-p:leading-relaxed">
-            <Markdown>{answer}</Markdown>
+            <Markdown>{processedAnswer}</Markdown>
           </div>
         </CollapsibleContent>
       </div>

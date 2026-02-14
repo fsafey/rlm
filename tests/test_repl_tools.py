@@ -662,7 +662,6 @@ class TestSetupCodeInLocalREPL:
                 "evaluate_results",
                 "reformulate",
                 "critique_answer",
-                "classify_question",
             ]:
                 assert name in repl.locals, f"Missing sub-agent tool: {name}"
                 assert callable(repl.locals[name])
@@ -1001,31 +1000,53 @@ class TestCritiqueAnswer:
         assert len(batched_calls) == 0
 
 
-class TestClassifyQuestion:
-    """Tests for the classify_question sub-agent function."""
+class TestClassificationInSetupCode:
+    """Tests for init_classify() wired into setup_code."""
 
-    def test_includes_kb_taxonomy(self):
-        ns = _make_sub_agent_ns()
-        calls = []
-        ns["_ctx"].llm_query = lambda prompt, model=None: (
-            calls.append(prompt),
-            "CATEGORY: PT\nCLUSTERS: Ghusl\nSTRATEGY: search",
-        )[1]
-        ns["classify_question"]("How to perform ghusl?")
-        assert "PT" in calls[0]
-        assert "Prayer" in calls[0]
-        assert "Ghusl" in calls[0]
-
-    def test_handles_none_kb_overview(self):
-        code = build_search_setup_code(api_url="http://localhost:8091", kb_overview_data=None)
-        ns: dict = {
-            "llm_query": lambda prompt, model=None: "CATEGORY: PT",
-            "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
-        }
+    def test_classify_question_wrapper_removed(self):
+        """classify_question should no longer be in the generated namespace."""
+        code = build_search_setup_code(api_url="http://localhost:8091")
+        ns: dict = {}
         exec(code, ns)  # noqa: S102
-        # Should not crash — just sends empty category info
-        result = ns["classify_question"]("question")
-        assert "PT" in result
+        assert "classify_question" not in ns
+
+    def test_classification_variable_exposed(self):
+        """classification variable should be defined in the namespace."""
+        code = build_search_setup_code(api_url="http://localhost:8091")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        assert "classification" in ns
+        # Without query, init_classify is not called, so classification is None
+        assert ns["classification"] is None
+
+    @patch("rlm.clients.get_client")
+    @patch("rlm_search.config.RLM_BACKEND", "claude_cli")
+    @patch("rlm_search.config.ANTHROPIC_API_KEY", "")
+    def test_init_classify_called_with_query(self, mock_get_client):
+        """When query is provided, init_classify runs and sets classification."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            'CATEGORY: PT\nCLUSTERS: Ghusl\nFILTERS: {"parent_code": "PT"}\nSTRATEGY: Search ghusl'
+        )
+        mock_get_client.return_value = mock_client
+
+        kb = {
+            "categories": {
+                "PT": {"name": "Prayer", "clusters": {"Ghusl": "g"}},
+            },
+            "total_documents": 50,
+        }
+        code = build_search_setup_code(
+            api_url="http://localhost:8091",
+            kb_overview_data=kb,
+            query="How to perform ghusl?",
+            classify_model="test-model",
+        )
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        assert ns["classification"] is not None
+        assert ns["classification"]["category"] == "PT"
+        assert ns["classification"]["filters"] == {"parent_code": "PT"}
 
 
 def _make_search_mock(hits=None):

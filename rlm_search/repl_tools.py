@@ -16,6 +16,8 @@ def build_search_setup_code(
     depth: int = 0,
     max_delegation_depth: int = 1,
     sub_iterations: int = 3,
+    query: str = "",
+    classify_model: str = "",
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
@@ -60,6 +62,11 @@ _ctx._parent_logger = globals().get("_parent_logger_ref")
         kb_json_str = json.dumps(kb_overview_data)
         code += f"\nimport json as _json\n_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
 
+    # Run init_classify at setup_code time (zero iteration cost)
+    if query:
+        code += f"\n_sub.init_classify(_ctx, {query!r}, model={classify_model!r})\n"
+    code += "\nclassification = _ctx.classification\n"
+
     code += """
 # ── Wrapper functions (bind _ctx, preserve REPL-facing signatures) ──────
 
@@ -86,9 +93,6 @@ def reformulate(question, failed_query, top_score=0.0, model=None):
 
 def critique_answer(question, draft, model=None):
     return _sub.critique_answer(_ctx, question, draft, model=model)
-
-def classify_question(question, model=None):
-    return _sub.classify_question(_ctx, question, model=model)
 
 def check_progress():
     return _prog.check_progress(_ctx)

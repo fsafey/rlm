@@ -39,7 +39,7 @@ def rlm_query(
     """Delegate a sub-question to a child RLM with its own isolated context.
 
     Args:
-        ctx: Per-session tool context (must be depth=0).
+        ctx: Per-session tool context (must be below max delegation depth).
         sub_question: The specific question for the child to research.
         instructions: Optional guidance for the child agent.
 
@@ -51,8 +51,8 @@ def rlm_query(
         "rlm_query",
         {"sub_question": sub_question, "instructions": instructions},
     ) as tc:
-        # Depth guard: prevent recursive delegation from child agents
-        if ctx._depth >= 1:
+        # Depth guard: prevent delegation beyond configured max depth
+        if ctx._depth >= ctx._max_delegation_depth:
             error_result = {"error": "Cannot delegate from a child agent"}
             tc.set_summary({"sub_question": sub_question, "error": "depth_guard"})
             print(f"[rlm_query] ERROR: depth={ctx._depth}, cannot delegate")
@@ -122,40 +122,51 @@ def _run_child_rlm(
         RLM_SUB_MODEL,
     )
     from rlm_search.repl_tools import build_search_setup_code
+    from rlm_search.streaming_logger import ChildStreamingLogger
 
+    backend = ctx._rlm_backend or RLM_BACKEND
     child_model = RLM_SUB_MODEL or ctx._rlm_model or RLM_MODEL
+    child_depth = ctx._depth + 1
+    # Reduce iteration budget at deeper delegation levels
+    child_iterations = RLM_SUB_ITERATIONS if child_depth <= 1 else max(2, RLM_SUB_ITERATIONS - 1)
 
     # Build backend kwargs (same pattern as api._build_rlm_kwargs)
-    if RLM_BACKEND == "claude_cli":
+    if backend == "claude_cli":
         backend_kwargs: dict = {"model": child_model}
     else:
         backend_kwargs = {"model_name": child_model}
         if ANTHROPIC_API_KEY:
             backend_kwargs["api_key"] = ANTHROPIC_API_KEY
 
-    # Child setup_code: depth=1 means NO rlm_query wrapper emitted
     setup_code = build_search_setup_code(
         api_url=CASCADE_API_URL,
         api_key=CASCADE_API_KEY,
         kb_overview_data=ctx.kb_overview_data,
         rlm_model=child_model,
-        depth=1,
+        rlm_backend=backend,
+        depth=child_depth,
+        max_delegation_depth=ctx._max_delegation_depth,
     )
 
     prompt = sub_question
     if instructions:
         prompt += f"\n\nInstructions: {instructions}"
 
+    # Build child logger that streams sub-iterations to parent SSE queue
+    child_logger = (
+        ChildStreamingLogger(ctx._parent_logger, sub_question) if ctx._parent_logger else None
+    )
+
     # persistent=True so we can extract source_registry after completion
     child_rlm = RLM(
-        backend=RLM_BACKEND,
+        backend=backend,
         backend_kwargs=backend_kwargs,
         environment="local",
         environment_kwargs={"setup_code": setup_code},
-        max_iterations=RLM_SUB_ITERATIONS,
+        max_iterations=child_iterations,
         max_depth=1,
         custom_system_prompt=SUB_AGENT_PROMPT,
-        logger=None,
+        logger=child_logger,
         persistent=True,
     )
 

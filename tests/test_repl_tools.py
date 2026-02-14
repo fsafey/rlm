@@ -90,6 +90,18 @@ class TestBuildSearchSetupCodeEmbedding:
         assert "x-api-key" not in ns["_ctx"].headers
 
 
+class TestBuildSearchSetupCodeBackend:
+    """Test rlm_backend parameter propagation."""
+
+    def test_rlm_backend_embedded(self):
+        code = build_search_setup_code(api_url="http://localhost:8091", rlm_backend="openai")
+        assert "_ctx._rlm_backend = 'openai'" in code
+
+    def test_rlm_backend_default_empty(self):
+        code = build_search_setup_code(api_url="http://localhost:8091")
+        assert "_ctx._rlm_backend = ''" in code
+
+
 class TestSearchFunctionSignature:
     """Test that search() has the correct signature (no collection param)."""
 
@@ -2121,6 +2133,29 @@ class TestRlmQuery:
             assert "research" in repl.locals
         finally:
             repl.cleanup()
+
+    def test_max_delegation_depth_set(self):
+        """_max_delegation_depth must be set on ToolContext."""
+        code = build_search_setup_code(
+            api_url="http://api.test", rlm_model="m", depth=0, max_delegation_depth=3
+        )
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        assert ns["_ctx"]._max_delegation_depth == 3
+
+    def test_wrapper_emitted_when_depth_lt_max(self):
+        """rlm_query wrapper emitted when depth < max_delegation_depth."""
+        code = build_search_setup_code(
+            api_url="http://api.test", rlm_model="m", depth=1, max_delegation_depth=2
+        )
+        assert "rlm_query" in code
+
+    def test_wrapper_not_emitted_when_depth_eq_max(self):
+        """rlm_query wrapper NOT emitted when depth == max_delegation_depth."""
+        code = build_search_setup_code(
+            api_url="http://api.test", rlm_model="m", depth=2, max_delegation_depth=2
+        )
+        assert "rlm_query" not in code
 
 
 # Mock target for _run_child_rlm

@@ -223,3 +223,47 @@ class StreamingLogger(RLMLogger):
     def is_done(self) -> bool:
         with self._lock:
             return self._done
+
+
+class ChildStreamingLogger:
+    """Thin proxy that emits child RLM events as sub_iteration events on the parent stream.
+
+    Duck-types the logger interface expected by RLM core (log, log_metadata,
+    on_environment_ready, raise_if_cancelled).  Cancellation delegates to the
+    parent, giving us propagation for free.
+    """
+
+    def __init__(self, parent: StreamingLogger, sub_question: str):
+        self._parent = parent
+        self._sub_question = sub_question
+
+    def log(self, iteration: RLMIteration) -> None:
+        """Wrap child iteration as a sub_iteration event on the parent queue."""
+        event = {
+            "type": "sub_iteration",
+            "sub_question": self._sub_question,
+            "timestamp": datetime.now().isoformat(),
+            **iteration.to_dict(),
+        }
+        with self._parent._lock:
+            self._parent.queue.append(event)
+
+    def log_metadata(self, metadata: RLMMetadata) -> None:
+        pass  # Child metadata not surfaced
+
+    def on_environment_ready(self) -> None:
+        pass
+
+    def on_llm_start(self, iteration: int) -> None:
+        pass
+
+    def on_code_executing(self, iteration: int, num_blocks: int) -> None:
+        pass
+
+    def raise_if_cancelled(self) -> None:
+        """Delegate to parent — propagates cancellation to child RLM."""
+        self._parent.raise_if_cancelled()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._parent.is_cancelled

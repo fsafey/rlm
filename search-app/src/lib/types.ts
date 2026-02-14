@@ -57,6 +57,16 @@ export interface Iteration {
   tool_calls?: ToolCall[];
 }
 
+export interface SubIterationEvent {
+  type: "sub_iteration";
+  sub_question: string;
+  timestamp: string;
+  response: string;
+  code_blocks: CodeBlock[];
+  final_answer: string | null;
+  iteration_time: number | null;
+}
+
 export interface MetadataEvent {
   type: "metadata";
   root_model: string;
@@ -109,6 +119,7 @@ export type SSEEvent =
   | ProgressEvent
   | ToolProgressEvent
   | Iteration
+  | SubIterationEvent
   | DoneEvent
   | ErrorEvent
   | CancelledEvent;
@@ -135,6 +146,7 @@ export interface SearchState {
   executionTime: number | null;
   usage: Record<string, unknown> | null;
   error: string | null;
+  subIterations: SubIterationEvent[];
   conversationHistory: ConversationTurn[];
 }
 
@@ -164,6 +176,7 @@ export const initialSearchState: SearchState = {
   executionTime: null,
   usage: null,
   error: null,
+  subIterations: [],
   conversationHistory: [],
 };
 

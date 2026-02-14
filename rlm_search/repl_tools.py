@@ -12,7 +12,9 @@ def build_search_setup_code(
     timeout: int = 30,
     kb_overview_data: dict[str, Any] | None = None,
     rlm_model: str = "",
+    rlm_backend: str = "",
     depth: int = 0,
+    max_delegation_depth: int = 1,
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
@@ -45,7 +47,10 @@ _ctx.llm_query = globals().get("llm_query")
 _ctx.llm_query_batched = globals().get("llm_query_batched")
 _ctx.progress_callback = globals().get("_progress_callback")
 _ctx._rlm_model = {rlm_model!r}
+_ctx._rlm_backend = {rlm_backend!r}
 _ctx._depth = {depth!r}
+_ctx._max_delegation_depth = {max_delegation_depth!r}
+_ctx._parent_logger = globals().get("_parent_logger_ref")
 """
 
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)
@@ -99,8 +104,8 @@ source_registry = _ctx.source_registry
 tool_calls = _ctx.tool_calls
 """
 
-    # Conditionally emit rlm_query wrapper only at root depth
-    if depth == 0:
+    # Conditionally emit rlm_query wrapper when depth allows further delegation
+    if depth < max_delegation_depth:
         code += """
 from rlm_search.tools import delegation_tools as _deleg
 

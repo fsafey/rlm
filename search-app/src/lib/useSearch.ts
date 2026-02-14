@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import type { Iteration, MetadataEvent, ProgressEvent, SearchSettings, SearchState, SSEEvent, ToolProgressEvent } from "./types";
+import type { Iteration, MetadataEvent, ProgressEvent, SearchSettings, SearchState, SSEEvent, SubIterationEvent, ToolProgressEvent } from "./types";
 import { defaultSettings, initialSearchState } from "./types";
 
 export function useSearch() {
@@ -94,6 +94,15 @@ export function useSearch() {
                   ...s,
                   iterations: [...s.iterations, event as Iteration],
                   toolProgress: [],  // clear — iteration supersedes tool events
+                  subIterations: [],  // clear — sub-iterations belong to previous delegation
+                }));
+                break;
+
+              case "sub_iteration":
+                console.log("[SSE] sub_iteration for:", (event as SubIterationEvent).sub_question);
+                setState((s) => ({
+                  ...s,
+                  subIterations: [...s.subIterations, event as SubIterationEvent],
                 }));
                 break;
 

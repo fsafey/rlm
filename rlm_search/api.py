@@ -31,6 +31,7 @@ from rlm_search.config import (
     CASCADE_API_URL,
     RLM_BACKEND,
     RLM_CLASSIFY_MODEL,
+    RLM_MAX_DELEGATION_DEPTH,
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
     RLM_MODEL,
@@ -241,7 +242,9 @@ def _build_rlm_kwargs(
         api_key=CASCADE_API_KEY,
         kb_overview_data=_kb_overview_cache,
         rlm_model=model,
+        rlm_backend=backend,
         depth=0,
+        max_delegation_depth=RLM_MAX_DELEGATION_DEPTH,
     )
 
     return {
@@ -366,9 +369,11 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                         logger._last_tool_call_count = len(tc)
 
                         rlm._persistent_env.globals["_progress_callback"] = logger.emit_tool_event
+                        rlm._persistent_env.globals["_parent_logger_ref"] = logger
                         ctx = rlm._persistent_env.locals.get("_ctx")
                         if ctx is not None:
                             ctx.progress_callback = logger.emit_tool_event
+                            ctx._parent_logger = logger
 
                     print(
                         f"[SEARCH:{search_id}] Follow-up #{session.search_count} in session "
@@ -408,6 +413,13 @@ def _run_search(search_id: str, query: str, settings: dict[str, Any], session_id
                     logger=logger,
                     persistent=True,
                 )
+
+                # Inject parent logger ref into REPL globals so setup_code can wire it
+                if rlm._persistent_env is not None:
+                    rlm._persistent_env.globals["_parent_logger_ref"] = logger
+                    _ctx = rlm._persistent_env.locals.get("_ctx")
+                    if _ctx is not None:
+                        _ctx._parent_logger = logger
 
                 _sessions[session_id] = SessionState(
                     session_id=session_id,

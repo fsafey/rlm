@@ -34,7 +34,10 @@ class ToolContext:
 
     # Delegation support (set via build_search_setup_code params)
     _rlm_model: str = ""
+    _rlm_backend: str = ""
     _depth: int = 0
+    _max_delegation_depth: int = 1
+    _parent_logger: Any = None
 
     def __post_init__(self) -> None:
         if not self.headers:

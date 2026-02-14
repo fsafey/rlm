@@ -107,6 +107,7 @@ function App() {
               metadata={state.metadata}
               progressSteps={state.progressSteps}
               toolProgress={state.toolProgress}
+              subIterations={state.subIterations}
             />
           </div>
         )}

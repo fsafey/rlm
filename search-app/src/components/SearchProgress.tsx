@@ -13,7 +13,7 @@ import {
   Tag,
   Gauge,
 } from "lucide-react";
-import type { Iteration, MetadataEvent, ProgressEvent, ToolProgressEvent } from "@/lib/types";
+import type { Iteration, MetadataEvent, ProgressEvent, SubIterationEvent, ToolProgressEvent } from "@/lib/types";
 
 interface SearchProgressProps {
   query: string;
@@ -21,6 +21,7 @@ interface SearchProgressProps {
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
   toolProgress: ToolProgressEvent[];
+  subIterations: SubIterationEvent[];
 }
 
 // --- Confidence ring ---
@@ -615,6 +616,31 @@ function CollapsedSummary({
   );
 }
 
+// --- Sub-agent steps (nested under delegation) ---
+
+function SubAgentSteps({ subIterations }: { subIterations: SubIterationEvent[] }) {
+  if (subIterations.length === 0) return null;
+
+  return (
+    <div className="ml-8 mt-2 space-y-1.5 border-l-2 border-primary/20 pl-3">
+      <div className="text-xs font-medium text-primary/70 mb-1">
+        Sub-agent: &ldquo;{subIterations[0].sub_question.slice(0, 50)}&rdquo;
+      </div>
+      {subIterations.map((sub, idx) => {
+        const activity = detectActivity(sub as unknown as Iteration);
+        return (
+          <div key={idx} className="flex items-center gap-2 text-xs text-muted-foreground">
+            <CheckCircle2 className="w-3 h-3 text-emerald-500/70" />
+            <activity.icon className="w-3 h-3" />
+            <span>{activity.label}</span>
+            <span className="text-muted-foreground/60 truncate">{activity.metric}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // --- Main component ---
 
 export function SearchProgress({
@@ -623,6 +649,7 @@ export function SearchProgress({
   metadata,
   progressSteps,
   toolProgress,
+  subIterations,
 }: SearchProgressProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [expanded, setExpanded] = useState(false);
@@ -758,6 +785,7 @@ export function SearchProgress({
 
           {/* Active step */}
           <ActiveStep label={activeText.label} detail={activeText.detail} />
+          {activeText.label === "Delegating" && <SubAgentSteps subIterations={subIterations} />}
         </div>
 
         {/* Footer stats */}

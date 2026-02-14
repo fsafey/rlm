@@ -2258,3 +2258,59 @@ class TestRlmQueryDelegation:
         assert result["answer"] == ""
         assert result["searches_run"] == 0
         assert result["sources_merged"] == 0
+
+
+class TestCtxAccessViaWrapperGlobals:
+    """Test that _ctx is accessible through wrapper function __globals__ after setup_code runs.
+
+    LocalREPL filters variables starting with '_' from self.locals (line 438).
+    So _ctx defined in setup_code is NOT in self.locals.  However, wrapper
+    functions like search() defined in setup_code DO have _ctx in their
+    __globals__ dict because they were exec'd in a namespace that includes _ctx.
+
+    This is the pattern used by the follow-up session path in api.py to recover
+    _ctx and update _parent_logger on reconnect.
+    """
+
+    def test_ctx_not_in_locals(self):
+        """_ctx must be filtered out of repl.locals by the underscore filter."""
+
+        code = build_search_setup_code(api_url="http://localhost")
+        repl = LocalREPL(setup_code=code)
+        try:
+            assert "_ctx" not in repl.locals
+        finally:
+            repl.cleanup()
+
+    def test_ctx_accessible_via_search_globals(self):
+        """_ctx must be reachable through search().__globals__ as a ToolContext."""
+        from rlm_search.tools.context import ToolContext
+
+        code = build_search_setup_code(api_url="http://localhost")
+        repl = LocalREPL(setup_code=code)
+        try:
+            search_fn = repl.locals["search"]
+            _ctx = search_fn.__globals__["_ctx"]
+            assert isinstance(_ctx, ToolContext)
+            assert _ctx.api_url == "http://localhost"
+        finally:
+            repl.cleanup()
+
+    def test_ctx_parent_logger_updatable_via_globals(self):
+        """Mutating _ctx via one wrapper's __globals__ must be visible via another wrapper."""
+        code = build_search_setup_code(api_url="http://localhost")
+        repl = LocalREPL(setup_code=code)
+        try:
+            sentinel = object()
+
+            # Set _parent_logger through search's __globals__
+            search_fn = repl.locals["search"]
+            _ctx = search_fn.__globals__["_ctx"]
+            _ctx._parent_logger = sentinel
+
+            # Read it back through browse's __globals__ — same namespace, same _ctx
+            browse_fn = repl.locals["browse"]
+            _ctx_via_browse = browse_fn.__globals__["_ctx"]
+            assert _ctx_via_browse._parent_logger is sentinel
+        finally:
+            repl.cleanup()

@@ -308,3 +308,30 @@ class TestSetupCodeErrorHandling:
         )
         with pytest.raises(SetupCodeError, match="ValueError"):
             LocalREPL(setup_code=code)
+
+
+class TestParentLoggerRefInjection:
+    """Tests that _parent_logger_ref is properly injected into REPL globals."""
+
+    def test_parent_logger_ref_in_globals(self):
+        """_parent_logger_ref should appear in globals when passed to __init__."""
+        sentinel = object()
+        repl = LocalREPL(_parent_logger_ref=sentinel)
+        assert repl.globals["_parent_logger_ref"] is sentinel
+        repl.cleanup()
+
+    def test_parent_logger_ref_accessible_in_setup_code(self):
+        """setup_code should be able to read _parent_logger_ref via globals()."""
+        sentinel = object()
+        repl = LocalREPL(
+            _parent_logger_ref=sentinel,
+            setup_code="captured = globals().get('_parent_logger_ref')",
+        )
+        assert repl.locals["captured"] is sentinel
+        repl.cleanup()
+
+    def test_parent_logger_ref_none_by_default(self):
+        """_parent_logger_ref should not be in globals when not provided."""
+        repl = LocalREPL()
+        assert "_parent_logger_ref" not in repl.globals
+        repl.cleanup()

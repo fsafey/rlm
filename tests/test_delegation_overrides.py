@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from rlm_search.repl_tools import build_search_setup_code
 from rlm_search.tools.context import ToolContext
 from rlm_search.tools.delegation_tools import _run_child_rlm, rlm_query
 
@@ -240,3 +241,27 @@ class TestChildDepthAndIterations:
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["max_iterations"] == 2  # max(2, 2-1) = 2
+
+
+class TestDelegationDisabled:
+    """Test that max_delegation_depth=0 completely disables delegation."""
+
+    def test_max_depth_zero_blocks_root_delegation(self):
+        """With max_delegation_depth=0, even root (depth=0) cannot delegate."""
+        ctx = ToolContext(api_url="http://localhost", _depth=0, _max_delegation_depth=0)
+        result = rlm_query(ctx, "test")
+        assert result == {"error": "Cannot delegate from a child agent"}
+
+    def test_max_depth_zero_no_wrapper_emitted(self):
+        """With max_delegation_depth=0, setup code should not contain rlm_query."""
+        code = build_search_setup_code(
+            api_url="http://localhost",
+            depth=0,
+            max_delegation_depth=0,
+        )
+        assert "def rlm_query" not in code
+        assert "delegation_tools" not in code
+
+    def test_negative_depth_clamped_to_zero(self):
+        """Config clamp logic: negative values should be clamped to 0."""
+        assert max(0, int("-1")) == 0

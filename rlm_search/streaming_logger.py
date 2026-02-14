@@ -136,11 +136,15 @@ class StreamingLogger(RLMLogger):
                     if isinstance(data, dict):
                         self.source_registry[sid] = data
 
-        # Extract new tool_calls since last iteration
+        # Extract new tool_calls since last iteration.
+        # All code blocks share the same tool_calls list reference (shallow-copied
+        # locals dict), so later blocks see the same list and would overwrite the
+        # delta captured from earlier blocks with an empty slice.  Guard with a
+        # length check so only the first block with new entries wins.
         tool_calls_data: list[dict] = []
         for block in iteration.code_blocks:
             tc = block.result.locals.get("tool_calls")
-            if isinstance(tc, list):
+            if isinstance(tc, list) and len(tc) > self._last_tool_call_count:
                 tool_calls_data = tc[self._last_tool_call_count :]
                 self._last_tool_call_count = len(tc)
 

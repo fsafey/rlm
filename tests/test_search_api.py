@@ -296,13 +296,13 @@ class TestSubModelWiring:
             "/api/search",
             json={
                 "query": "test",
-                "settings": {"sub_model": "claude-sonnet-4-5-20250929"},
+                "settings": {"sub_model": "claude-sonnet-4-6"},
             },
         )
         assert resp.status_code == 200
         call_args = mock_executor.submit.call_args
         settings = call_args[0][3]
-        assert settings["sub_model"] == "claude-sonnet-4-5-20250929"
+        assert settings["sub_model"] == "claude-sonnet-4-6"
 
     @patch("rlm_search.api.RLM")
     @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
@@ -328,14 +328,14 @@ class TestSubModelWiring:
         _run_search(
             search_id,
             "test query",
-            {"model": "claude-opus-4-6", "sub_model": "claude-sonnet-4-5-20250929"},
+            {"model": "claude-opus-4-6", "sub_model": "claude-sonnet-4-6"},
             session_id,
         )
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] == ["anthropic"]
         assert rlm_kwargs["other_backend_kwargs"] is not None
-        assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-sonnet-4-5-20250929"
+        assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-sonnet-4-6"
         _sessions.clear()
 
     @patch("rlm_search.api.RLM")
@@ -450,13 +450,13 @@ class TestSubModelWiring:
         _run_search(
             search_id,
             "test query",
-            {"sub_model": "claude-sonnet-4-5-20250929"},
+            {"sub_model": "claude-sonnet-4-6"},
             session_id,
         )
 
         rlm_kwargs = mock_rlm.call_args[1]
         assert rlm_kwargs["other_backends"] == ["claude_cli"]
-        assert rlm_kwargs["other_backend_kwargs"][0]["model"] == "claude-sonnet-4-5-20250929"
+        assert rlm_kwargs["other_backend_kwargs"][0]["model"] == "claude-sonnet-4-6"
         assert "model_name" not in rlm_kwargs["other_backend_kwargs"][0]
         _sessions.clear()
 

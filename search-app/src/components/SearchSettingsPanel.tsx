@@ -2,14 +2,14 @@ import type { SearchSettings } from "@/lib/types";
 
 const MODEL_OPTIONS = [
   { value: "claude-opus-4-6", label: "Opus 4.6" },
-  { value: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
 
 const SUB_MODEL_OPTIONS = [
-  { value: "", label: "Same as root" },
-  { value: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+  { value: "", label: "Same as root" },
 ];
 
 const BACKEND_OPTIONS = [

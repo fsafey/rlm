@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import subprocess
 from collections import defaultdict
 from typing import Any
@@ -94,6 +95,13 @@ class ClaudeCLI(BaseLM):
             cmd.extend(self.extra_flags)
         return cmd
 
+    @staticmethod
+    def _clean_env() -> dict[str, str]:
+        """Return env dict without CLAUDECODE to allow nested CLI invocations."""
+        env = os.environ.copy()
+        env.pop("CLAUDECODE", None)
+        return env
+
     def _parse_response(self, raw_output: str) -> str:
         """Parse JSON output from claude CLI, accumulate usage, return result text."""
         try:
@@ -129,7 +137,9 @@ class ClaudeCLI(BaseLM):
         prompt_text, system_prompt = self._build_prompt(prompt)
         cmd = self._build_cmd(prompt_text, system_prompt, model_override=model)
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=self.timeout, env=self._clean_env()
+        )
         if result.returncode != 0:
             raise RuntimeError(f"claude CLI failed (rc={result.returncode}): {result.stderr}")
 
@@ -145,6 +155,7 @@ class ClaudeCLI(BaseLM):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=self._clean_env(),
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
 

@@ -216,7 +216,7 @@ def _build_rlm_kwargs(
     """Build RLM constructor kwargs from search settings + config defaults."""
     backend = settings.get("backend") or RLM_BACKEND
     model = settings.get("model") or RLM_MODEL
-    sub_model = settings.get("sub_model") or RLM_SUB_MODEL
+    sub_model = settings["sub_model"] if "sub_model" in settings else RLM_SUB_MODEL
     max_iterations = settings.get("max_iterations")
     if max_iterations is None:
         max_iterations = RLM_MAX_ITERATIONS

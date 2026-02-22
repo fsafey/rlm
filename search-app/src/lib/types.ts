@@ -170,7 +170,7 @@ export interface SearchSettings {
 
 export const defaultSettings: SearchSettings = {
   model: "claude-opus-4-6",
-  sub_model: "",
+  sub_model: "claude-sonnet-4-6",
   backend: "claude_cli",
   max_iterations: 15,
   max_depth: 1,

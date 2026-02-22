@@ -114,7 +114,6 @@ def _run_child_rlm(
     from rlm.core.rlm import RLM
     from rlm_search.config import (
         ANTHROPIC_API_KEY,
-        CASCADE_API_KEY,
         CASCADE_API_URL,
         RLM_BACKEND,
         RLM_MODEL,
@@ -141,7 +140,6 @@ def _run_child_rlm(
 
     setup_code = build_search_setup_code(
         api_url=CASCADE_API_URL,
-        api_key=CASCADE_API_KEY,
         kb_overview_data=ctx.kb_overview_data,
         rlm_model=child_model,
         rlm_backend=backend,

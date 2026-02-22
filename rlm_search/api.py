@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -99,6 +100,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown lifecycle — Cascade health check + stale cleanup."""
 
     global _kb_overview_cache
+
+    # Expose Cascade API key via env var so REPL setup code can read it
+    # without embedding the literal in exec()'d strings visible to the LLM.
+    if CASCADE_API_KEY:
+        os.environ["_RLM_CASCADE_API_KEY"] = CASCADE_API_KEY
 
     # Cascade API health check at startup
     status, url = await _check_cascade_health()
@@ -252,7 +258,6 @@ def _build_rlm_kwargs(
 
     setup_code = build_search_setup_code(
         api_url=CASCADE_API_URL,
-        api_key=CASCADE_API_KEY,
         kb_overview_data=_kb_overview_cache,
         rlm_model=model,
         rlm_backend=backend,

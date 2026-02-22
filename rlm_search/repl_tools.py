@@ -8,7 +8,6 @@ from typing import Any
 
 def build_search_setup_code(
     api_url: str,
-    api_key: str = "",
     timeout: int = 30,
     kb_overview_data: dict[str, Any] | None = None,
     rlm_model: str = "",
@@ -31,6 +30,7 @@ def build_search_setup_code(
     to ``StreamingLogger`` via ``repl.locals``.
     """
     code = f"""\
+import os as _os
 from rlm_search.tools.context import ToolContext as _ToolContext
 from rlm_search.tools import api_tools as _api
 from rlm_search.tools import subagent_tools as _sub
@@ -41,7 +41,7 @@ from rlm_search.tools import progress_tools as _prog
 
 _ctx = _ToolContext(
     api_url={api_url!r},
-    api_key={api_key!r},
+    api_key=_os.environ.get("_RLM_CASCADE_API_KEY", ""),
     timeout={timeout!r},
 )
 

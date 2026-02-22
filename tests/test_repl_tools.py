@@ -16,7 +16,7 @@ class TestBuildSearchSetupCodeValidity:
 
     def test_generated_code_compiles(self):
         """Generated code string must be valid Python (no syntax errors)."""
-        code = build_search_setup_code(api_url="http://localhost:8091", api_key="test-key")
+        code = build_search_setup_code(api_url="http://localhost:8091")
         compile(code, "<setup_code>", "exec")
 
     def test_defines_search_function(self):
@@ -53,9 +53,11 @@ class TestBuildSearchSetupCodeEmbedding:
         code = build_search_setup_code(api_url="https://my-api.example.com")
         assert "https://my-api.example.com" in code
 
-    def test_api_key_embedded(self):
-        code = build_search_setup_code(api_url="http://localhost", api_key="sk-secret-123")
-        assert "sk-secret-123" in code
+    def test_api_key_not_embedded(self):
+        """API key must NOT appear as a literal in generated code (reads env var instead)."""
+        code = build_search_setup_code(api_url="http://localhost")
+        assert "sk-secret-123" not in code
+        assert '_RLM_CASCADE_API_KEY' in code
 
     def test_empty_api_key_default(self):
         code = build_search_setup_code(api_url="http://localhost")
@@ -75,16 +77,25 @@ class TestBuildSearchSetupCodeEmbedding:
         exec(code, ns)  # noqa: S102
         assert ns["_ctx"].timeout == 30
 
-    def test_api_key_sets_header(self):
-        """When api_key is provided, x-api-key header must be set."""
-        code = build_search_setup_code(api_url="http://localhost", api_key="my-key")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        assert ns["_ctx"].headers["x-api-key"] == "my-key"
+    def test_api_key_sets_header_from_env(self):
+        """When _RLM_CASCADE_API_KEY env var is set, x-api-key header must be set."""
+        import os
+
+        os.environ["_RLM_CASCADE_API_KEY"] = "my-key"
+        try:
+            code = build_search_setup_code(api_url="http://localhost")
+            ns: dict = {}
+            exec(code, ns)  # noqa: S102
+            assert ns["_ctx"].headers["x-api-key"] == "my-key"
+        finally:
+            del os.environ["_RLM_CASCADE_API_KEY"]
 
     def test_no_api_key_no_header(self):
-        """When api_key is empty, x-api-key header must NOT be set."""
-        code = build_search_setup_code(api_url="http://localhost", api_key="")
+        """When _RLM_CASCADE_API_KEY env var is absent, x-api-key header must NOT be set."""
+        import os
+
+        os.environ.pop("_RLM_CASCADE_API_KEY", None)
+        code = build_search_setup_code(api_url="http://localhost")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         assert "x-api-key" not in ns["_ctx"].headers
@@ -129,7 +140,7 @@ class TestSearchFunctionBehavior:
     """Test that search() calls requests.post correctly (mocked)."""
 
     def test_search_calls_api(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
 
@@ -155,7 +166,7 @@ class TestSearchFunctionBehavior:
 
     def test_search_populates_source_registry(self):
         """search() must populate source_registry with normalized hits keyed by ID."""
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
 
@@ -190,7 +201,7 @@ class TestSearchFunctionBehavior:
 
     def test_search_always_sends_enriched_collection(self):
         """search() must always include collection=enriched_gemini in payload."""
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
 
@@ -262,7 +273,7 @@ class TestFormatEvidence:
     """Test format_evidence() output formatting and limits."""
 
     def _exec_ns(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         return ns
@@ -322,7 +333,7 @@ class TestFiqhLookup:
     """Test fiqh_lookup() function generation and behavior."""
 
     def _exec_ns(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         return ns
@@ -386,7 +397,7 @@ class TestBrowseFunction:
     """Test browse() function generation and behavior."""
 
     def _exec_ns(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {}
         exec(code, ns)  # noqa: S102
         return ns
@@ -1583,7 +1594,7 @@ class TestToolCallsTracking:
     """Tests for structured tool call tracking via tool_calls list."""
 
     def _exec_ns(self):
-        code = build_search_setup_code(api_url="http://api.test", api_key="k")
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {
             "llm_query": lambda prompt, model=None: "",
             "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
@@ -1818,7 +1829,7 @@ class TestCheckProgress:
     def _exec_ns(self, kb_data=_UNSET):
         data = _KB_PROGRESS if kb_data is _UNSET else kb_data
         code = build_search_setup_code(
-            api_url="http://api.test", api_key="k", kb_overview_data=data
+            api_url="http://api.test", kb_overview_data=data
         )
         ns: dict = {
             "llm_query": lambda prompt, model=None: "",
@@ -2062,7 +2073,6 @@ class TestRlmQuery:
         """Build namespace with depth=0 (root) to get rlm_query wrapper."""
         code = build_search_setup_code(
             api_url="http://api.test",
-            api_key="k",
             rlm_model="test-model",
             depth=depth,
         )

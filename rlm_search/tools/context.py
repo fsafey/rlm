@@ -16,9 +16,9 @@ class ToolContext:
     """
 
     api_url: str
-    api_key: str = ""
+    api_key: str = dataclasses.field(default="", repr=False)
     timeout: int = 30
-    headers: dict[str, str] = dataclasses.field(default_factory=dict)
+    headers: dict[str, str] = dataclasses.field(default_factory=dict, repr=False)
     kb_overview_data: dict | None = None
     classification: dict | None = None
 

@@ -149,6 +149,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     task = asyncio.create_task(_cleanup_stale())
     yield
     task.cancel()
+    os.environ.pop("_RLM_CASCADE_API_KEY", None)
 
 
 app = FastAPI(title="RLM Agentic Search", version="0.1.0", lifespan=lifespan)
@@ -164,6 +165,7 @@ app.add_middleware(
 # Active searches: search_id -> StreamingLogger
 _searches: dict[str, StreamingLogger] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
+_MAX_CONCURRENT_SEARCHES = 8  # 4 running + 4 queued
 
 _SOURCE_PATTERN = re.compile(r"\[Source:\s*(\d+)\]")
 _SEARCH_ID_RE = re.compile(r"^[a-f0-9-]{1,36}$")
@@ -448,6 +450,10 @@ async def start_search(req: SearchRequest) -> SearchResponse:
     else:
         # New session
         session_id = str(uuid.uuid4())[:12]
+
+    active_count = sum(1 for lg in _searches.values() if not lg.is_done)
+    if active_count >= _MAX_CONCURRENT_SEARCHES:
+        raise HTTPException(status_code=503, detail="Service busy, retry later")
 
     search_id = str(uuid.uuid4())[:12]
     print(

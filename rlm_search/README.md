@@ -15,19 +15,19 @@ FastAPI Backend (rlm_search/, port 8092)
 RLM Engine (rlm/)
   │ LM orchestrates via REPL:
   │   search("prayer menstruation", top_k=20)    ──→ Cascade API
-  │   evaluate_results(context, results)          ──→ llm_query (sub-agent)
-  │   reformulate(context, query, score)          ──→ llm_query (sub-agent)
+  │   evaluate_results(question, results)          ──→ llm_query (sub-agent)
+  │   reformulate(question, failed_query, score)  ──→ llm_query (sub-agent)
   │   format_evidence(results) + llm_query(...)   ──→ synthesis
-  │   critique_answer(context, answer)            ──→ llm_query (sub-agent)
+  │   critique_answer(question, answer)            ──→ llm_query (sub-agent)
   │   FINAL_VAR("answer")
   ▼
-Cascade Search API (https://cascade.vworksflow.com)
+Cascade Search API (https://cascade.imam-us.org)
 ```
 
 ### Capability Layers
 
 ```
-Layer 2: Sub-agent tools (evaluate_results, reformulate, critique_answer, classify_question)
+Layer 2: Sub-agent tools (evaluate_results, reformulate, critique_answer)
          Wrap llm_query() with role-specific prompts. Fired by the main agent on demand.
 
 Layer 1: REPL tools (search, browse, kb_overview, fiqh_lookup, format_evidence)
@@ -43,7 +43,7 @@ Zero changes to the RLM core library. Uses `custom_system_prompt` and `environme
 
 ### Prerequisites
 
-- Cascade search API reachable (default: `https://cascade.vworksflow.com`)
+- Cascade search API reachable (default: `https://cascade.imam-us.org`)
 - `ANTHROPIC_API_KEY` set in environment or `.env`
 
 ### Backend
@@ -131,7 +131,7 @@ All via environment variables (or `.env` file):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CASCADE_API_URL` | `https://cascade.vworksflow.com` | Cascade search API base URL |
+| `CASCADE_API_URL` | `https://cascade.imam-us.org` | Cascade search API base URL |
 | `CASCADE_API_KEY` | `""` | API key for cascade (sent as `x-api-key` header) |
 | `ANTHROPIC_API_KEY` | — | Required for default Anthropic backend |
 | `RLM_BACKEND` | `anthropic` | LM backend (`anthropic`, `openai`, etc.) |
@@ -205,7 +205,6 @@ Composite tools (`research`, `draft_answer`) record parent-child relationships v
 | `evaluate_results` | `num_rated`, `relevant`, `partial`, `off_topic` |
 | `reformulate` | `num_queries` |
 | `critique_answer` | `verdict` |
-| `classify_question` | `raw_length` |
 | `research` | `search_count`, `raw`, `unique`, `filtered`, `eval_summary` |
 | `draft_answer` | `passed`, `revised`, `answer_length` |
 
@@ -247,7 +246,8 @@ These wrap `llm_query()` with role-specific prompts. Each costs one sub-LLM call
 | `evaluate_results()` | `(question, results, top_n=5) -> str` | After search — rates each result RELEVANT/PARTIAL/OFF-TOPIC, suggests next step. Use when scores are mixed (0.2–0.5). |
 | `reformulate()` | `(question, failed_query, top_score) -> list[str]` | Top score < 0.3 — returns up to 3 alternative query strings. |
 | `critique_answer()` | `(question, draft) -> str` | Before FINAL — returns PASS/FAIL verdict checking citations, topic drift, unsupported claims. |
-| `classify_question()` | `(question) -> str` | Optional — classifies question into CATEGORY, CLUSTERS, STRATEGY using kb_overview taxonomy. |
+
+Classification is pre-computed at search init via `init_classify()` — access the result via the `classification` variable in the REPL.
 
 ### Utility
 
@@ -276,12 +276,12 @@ Example: `search("zakat", filters={"parent_code": "FN", "cluster_label": "Khums 
 
 | Situation | Action |
 |-----------|--------|
-| Starting a question | `kb_overview()` → `search(context, ...)` |
-| Search scores < 0.3 | `reformulate(context, query, score)` → search alternatives |
-| Unsure if results match | `evaluate_results(context, results)` |
+| Starting a question | `kb_overview()` → `search(query, ...)` |
+| Search scores < 0.3 | `reformulate(question, failed_query, top_score)` → search alternatives |
+| Unsure if results match | `evaluate_results(question, results)` |
 | Large result set | `format_evidence()` → `llm_query()` |
-| Draft answer ready | `critique_answer(context, draft)` |
-| Unsure which category | `classify_question(context)` |
+| Draft answer ready | `critique_answer(question, draft)` |
+| Unsure which category | Inspect pre-computed `classification` variable |
 
 ### Score Interpretation
 
@@ -338,7 +338,7 @@ uv run pytest
 ## How It Works
 
 1. **User submits query** → `POST /api/search` creates a `StreamingLogger` and launches `rlm.completion()` in a thread pool
-2. **Turn 1 — Orient + search**: LM calls `kb_overview()` (pre-cached taxonomy), then `search(context, ...)` against Cascade API
+2. **Turn 1 — Orient + search**: LM calls `kb_overview()` (pre-cached taxonomy), then `search(query, ...)` against Cascade API
 3. **Turn 2 — Evaluate + refine**: LM calls `evaluate_results()` (sub-agent) to rate relevance. If scores are low, `reformulate()` (sub-agent) generates alternative queries. `fiqh_lookup()` for terminology.
 4. **Turn 3 — Synthesize + verify**: `format_evidence()` → `llm_query()` for synthesis, then `critique_answer()` (sub-agent) as quality gate before `FINAL_VAR("answer")`
 5. **SSE stream** — the frontend polls `StreamingLogger.drain()` every 200ms, pushing events to the React UI as they arrive

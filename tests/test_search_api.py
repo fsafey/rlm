@@ -122,6 +122,26 @@ class TestSearchEndpoint:
         resp = client.post("/api/search", json={})
         assert resp.status_code == 422  # Pydantic validation error
 
+    @patch("rlm_search.api._MAX_CONCURRENT_SEARCHES", 2)
+    @patch("rlm_search.api._executor")
+    def test_search_503_when_concurrency_cap_reached(
+        self, mock_executor: MagicMock, client: TestClient
+    ):
+        """POST /api/search returns 503 when active searches reach the cap."""
+        mock_executor.submit = MagicMock()
+        # Pre-populate _searches with non-done loggers to hit the cap
+        for i in range(2):
+            logger = StreamingLogger(log_dir="/tmp/rlm_test_logs", file_name=f"test_cap_{i}")
+            _searches[f"cap-{i}"] = logger
+
+        try:
+            resp = client.post("/api/search", json={"query": "should be rejected"})
+            assert resp.status_code == 503
+            assert "busy" in resp.json()["detail"].lower()
+        finally:
+            for i in range(2):
+                _searches.pop(f"cap-{i}", None)
+
     @patch("rlm_search.api._executor")
     def test_search_registers_logger(self, mock_executor: MagicMock, client: TestClient):
         mock_executor.submit = MagicMock()

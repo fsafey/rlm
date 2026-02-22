@@ -338,14 +338,14 @@ Main's `other_backends/other_backend_kwargs` routes depth-1 calls to a cheaper m
 | 1.2 | API key via env var in main's `repl_tools.py` | done |
 | 1.3 | `.gitignore` `rlm_logs/` in standalone | n/a (standalone not in repo) |
 | 1.4 | Separate inbound/outbound auth keys | n/a (standalone not in repo) |
-| 2.1 | Update `CASCADE_API_URL` default | |
-| 2.2 | Sync README defaults | |
-| 2.3 | Fix `EnrichResponse` in sync endpoint | |
-| 2.4 | Add `requests` to dep group | |
-| 3.1 | Concurrency cap with 503 | |
-| 3.2 | Thread `source_id` through SSE | |
-| 3.3 | Fix `progress_tools` suggestion signatures | |
-| 3.4 | Guard `CLAUDECODE` in Python | |
+| 2.1 | Update `CASCADE_API_URL` default | done |
+| 2.2 | Sync README defaults | done |
+| 2.3 | Fix `EnrichResponse` in sync endpoint | n/a (standalone not in repo) |
+| 2.4 | Add `requests` to dep group | n/a (standalone not in repo) |
+| 3.1 | Concurrency cap with 503 | done |
+| 3.2 | Thread `source_id` through SSE | n/a (standalone not in repo) |
+| 3.3 | Fix `progress_tools` suggestion signatures | done |
+| 3.4 | Guard `CLAUDECODE` in Python | done |
 | 4.1 | Add `search_multi()` to main | |
 | 4.2 | Add `emit_event()` to main's logger | |
 | 4.3 | Add API key auth to main | |

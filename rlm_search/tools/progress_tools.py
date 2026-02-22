@@ -47,7 +47,7 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
         suggestion = f"Unexplored: {best_cat['name']} ({best_cat['document_count']} docs)."
         if top_cluster:
             suggestion += (
-                f" Try: research(context, "
+                f" Try: research(query, "
                 f'filters={{"parent_code": "{best_code}", '
                 f'"cluster_label": "{top_cluster}"}})'
             )
@@ -65,7 +65,7 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
                 return (
                     f'Try cluster "{cluster["value"]}" in {cat["name"]}'
                     f" ({cluster['count']} docs): "
-                    f"research(context, "
+                    f"research(query, "
                     f'filters={{"parent_code": "{code}", '
                     f'"cluster_label": "{cluster["value"]}"}})'
                 )

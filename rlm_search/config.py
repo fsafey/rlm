@@ -7,11 +7,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+# Prevent CLAUDECODE env var from leaking to nested CLI invocations
+os.environ.pop("CLAUDECODE", None)
+
 # Load .env from project root (parent of rlm_search/)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
-CASCADE_API_URL = os.getenv("CASCADE_API_URL", "https://cascade.vworksflow.com")
+CASCADE_API_URL = os.getenv("CASCADE_API_URL", "https://cascade.imam-us.org")
 CASCADE_API_KEY = os.getenv("CASCADE_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 RLM_BACKEND = os.getenv("RLM_BACKEND", "anthropic")

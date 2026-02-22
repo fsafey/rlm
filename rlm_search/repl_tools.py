@@ -17,6 +17,8 @@ def build_search_setup_code(
     sub_iterations: int = 3,
     query: str = "",
     classify_model: str = "",
+    pipeline_mode: str = "",
+    existing_answer: str | None = None,
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
@@ -55,12 +57,16 @@ _ctx._depth = {depth!r}
 _ctx._max_delegation_depth = {max_delegation_depth!r}
 _ctx._sub_iterations = {sub_iterations!r}
 _ctx._parent_logger = globals().get("_parent_logger_ref")
+_ctx.pipeline_mode = {pipeline_mode!r}
 """
 
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)
     if kb_overview_data is not None:
         kb_json_str = json.dumps(kb_overview_data)
         code += f"\nimport json as _json\n_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
+
+    if existing_answer is not None:
+        code += f"\n_ctx.existing_answer = {existing_answer!r}\n"
 
     # Run init_classify at setup_code time (zero iteration cost)
     if query:
@@ -73,8 +79,8 @@ _ctx._parent_logger = globals().get("_parent_logger_ref")
 def search(query, filters=None, top_k=10):
     return _api.search(_ctx, query, filters=filters, top_k=top_k)
 
-def search_multi(query, collections=None, filters=None, top_k=10):
-    return _api.search_multi(_ctx, query, collections=collections, filters=filters, top_k=top_k)
+def search_multi(query, collections=None, top_k_per_collection=50, final_top_k=10):
+    return _api.search_multi(_ctx, query, collections=collections, top_k_per_collection=top_k_per_collection, final_top_k=final_top_k)
 
 def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_limit=4):
     return _api.browse(_ctx, filters=filters, offset=offset, limit=limit, sort_by=sort_by, group_by=group_by, group_limit=group_limit)
@@ -111,6 +117,9 @@ def draft_answer(question, results, instructions=None, model=None):
 search_log = _ctx.search_log
 source_registry = _ctx.source_registry
 tool_calls = _ctx.tool_calls
+
+# Public alias for persistence extraction
+tool_context = _ctx
 """
 
     # Conditionally emit rlm_query wrapper when depth allows further delegation

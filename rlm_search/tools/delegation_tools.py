@@ -30,6 +30,42 @@ Aim for 2-3 code blocks maximum.
 
 FINAL_VAR(answer) when done."""
 
+W3_SUB_AGENT_PROMPT = """You are a focused W3 research sub-agent. Research ONE sub-question using the W3 pipeline tools.
+
+**Do NOT fabricate rulings or sources.** Only use pipeline outputs.
+
+## Tools Available
+- research(query, extra_queries) -- multi-collection search + LLM relevance eval + dedup (primary)
+- w3_ground(question, passages) -- corpus grounding
+- w3_sanitize(question, passages, grounding) -- structured Q&A generation
+- w3_classify(question, grounding, sanitization) -- taxonomy classification
+
+## Workflow (2-3 blocks)
+
+```repl
+# Block 1: Research
+results = research(question, top_k=10)
+print(results["eval_summary"])
+```
+
+```repl
+# Block 2: Ground + Sanitize
+grounding = w3_ground(question, results["results"])
+passages = grounding["grounding_passages"] or results["results"]
+sanitization = w3_sanitize(question, passages, grounding_context=grounding)
+answer = sanitization["sanitized_answer"]
+```
+
+FINAL_VAR(answer)
+
+## Rules
+1. The sanitized_answer IS the final answer — do NOT rewrite it.
+2. Do NOT call draft_answer(). Use w3_sanitize instead.
+3. If grounding_passages is empty, pass the full results["results"] to w3_sanitize.
+4. w3_classify is optional — use it only if you need taxonomy enrichment.
+
+FINAL_VAR(answer) at the START of a line, OUTSIDE code blocks."""
+
 
 def rlm_query(
     ctx: ToolContext,
@@ -146,6 +182,7 @@ def _run_child_rlm(
         depth=child_depth,
         max_delegation_depth=ctx._max_delegation_depth,
         sub_iterations=sub_iters,
+        pipeline_mode=ctx.pipeline_mode,
     )
 
     prompt = sub_question
@@ -158,6 +195,7 @@ def _run_child_rlm(
     )
 
     # persistent=True so we can extract source_registry after completion
+    child_prompt = W3_SUB_AGENT_PROMPT if ctx.pipeline_mode == "w3" else SUB_AGENT_PROMPT
     child_rlm = RLM(
         backend=backend,
         backend_kwargs=backend_kwargs,
@@ -165,7 +203,7 @@ def _run_child_rlm(
         environment_kwargs={"setup_code": setup_code},
         max_iterations=child_iterations,
         max_depth=1,
-        custom_system_prompt=SUB_AGENT_PROMPT,
+        custom_system_prompt=child_prompt,
         logger=child_logger,
         persistent=True,
     )

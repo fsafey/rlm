@@ -142,8 +142,11 @@ def search_multi(
     ctx: ToolContext,
     query: str,
     collections: list[str] | None = None,
+    top_k_per_collection: int = 50,
+    final_top_k: int = 10,
+    # Deprecated — use final_top_k instead
     filters: dict | None = None,
-    top_k: int = 10,
+    top_k: int | None = None,
 ) -> dict:
     """Search across multiple collections with server-side RRF + L5 reranking.
 
@@ -154,13 +157,18 @@ def search_multi(
         ctx: Per-session tool context.
         query: Natural language search query.
         collections: Collections to search (default: ["enriched_gemini", "risala"]).
+        top_k_per_collection: Candidates per collection before merge (default 50).
+        final_top_k: Final results after reranking (default 10).
         filters: Optional filter dict, e.g. ``{"parent_code": "PT"}``.
-        top_k: Number of results to return (default 10).
+        top_k: Deprecated — use final_top_k instead.
 
     Returns:
         Dict with ``results`` list (normalized, deduplicated, reranked by server),
         ``total``, and ``collections_searched``.
     """
+    # Backward compat: map deprecated top_k to final_top_k
+    if top_k is not None and final_top_k == 10:
+        final_top_k = top_k
     if collections is None:
         collections = ["enriched_gemini", "risala"]
     if len(query) > MAX_QUERY_LEN:
@@ -172,10 +180,15 @@ def search_multi(
     with tool_call_tracker(
         ctx,
         "search_multi",
-        {"query": query, "collections": collections, "top_k": top_k},
+        {"query": query, "collections": collections, "final_top_k": final_top_k},
         parent_idx=ctx.current_parent_idx,
     ) as tc:
-        payload: dict = {"query": query, "collections": collections, "top_k": top_k}
+        payload: dict = {
+            "query": query,
+            "collections": collections,
+            "top_k_per_collection": top_k_per_collection,
+            "top_k": final_top_k,
+        }
         if filters:
             payload["filters"] = filters
         resp = requests.post(
@@ -190,15 +203,15 @@ def search_multi(
         results = [normalize_hit(h, ctx.source_registry) for h in hits]
         print(
             f"[search_multi] query={query!r} collections={collections} "
-            f"top_k={top_k} results={len(results)}"
+            f"final_top_k={final_top_k} results={len(results)}"
         )
         ctx.search_log.append(
             {
                 "type": "search_multi",
                 "query": query,
                 "collections": collections,
-                "filters": filters,
-                "top_k": top_k,
+                "top_k_per_collection": top_k_per_collection,
+                "final_top_k": final_top_k,
                 "num_results": len(results),
             }
         )

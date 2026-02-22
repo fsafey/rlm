@@ -21,6 +21,9 @@ class ToolContext:
     headers: dict[str, str] = dataclasses.field(default_factory=dict, repr=False)
     kb_overview_data: dict | None = None
     classification: dict | None = None
+    w3_state: dict = dataclasses.field(default_factory=dict)
+    pipeline_mode: str = ""  # "w3" when running W3 enrichment, "" for generic RLM
+    existing_answer: str | None = None  # Scholar's answer for sanitize mode
 
     # Mutable per-session state
     search_log: list = dataclasses.field(default_factory=list)

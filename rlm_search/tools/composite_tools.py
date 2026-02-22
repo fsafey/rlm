@@ -70,40 +70,56 @@ def research(
             ]
             eval_question = query
 
+        use_multi = ctx.pipeline_mode == "w3"
+
         for spec in specs:
             q = spec["query"]
             f = spec.get("filters")
             k = spec.get("top_k", top_k)
             try:
-                r = search_multi(ctx, q, filters=f, top_k=k)
+                if use_multi:
+                    r = search_multi(ctx, q, final_top_k=k)
+                else:
+                    r = search_multi(ctx, q, filters=f, top_k=k)
                 all_results.extend(r["results"])
                 search_count += 1
-            except Exception:
-                try:
-                    r = search(ctx, q, filters=f, top_k=k)
-                    all_results.extend(r["results"])
-                    search_count += 1
-                except Exception as e:
+            except Exception as e:
+                if not use_multi:
+                    try:
+                        r = search(ctx, q, filters=f, top_k=k)
+                        all_results.extend(r["results"])
+                        search_count += 1
+                    except Exception as e2:
+                        errors.append(str(e2))
+                        print(f"[research] WARNING: search failed: {e2}")
+                else:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")
             for eq in spec.get("extra_queries") or []:
                 try:
-                    r = search_multi(
-                        ctx, eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k)
-                    )
+                    if use_multi:
+                        r = search_multi(ctx, eq["query"], final_top_k=eq.get("top_k", k))
+                    else:
+                        r = search_multi(
+                            ctx, eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k)
+                        )
                     all_results.extend(r["results"])
                     search_count += 1
-                except Exception:
-                    try:
-                        r = search(
-                            ctx,
-                            eq["query"],
-                            filters=eq.get("filters"),
-                            top_k=eq.get("top_k", k),
-                        )
-                        all_results.extend(r["results"])
-                        search_count += 1
-                    except Exception as e:
+                except Exception as e:
+                    if not use_multi:
+                        try:
+                            r = search(
+                                ctx,
+                                eq["query"],
+                                filters=eq.get("filters"),
+                                top_k=eq.get("top_k", k),
+                            )
+                            all_results.extend(r["results"])
+                            search_count += 1
+                        except Exception as e2:
+                            errors.append(str(e2))
+                            print(f"[research] WARNING: search failed: {e2}")
+                    else:
                         errors.append(str(e))
                         print(f"[research] WARNING: search failed: {e}")
 

@@ -288,8 +288,8 @@ class TestSearchMultiFunctionSignature:
         params = list(sig.parameters.keys())
         assert "query" in params
         assert "collections" in params
-        assert "filters" in params
-        assert "top_k" in params
+        assert "top_k_per_collection" in params
+        assert "final_top_k" in params
 
     def test_search_multi_defaults(self):
         code = build_search_setup_code(api_url="http://localhost")
@@ -297,8 +297,8 @@ class TestSearchMultiFunctionSignature:
         exec(code, ns)  # noqa: S102
         sig = inspect.signature(ns["search_multi"])
         assert sig.parameters["collections"].default is None
-        assert sig.parameters["filters"].default is None
-        assert sig.parameters["top_k"].default == 10
+        assert sig.parameters["top_k_per_collection"].default == 50
+        assert sig.parameters["final_top_k"].default == 10
 
 
 class TestSearchMultiFunctionBehavior:

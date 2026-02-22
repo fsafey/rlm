@@ -349,8 +349,8 @@ Main's `other_backends/other_backend_kwargs` routes depth-1 calls to a cheaper m
 | 4.1 | Add `search_multi()` to main | done |
 | 4.2 | Add `emit_event()` to main's logger | done |
 | 4.3 | Add API key auth to main | done |
-| 5.1 | Audit tool layer divergence | |
-| 5.2 | Make `rlm_search` installable | |
+| 5.1 | Audit tool layer divergence | n/a (standalone not in repo) |
+| 5.2 | Make `rlm_search` installable | done |
 | 5.3 | Standalone subclasses `ToolContext` | |
 | 5.4 | Redirect standalone imports | |
 | 5.5 | Delete vendored copies | |

@@ -52,6 +52,7 @@ Delegate a sub-question to a child research agent with its own isolated context.
 ## Low-Level Tools (available when you need fine-grained control)
 
 - `search(query, filters, top_k)` — single search call (auto-truncates queries > 500 chars)
+- `search_multi(query, collections, filters, top_k)` — search across multiple collections with server-side RRF reranking (default: enriched_gemini + risala)
 - `browse(filters, offset, limit, sort_by, group_by, group_limit)` — filter-based exploration
 - `format_evidence(results, max_per_source)` — format as `[Source: <id>]` citation strings
 - `fiqh_lookup(query)` — Islamic terminology dictionary (for written answers, not search queries)

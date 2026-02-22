@@ -489,6 +489,37 @@ class TestStreamingLoggerSourceRegistry:
         assert logger.source_registry == {}
 
 
+class TestEmitEvent:
+    """Test StreamingLogger.emit_event() generic event emission."""
+
+    def test_emit_event_queued(self):
+        """emit_event() appends the event to the queue."""
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name="test_emit")
+        logger.emit_event({"type": "custom", "data": "hello"})
+        events = logger.drain()
+        assert len(events) == 1
+        assert events[0]["type"] == "custom"
+        assert events[0]["data"] == "hello"
+        assert "timestamp" in events[0]
+
+    def test_emit_event_preserves_timestamp(self):
+        """When event already has a timestamp, it is preserved."""
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name="test_emit_ts")
+        logger.emit_event({"type": "custom", "timestamp": "2025-01-01T00:00:00"})
+        events = logger.drain()
+        assert events[0]["timestamp"] == "2025-01-01T00:00:00"
+
+    def test_emit_event_multiple(self):
+        """Multiple emit_event calls accumulate in queue."""
+        logger = StreamingLogger(log_dir="/tmp/rlm_test", file_name="test_emit_multi")
+        logger.emit_event({"type": "a"})
+        logger.emit_event({"type": "b"})
+        events = logger.drain()
+        assert len(events) == 2
+        assert events[0]["type"] == "a"
+        assert events[1]["type"] == "b"
+
+
 class TestSessionLifecycle:
     """Test persistent session creation, follow-up, and cleanup."""
 
@@ -861,6 +892,35 @@ class TestBuildSystemPrompt:
 
         prompt = build_system_prompt(15)
         assert prompt.startswith(AGENTIC_SEARCH_SYSTEM_PROMPT)
+
+
+class TestApiKeyAuth:
+    """Test optional API key authentication."""
+
+    @patch("rlm_search.api.SEARCH_API_KEY", "")
+    def test_no_auth_when_key_empty(self, client: TestClient):
+        """When SEARCH_API_KEY is empty, endpoints work without auth."""
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+
+    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
+    def test_401_without_key(self, client: TestClient):
+        """When SEARCH_API_KEY is set, requests without key get 401."""
+        resp = client.get("/api/health")
+        assert resp.status_code == 401
+        assert "API key" in resp.json()["detail"]
+
+    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
+    def test_401_with_wrong_key(self, client: TestClient):
+        """When SEARCH_API_KEY is set, wrong key gets 401."""
+        resp = client.get("/api/health", headers={"x-api-key": "wrong-key"})
+        assert resp.status_code == 401
+
+    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
+    def test_success_with_correct_key(self, client: TestClient):
+        """When SEARCH_API_KEY is set, correct key allows access."""
+        resp = client.get("/api/health", headers={"x-api-key": "test-secret-key"})
+        assert resp.status_code == 200
 
 
 def _parse_sse_events(text: str) -> list[dict]:

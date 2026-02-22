@@ -120,6 +120,17 @@ class StreamingLogger(RLMLogger):
         with self._lock:
             self.queue.append(event)
 
+    def emit_event(self, event: dict) -> None:
+        """Emit an arbitrary event to the SSE stream.
+
+        Use for custom event types that don't warrant a dedicated method.
+        Automatically adds a timestamp if not present.
+        """
+        if "timestamp" not in event:
+            event = {**event, "timestamp": datetime.now().isoformat()}
+        with self._lock:
+            self.queue.append(event)
+
     def log(self, iteration: RLMIteration) -> None:
         with self._lock:
             if self._cancelled:

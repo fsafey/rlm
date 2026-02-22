@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hmac
 import json
 import logging
 import os
@@ -18,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -38,6 +39,7 @@ from rlm_search.config import (
     RLM_MODEL,
     RLM_SUB_ITERATIONS,
     RLM_SUB_MODEL,
+    SEARCH_API_KEY,
     SESSION_TIMEOUT,
 )
 from rlm_search.kb_overview import build_kb_overview
@@ -93,6 +95,15 @@ async def _check_cascade_health(
         return "unreachable", url
 
     return "connected", url
+
+
+def _check_api_key(request: Request) -> None:
+    """Validate x-api-key header when SEARCH_API_KEY is configured."""
+    if not SEARCH_API_KEY:
+        return  # No auth required
+    key = request.headers.get("x-api-key", "")
+    if not hmac.compare_digest(key, SEARCH_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 @asynccontextmanager
@@ -152,7 +163,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     os.environ.pop("_RLM_CASCADE_API_KEY", None)
 
 
-app = FastAPI(title="RLM Agentic Search", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="RLM Agentic Search",
+    version="0.1.0",
+    lifespan=lifespan,
+    dependencies=[Depends(_check_api_key)],
+)
 
 app.add_middleware(
     CORSMiddleware,

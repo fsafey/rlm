@@ -75,7 +75,7 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
 
 def _format_audit_trail(ctx: ToolContext) -> str:
     """Structured summary of searches tried so far."""
-    searches = [e for e in ctx.search_log if e["type"] == "search"]
+    searches = [e for e in ctx.search_log if e["type"] in ("search", "search_multi")]
     if not searches:
         return "  No searches run yet."
 
@@ -106,7 +106,7 @@ def check_progress(ctx: ToolContext) -> dict:
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         # -- Signal computation --
-        n_searches = sum(1 for e in ctx.search_log if e["type"] == "search")
+        n_searches = sum(1 for e in ctx.search_log if e["type"] in ("search", "search_multi"))
         n_sources = len(ctx.source_registry)
 
         # Relevant/partial counts from the last evaluate_results tool_call
@@ -122,7 +122,7 @@ def check_progress(ctx: ToolContext) -> dict:
         top_score = max((r.get("score", 0) for r in ctx.source_registry.values()), default=0.0)
 
         # Query diversity
-        queries = [e["query"] for e in ctx.search_log if e["type"] == "search"]
+        queries = [e["query"] for e in ctx.search_log if e["type"] in ("search", "search_multi")]
         diversity = len(set(queries)) / len(queries) if queries else 0.0
 
         has_draft = any(c["tool"] == "draft_answer" for c in ctx.tool_calls)

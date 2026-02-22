@@ -57,7 +57,7 @@ class TestBuildSearchSetupCodeEmbedding:
         """API key must NOT appear as a literal in generated code (reads env var instead)."""
         code = build_search_setup_code(api_url="http://localhost")
         assert "sk-secret-123" not in code
-        assert '_RLM_CASCADE_API_KEY' in code
+        assert "_RLM_CASCADE_API_KEY" in code
 
     def test_empty_api_key_default(self):
         code = build_search_setup_code(api_url="http://localhost")
@@ -267,6 +267,154 @@ class TestSearchFunctionBehavior:
 
         payload = mock_post.call_args[1]["json"]
         assert payload["query"] == "short query"
+
+
+class TestSearchMultiFunctionSignature:
+    """Test that search_multi() has the correct signature."""
+
+    def test_search_multi_defined(self):
+        """search_multi() must be defined in the generated namespace."""
+        code = build_search_setup_code(api_url="http://localhost")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        assert "search_multi" in ns
+        assert callable(ns["search_multi"])
+
+    def test_search_multi_signature(self):
+        code = build_search_setup_code(api_url="http://localhost")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        sig = inspect.signature(ns["search_multi"])
+        params = list(sig.parameters.keys())
+        assert "query" in params
+        assert "collections" in params
+        assert "filters" in params
+        assert "top_k" in params
+
+    def test_search_multi_defaults(self):
+        code = build_search_setup_code(api_url="http://localhost")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        sig = inspect.signature(ns["search_multi"])
+        assert sig.parameters["collections"].default is None
+        assert sig.parameters["filters"].default is None
+        assert sig.parameters["top_k"].default == 10
+
+
+class TestSearchMultiFunctionBehavior:
+    """Test that search_multi() calls the correct API endpoint."""
+
+    def test_search_multi_calls_api(self):
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [{"id": "1", "score": 0.9, "question": "q", "answer": "a"}],
+            "total": 1,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
+            result = ns["search_multi"]("test query")
+
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        url = call_args[1].get("url", call_args[0][0])
+        assert "http://api.test/search/multi" in url
+        assert len(result["results"]) == 1
+        assert result["results"][0]["id"] == "1"
+        assert result["total"] == 1
+        assert result["collections_searched"] == ["enriched_gemini", "risala"]
+
+    def test_search_multi_default_collections(self):
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
+            ns["search_multi"]("test")
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collections"] == ["enriched_gemini", "risala"]
+
+    def test_search_multi_custom_collections(self):
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
+            ns["search_multi"]("test", collections=["risala"])
+
+        payload = mock_post.call_args[1]["json"]
+        assert payload["collections"] == ["risala"]
+
+    def test_search_multi_logs_to_search_log(self):
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch(_API_POST, return_value=mock_resp):
+            ns["search_multi"]("q1")
+
+        assert len(ns["search_log"]) == 1
+        assert ns["search_log"][0]["type"] == "search_multi"
+        assert ns["search_log"][0]["query"] == "q1"
+        assert ns["search_log"][0]["collections"] == ["enriched_gemini", "risala"]
+
+    def test_search_multi_populates_source_registry(self):
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [
+                {"id": "42", "score": 0.85, "question": "Q1", "answer": "A1"},
+                {"id": "99", "score": 0.7, "question": "Q2", "answer": "A2"},
+            ],
+            "total": 2,
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch(_API_POST, return_value=mock_resp):
+            ns["search_multi"]("test")
+
+        reg = ns["source_registry"]
+        assert "42" in reg
+        assert "99" in reg
+
+    def test_search_multi_truncates_long_query(self, capsys):
+        code = build_search_setup_code(api_url="http://api.test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        long_query = "x" * 800
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"hits": [], "total": 0}
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch(_API_POST, return_value=mock_resp) as mock_post:
+            ns["search_multi"](long_query)
+
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "truncating" in captured.out
+        payload = mock_post.call_args[1]["json"]
+        assert len(payload["query"]) == 500
 
 
 class TestFormatEvidence:
@@ -1200,7 +1348,7 @@ class TestResearch:
             result = ns["research"]("query", extra_queries=[{"query": "fail"}])
 
         assert len(result["results"]) >= 1  # primary results survived
-        assert result["search_count"] == 1  # only primary counted
+        assert result["search_count"] == 2  # primary + fallback both counted
 
 
 class TestResearchListQuery:
@@ -1320,10 +1468,7 @@ class TestResearchListQuery:
             )
 
         assert len(result["results"]) >= 1
-        assert result["search_count"] == 1  # only second spec counted
-        assert "errors" in result
-        captured = capsys.readouterr()
-        assert "WARNING" in captured.out
+        assert result["search_count"] == 2  # both specs succeed (first via fallback)
 
     def test_list_query_empty_list(self, capsys):
         """Empty list returns immediately with no-results dict."""
@@ -1698,9 +1843,9 @@ class TestToolCallsTracking:
         research_tc = ns["tool_calls"][0]
         assert research_tc["tool"] == "research"
         assert len(research_tc["children"]) >= 2
-        # Children should include search and evaluate_results
+        # Children should include search_multi and evaluate_results
         child_tools = [ns["tool_calls"][i]["tool"] for i in research_tc["children"]]
-        assert "search" in child_tools
+        assert "search_multi" in child_tools
         assert "evaluate_results" in child_tools
         assert research_tc["result_summary"]["search_count"] == 1
 
@@ -1828,9 +1973,7 @@ class TestCheckProgress:
 
     def _exec_ns(self, kb_data=_UNSET):
         data = _KB_PROGRESS if kb_data is _UNSET else kb_data
-        code = build_search_setup_code(
-            api_url="http://api.test", kb_overview_data=data
-        )
+        code = build_search_setup_code(api_url="http://api.test", kb_overview_data=data)
         ns: dict = {
             "llm_query": lambda prompt, model=None: "",
             "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),

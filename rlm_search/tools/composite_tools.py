@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from rlm_search.tools.api_tools import search
+from rlm_search.tools.api_tools import search, search_multi
 from rlm_search.tools.format_tools import format_evidence
 from rlm_search.tools.subagent_tools import batched_critique, evaluate_results
 from rlm_search.tools.tracker import tool_call_tracker
@@ -75,22 +75,37 @@ def research(
             f = spec.get("filters")
             k = spec.get("top_k", top_k)
             try:
-                r = search(ctx, q, filters=f, top_k=k)
+                r = search_multi(ctx, q, filters=f, top_k=k)
                 all_results.extend(r["results"])
                 search_count += 1
-            except Exception as e:
-                errors.append(str(e))
-                print(f"[research] WARNING: search failed: {e}")
-            for eq in spec.get("extra_queries") or []:
+            except Exception:
                 try:
-                    r = search(
-                        ctx, eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k)
-                    )
+                    r = search(ctx, q, filters=f, top_k=k)
                     all_results.extend(r["results"])
                     search_count += 1
                 except Exception as e:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")
+            for eq in spec.get("extra_queries") or []:
+                try:
+                    r = search_multi(
+                        ctx, eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k)
+                    )
+                    all_results.extend(r["results"])
+                    search_count += 1
+                except Exception:
+                    try:
+                        r = search(
+                            ctx,
+                            eq["query"],
+                            filters=eq.get("filters"),
+                            top_k=eq.get("top_k", k),
+                        )
+                        all_results.extend(r["results"])
+                        search_count += 1
+                    except Exception as e:
+                        errors.append(str(e))
+                        print(f"[research] WARNING: search failed: {e}")
 
         if not all_results:
             print("[research] ERROR: all searches failed")

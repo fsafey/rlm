@@ -138,6 +138,85 @@ def browse(
         }
 
 
+def search_multi(
+    ctx: ToolContext,
+    query: str,
+    collections: list[str] | None = None,
+    filters: dict | None = None,
+    top_k: int = 10,
+) -> dict:
+    """Search across multiple collections with server-side RRF + L5 reranking.
+
+    Strictly better than single-collection search() for queries that span
+    both Risala and enriched corpora.
+
+    Args:
+        ctx: Per-session tool context.
+        query: Natural language search query.
+        collections: Collections to search (default: ["enriched_gemini", "risala"]).
+        filters: Optional filter dict, e.g. ``{"parent_code": "PT"}``.
+        top_k: Number of results to return (default 10).
+
+    Returns:
+        Dict with ``results`` list (normalized, deduplicated, reranked by server),
+        ``total``, and ``collections_searched``.
+    """
+    if collections is None:
+        collections = ["enriched_gemini", "risala"]
+    if len(query) > MAX_QUERY_LEN:
+        print(
+            f"[search_multi] WARNING: query too long ({len(query)} chars), "
+            f"truncating to {MAX_QUERY_LEN}"
+        )
+        query = query[:MAX_QUERY_LEN]
+    with tool_call_tracker(
+        ctx,
+        "search_multi",
+        {"query": query, "collections": collections, "top_k": top_k},
+        parent_idx=ctx.current_parent_idx,
+    ) as tc:
+        payload: dict = {"query": query, "collections": collections, "top_k": top_k}
+        if filters:
+            payload["filters"] = filters
+        resp = requests.post(
+            f"{ctx.api_url}/search/multi",
+            json=payload,
+            headers=ctx.headers,
+            timeout=ctx.timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        hits = data.get("hits", [])
+        results = [normalize_hit(h, ctx.source_registry) for h in hits]
+        print(
+            f"[search_multi] query={query!r} collections={collections} "
+            f"top_k={top_k} results={len(results)}"
+        )
+        ctx.search_log.append(
+            {
+                "type": "search_multi",
+                "query": query,
+                "collections": collections,
+                "filters": filters,
+                "top_k": top_k,
+                "num_results": len(results),
+            }
+        )
+        tc.set_summary(
+            {
+                "num_results": len(results),
+                "total": data.get("total", len(results)),
+                "query": query,
+                "collections": collections,
+            }
+        )
+        return {
+            "results": results,
+            "total": data.get("total", len(results)),
+            "collections_searched": collections,
+        }
+
+
 def fiqh_lookup(ctx: ToolContext, query: str) -> dict:
     """Look up Islamic jurisprudence terminology for use in your answer.
 

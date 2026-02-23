@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import subprocess
 from collections import defaultdict
@@ -7,6 +8,8 @@ from typing import Any
 
 from rlm.clients.base_lm import BaseLM
 from rlm.core.types import ModelUsageSummary, UsageSummary
+
+_log = logging.getLogger(__name__)
 
 
 class ClaudeCLI(BaseLM):
@@ -66,13 +69,17 @@ class ClaudeCLI(BaseLM):
         return prompt_text, system_prompt
 
     def _build_cmd(
-        self, prompt_text: str, system_prompt: str | None, model_override: str | None = None
+        self, system_prompt: str | None, model_override: str | None = None
     ) -> list[str]:
-        """Build the CLI command list from instance config and per-call args."""
+        """Build the CLI command list from instance config and per-call args.
+
+        The prompt is passed via stdin (not as a CLI argument) to avoid
+        OS argument size limits and shell quoting issues with embedded
+        code blocks in multi-iteration prompts.
+        """
         cmd = [
             "claude",
             "-p",
-            prompt_text,
             "--output-format",
             "json",
             "--no-session-persistence",
@@ -97,9 +104,17 @@ class ClaudeCLI(BaseLM):
 
     @staticmethod
     def _clean_env() -> dict[str, str]:
-        """Return env dict without CLAUDECODE to allow nested CLI invocations."""
+        """Return env dict without Claude Code vars to allow clean nested CLI invocations.
+
+        Also strips ANTHROPIC_API_KEY so the CLI uses the authenticated Max/Pro
+        session instead of switching to API-key billing (which may have a
+        separate, lower credit balance).
+        """
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)
+        env.pop("ANTHROPIC_API_KEY", None)
+        for key in [k for k in env if k.startswith("CLAUDE_CODE_")]:
+            del env[key]
         return env
 
     def _parse_response(self, raw_output: str) -> str:
@@ -135,13 +150,36 @@ class ClaudeCLI(BaseLM):
         self, prompt: str | list[dict[str, Any]] | dict[str, Any], model: str | None = None
     ) -> str:
         prompt_text, system_prompt = self._build_prompt(prompt)
-        cmd = self._build_cmd(prompt_text, system_prompt, model_override=model)
+        cmd = self._build_cmd(system_prompt, model_override=model)
 
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=self.timeout, env=self._clean_env()
+        _log.debug(
+            "claude CLI call: prompt_len=%d cmd_args=%d model=%s",
+            len(prompt_text), len(cmd), model or self.model or "default",
         )
+
+        try:
+            result = subprocess.run(
+                cmd, input=prompt_text,
+                capture_output=True, text=True,
+                timeout=self.timeout, env=self._clean_env(),
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"claude CLI timed out after {self.timeout}s "
+                f"(prompt_len={len(prompt_text):,} chars). "
+                f"Consider increasing timeout or reducing context."
+            )
+
         if result.returncode != 0:
-            raise RuntimeError(f"claude CLI failed (rc={result.returncode}): {result.stderr}")
+            # Claude Code may write errors to stdout (JSON mode) or stderr
+            stderr = (result.stderr or "").strip()
+            stdout_preview = (result.stdout or "")[:500].strip()
+            raise RuntimeError(
+                f"claude CLI failed (rc={result.returncode}). "
+                f"stderr: {stderr or '[empty]'}. "
+                f"stdout: {stdout_preview or '[empty]'}. "
+                f"prompt_len={len(prompt_text):,}"
+            )
 
         return self._parse_response(result.stdout)
 
@@ -149,18 +187,35 @@ class ClaudeCLI(BaseLM):
         self, prompt: str | list[dict[str, Any]] | dict[str, Any], model: str | None = None
     ) -> str:
         prompt_text, system_prompt = self._build_prompt(prompt)
-        cmd = self._build_cmd(prompt_text, system_prompt, model_override=model)
+        cmd = self._build_cmd(system_prompt, model_override=model)
 
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=self._clean_env(),
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=self.timeout)
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=prompt_text.encode()), timeout=self.timeout
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()  # Reap child to avoid zombie processes
+            raise RuntimeError(
+                f"claude CLI timed out after {self.timeout}s "
+                f"(prompt_len={len(prompt_text):,} chars)."
+            )
 
         if proc.returncode != 0:
-            raise RuntimeError(f"claude CLI failed (rc={proc.returncode}): {stderr.decode()}")
+            stderr_str = stderr.decode().strip() if stderr else "[empty]"
+            stdout_preview = stdout.decode()[:500].strip() if stdout else "[empty]"
+            raise RuntimeError(
+                f"claude CLI failed (rc={proc.returncode}). "
+                f"stderr: {stderr_str}. stdout: {stdout_preview}. "
+                f"prompt_len={len(prompt_text):,}"
+            )
 
         return self._parse_response(stdout.decode())
 

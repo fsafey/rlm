@@ -66,7 +66,9 @@ def test_default_cmd(mock_run: MagicMock) -> None:
 
     cmd = mock_run.call_args[0][0]
     assert cmd[0] == "claude"
-    assert cmd[1:3] == ["-p", "hello"]
+    assert cmd[1] == "-p"
+    # Prompt is passed via stdin (input= kwarg), not in cmd args
+    assert mock_run.call_args[1].get("input") == "hello"
     assert "--output-format" in cmd
     assert cmd[cmd.index("--output-format") + 1] == "json"
     assert "--no-session-persistence" in cmd
@@ -161,8 +163,8 @@ def test_system_prompt_extraction(mock_run: MagicMock) -> None:
     cmd = mock_run.call_args[0][0]
     idx = cmd.index("--system-prompt")
     assert cmd[idx + 1] == "You are helpful."
-    # The prompt text should contain the user message but not the system message
-    prompt_text = cmd[2]  # -p <prompt_text>
+    # The prompt text is passed via stdin, should contain user message but not system
+    prompt_text = mock_run.call_args[1].get("input", "")
     assert "Hi there" in prompt_text
     assert "You are helpful" not in prompt_text
 
@@ -255,14 +257,17 @@ def test_completion_returns_result_text(mock_run: MagicMock) -> None:
 def test_build_cmd_no_system_prompt() -> None:
     """_build_cmd without system prompt omits --system-prompt."""
     client = ClaudeCLI()
-    cmd = client._build_cmd("test", None)
+    cmd = client._build_cmd(None)
     assert "--system-prompt" not in cmd
+    # Prompt should NOT be in cmd (passed via stdin now)
+    assert "claude" in cmd
+    assert "-p" in cmd
 
 
 def test_build_cmd_with_system_prompt() -> None:
     """_build_cmd with system prompt includes --system-prompt."""
     client = ClaudeCLI()
-    cmd = client._build_cmd("test", "be helpful")
+    cmd = client._build_cmd("be helpful")
     idx = cmd.index("--system-prompt")
     assert cmd[idx + 1] == "be helpful"
 

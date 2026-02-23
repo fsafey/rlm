@@ -59,6 +59,9 @@ rlm = RLM(
 print(rlm.completion("Print me the first 100 powers of two, each on a newline.").response)
 ```
 
+> [!IMPORTANT]
+> **Environment isolation**: The Claude CLI client automatically strips `ANTHROPIC_API_KEY`, `CLAUDECODE`, and all `CLAUDE_CODE_*` variables from the subprocess environment. This ensures `claude -p` uses the authenticated Max/Pro session rather than switching to API-key billing (which may have a separate, lower credit balance). Prompts are passed via stdin to avoid OS argument size limits with large inputs.
+
 ### API-Based Backends
 
 Alternatively, use any supported API backend by setting the appropriate environment variable:
@@ -139,7 +142,7 @@ export PRIME_API_KEY=...
 
 | Backend | Key | Notes |
 |---------|-----|-------|
-| `claude_cli` | None | Shells out to `claude -p`. Zero config if Claude Code is authenticated. |
+| `claude_cli` | None | Shells out to `claude -p` via stdin. Zero config if Claude Code is authenticated. Strips `ANTHROPIC_API_KEY` from env to use session auth. |
 | `openai` | `OPENAI_API_KEY` | GPT-4o, GPT-5, etc. |
 | `anthropic` | `ANTHROPIC_API_KEY` | Claude via API. |
 | `gemini` | `GOOGLE_API_KEY` | Gemini models. |

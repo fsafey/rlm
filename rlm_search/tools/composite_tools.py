@@ -273,11 +273,12 @@ def draft_answer(
             f" | {len(answer)} chars | {len(evidence)} evidence entries"
         )
         ctx.current_parent_idx = saved_parent
-        tc.set_summary(
-            {
-                "passed": passed,
-                "revised": revised,
-                "answer_length": len(answer),
-            }
-        )
+        tc.set_summary({
+            "passed": passed,
+            "revised": revised,
+            "answer_length": len(answer),
+            "answer_preview": answer[:300],
+            "critique_verdict": "PASS" if passed else "FAIL",
+            "critique_reason": critique_text[:150] if critique_text else "",
+        })
         return {"answer": answer, "critique": critique_text, "passed": passed, "revised": revised}

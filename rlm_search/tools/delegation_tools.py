@@ -120,14 +120,13 @@ def rlm_query(
 
         print(f"[rlm_query] Complete: {searches_run} searches, {n_merged} sources merged")
 
-        tc.set_summary(
-            {
-                "sub_question": sub_question,
-                "searches_run": searches_run,
-                "answer_length": len(answer),
-                "sources_merged": n_merged,
-            }
-        )
+        tc.set_summary({
+            "sub_question": sub_question,
+            "searches_run": searches_run,
+            "answer_length": len(answer),
+            "sources_merged": n_merged,
+            "answer_preview": answer[:200],
+        })
 
         return {
             "answer": answer,

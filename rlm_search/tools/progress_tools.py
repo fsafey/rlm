@@ -170,14 +170,16 @@ def check_progress(ctx: ToolContext) -> dict:
         )
         print(f"  Searches tried:\n{audit}")
 
-        tc.set_summary(
-            {
-                "phase": phase,
-                "confidence": confidence,
-                "relevant": relevant_count,
-                "searches": n_searches,
-            }
-        )
+        tc.set_summary({
+            "phase": phase,
+            "confidence": confidence,
+            "relevant": relevant_count,
+            "searches": n_searches,
+            "guidance": guidance,
+            "partial": partial_count,
+            "top_score": round(top_score, 3),
+            "categories_explored": sorted(categories_explored),
+        })
 
         return {
             "phase": phase,

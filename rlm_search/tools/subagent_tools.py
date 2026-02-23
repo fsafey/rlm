@@ -114,14 +114,20 @@ def evaluate_results(
             summary += f", {unknown_count} unknown"
         print(f"[evaluate_results] {len(ratings)} rated: {summary}")
         print(f"[evaluate_results] suggestion: {suggestion}")
-        tc.set_summary(
-            {
-                "num_rated": len(ratings),
-                "relevant": relevant_count,
-                "partial": partial_count,
-                "off_topic": off_topic_count,
-            }
-        )
+        tc.set_summary({
+            "num_rated": len(ratings),
+            "relevant": relevant_count,
+            "partial": partial_count,
+            "off_topic": off_topic_count,
+            "ratings": [
+                {
+                    "id": r.get("id", ""),
+                    "rating": r.get("rating", "UNKNOWN"),
+                    "confidence": r.get("confidence", 0),
+                }
+                for r in ratings
+            ],
+        })
         return {"ratings": ratings, "suggestion": suggestion, "raw": raw}
 
 
@@ -162,7 +168,10 @@ def reformulate(
         queries = [line.strip() for line in response.strip().split("\n") if line.strip()]
         queries = queries[:3]
         print(f"[reformulate] generated {len(queries)} queries")
-        tc.set_summary({"num_queries": len(queries)})
+        tc.set_summary({
+            "num_queries": len(queries),
+            "queries": queries,
+        })
         return queries
 
 
@@ -209,7 +218,11 @@ def critique_answer(
         verdict = ctx.llm_query(prompt, model=model)
         status = "PASS" if verdict.strip().strip("*").upper().startswith("PASS") else "FAIL"
         print(f"[critique_answer] verdict={status}")
-        tc.set_summary({"verdict": status})
+        reason_text = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
+        tc.set_summary({
+            "verdict": status,
+            "reason": reason_text[:150],
+        })
         return verdict
 
 
@@ -267,13 +280,19 @@ def batched_critique(
         failed_str = f" (failed: {', '.join(failed_parts)})" if failed_parts else ""
         print(f"[critique_answer] dual-review verdict={verdict_str}{failed_str}")
         combined = f"CONTENT: {content_verdict}\n\nCITATIONS: {citation_verdict}"
-        tc.set_summary(
-            {
-                "verdict": verdict_str,
-                "content_passed": content_passed,
-                "citation_passed": citation_passed,
-            }
-        )
+        content_feedback = content_verdict.split("\n", 1)[1].strip() if "\n" in content_verdict else ""
+        citation_feedback = citation_verdict.split("\n", 1)[1].strip() if "\n" in citation_verdict else ""
+        tc.set_summary({
+            "verdict": verdict_str,
+            "content_passed": content_passed,
+            "citation_passed": citation_passed,
+            "content_feedback": content_feedback[:150],
+            "citation_feedback": citation_feedback[:150],
+            "failed": [
+                *([] if content_passed else ["content"]),
+                *([] if citation_passed else ["citations"]),
+            ],
+        })
         return combined, passed
 
 

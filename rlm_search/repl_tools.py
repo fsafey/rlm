@@ -107,7 +107,15 @@ def check_progress():
     return _prog.check_progress(_ctx)
 
 def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None):
-    return _comp.research(_ctx, query, filters=filters, top_k=top_k, extra_queries=extra_queries, eval_model=eval_model)
+    result = _comp.research(_ctx, query, filters=filters, top_k=top_k, extra_queries=extra_queries, eval_model=eval_model)
+    progress = _prog.check_progress(_ctx)
+    if progress["phase"] == "ready":
+        print(f"\\n>>> PROGRESS: Evidence sufficient (confidence {progress['confidence']}%). Call draft_answer() now.")
+    elif progress["phase"] == "finalize":
+        print(f"\\n>>> PROGRESS: Draft complete. Call FINAL_VAR(answer) to finish.")
+    elif progress["phase"] in ("stalled", "repeating"):
+        print(f"\\n>>> PROGRESS: {progress['guidance']}")
+    return result
 
 def draft_answer(question, results, instructions=None, model=None):
     return _comp.draft_answer(_ctx, question, results, instructions=instructions, model=model)

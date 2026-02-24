@@ -363,6 +363,47 @@ def batched_critique(
         return verdict, passed
 
 
+# Stop words excluded from query token matching
+_CLASSIFY_STOP_WORDS = frozenset(
+    "is it a the to can i do how what in of for and or but from with this that are was were"
+    " be been have has had my your his her its on at by an".split()
+)
+
+
+def _match_clusters(question: str, grouped_results: list) -> list[str]:
+    """Rank clusters by token overlap with question against sample hits + labels.
+
+    Returns up to 5 cluster labels, ordered by relevance score.
+    Falls back to top 2 by document count when no tokens match.
+    """
+    if not grouped_results:
+        return []
+
+    query_tokens = set(question.lower().split()) - _CLASSIFY_STOP_WORDS
+
+    scores: list[tuple[str, int, int]] = []
+    for group in grouped_results:
+        label = group.get("label", "")
+        label_tokens = set(label.lower().split()) - _CLASSIFY_STOP_WORDS
+        # Label matches weighted 3x (cluster name is high-signal)
+        score = len(query_tokens & label_tokens) * 3
+        # Sample hit question matches weighted 1x each
+        for hit in group.get("hits", []):
+            q = hit.get("question", "").lower()
+            hit_tokens = set(q.split()) - _CLASSIFY_STOP_WORDS
+            score += len(query_tokens & hit_tokens)
+        scores.append((label, score, group.get("total_count", 0)))
+
+    # Sort by match score desc, break ties by doc count desc
+    scores.sort(key=lambda x: (-x[1], -x[2]))
+
+    matched = [s[0] for s in scores if s[1] > 0]
+    if matched:
+        return matched[:5]
+    # Fallback: top 2 by document count
+    return [s[0] for s in scores[:2]]
+
+
 def init_classify(
     ctx: ToolContext,
     question: str,

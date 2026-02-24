@@ -1186,23 +1186,65 @@ class TestCritiqueAnswer:
         ns = _make_sub_agent_ns()
         ns["_ctx"].llm_query = lambda prompt, model=None: "PASS - all citations verified"
         result = ns["critique_answer"]("question", "draft answer")
-        assert "PASS" in result
+        assert result["passed"] is True
+        assert "PASS" in result["verdict"]
 
     def test_fail_verdict(self, capsys):
         ns = _make_sub_agent_ns()
         ns["_ctx"].llm_query = lambda prompt, model=None: "FAIL - missing citations"
         result = ns["critique_answer"]("question", "draft")
-        assert "FAIL" in result
+        assert result["passed"] is False
+        assert "FAIL" in result["verdict"]
         captured = capsys.readouterr()
         assert "verdict=FAIL" in captured.out
 
-    def test_returns_string_not_tuple(self):
-        """critique_answer returns verdict string for REPL backward compat."""
+    def test_returns_dict_with_verdict_and_passed(self):
+        """critique_answer returns dict with verdict and passed keys."""
         ns = _make_sub_agent_ns()
         ns["_ctx"].llm_query = lambda prompt, model=None: "PASS — ok"
         result = ns["critique_answer"]("question", "draft")
-        assert isinstance(result, str)
-        assert "PASS" in result
+        assert isinstance(result, dict)
+        assert "verdict" in result
+        assert "passed" in result
+        assert result["passed"] is True
+
+    def test_auto_pulls_evidence_from_source_registry(self):
+        """When evidence omitted, auto-builds from source_registry."""
+        ns = _make_sub_agent_ns()
+        prompts_seen = []
+
+        def capture_prompt(prompt, model=None):
+            prompts_seen.append(prompt)
+            return "PASS\nAll good."
+
+        ns["_ctx"].llm_query = capture_prompt
+        ns["_ctx"].source_registry = {
+            "42": {"id": "42", "question": "Test Q", "answer": "Test A"},
+        }
+        result = ns["critique_answer"]("question", "draft [Source: 42]")
+        assert result["passed"] is True
+        # Should have used evidence-grounded path (CITATION ACCURACY check)
+        assert "CITATION ACCURACY" in prompts_seen[0]
+        assert "[Source: 42]" in prompts_seen[0]
+
+    def test_explicit_evidence_takes_precedence(self):
+        """Explicit evidence param is used even when source_registry exists."""
+        ns = _make_sub_agent_ns()
+        prompts_seen = []
+
+        def capture_prompt(prompt, model=None):
+            prompts_seen.append(prompt)
+            return "PASS\nOK"
+
+        ns["_ctx"].llm_query = capture_prompt
+        ns["_ctx"].source_registry = {
+            "99": {"id": "99", "question": "Noise", "answer": "Should not appear"},
+        }
+        evidence = ["[Source: 1] Q: Real A: Evidence"]
+        result = ns["critique_answer"]("question", "draft", evidence=evidence)
+        assert result["passed"] is True
+        assert "[Source: 1] Q: Real A: Evidence" in prompts_seen[0]
+        assert "Noise" not in prompts_seen[0]
 
 
 class TestClassificationInSetupCode:

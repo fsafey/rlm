@@ -268,12 +268,21 @@ def critique_answer(
     """Evidence-grounded critique: cross-check draft citations against sources.
 
     When evidence is provided, checks citation accuracy, attribution fidelity,
-    unsupported claims, and completeness against actual sources. Falls back to
-    a generic review when evidence is unavailable.
+    unsupported claims, and completeness against actual sources. When evidence
+    is omitted but ``ctx.source_registry`` has accumulated results, auto-builds
+    evidence from the session state so the critique is still grounded.
 
     Returns:
         Tuple of (verdict_text, passed).
     """
+    # Option B: auto-pull evidence from session state when caller omits it
+    if evidence is None and ctx.source_registry:
+        from rlm_search.tools.format_tools import format_evidence
+
+        evidence = format_evidence(list(ctx.source_registry.values()), max_per_source=3)
+        if not evidence:
+            evidence = None  # format_evidence returned [] — fall back to generic
+
     with tool_call_tracker(
         ctx,
         "critique_answer",

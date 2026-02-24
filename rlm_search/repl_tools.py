@@ -97,9 +97,9 @@ def evaluate_results(question, results, top_n=5, model=None):
 def reformulate(question, failed_query, top_score=0.0, model=None):
     return _sub.reformulate(_ctx, question, failed_query, top_score=top_score, model=model)
 
-def critique_answer(question, draft, model=None):
-    verdict, _passed = _sub.critique_answer(_ctx, question, draft, model=model)
-    return verdict
+def critique_answer(question, draft, evidence=None, model=None):
+    verdict, passed = _sub.critique_answer(_ctx, question, draft, evidence=evidence, model=model)
+    return {"verdict": verdict, "passed": passed}
 
 def check_progress():
     return _prog.check_progress(_ctx)

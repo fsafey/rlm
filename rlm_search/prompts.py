@@ -53,7 +53,8 @@ Delegate a sub-question to a child agent with its own search tools and iteration
 - `fiqh_lookup(query)` — Islamic terminology dictionary
 - `evaluate_results(question, results, top_n, model)` — rate result relevance
 - `reformulate(question, failed_query, top_score, model)` — generate 3 alternative queries
-- `critique_answer(question, draft, model)` — standalone PASS/FAIL review
+- `critique_answer(question, draft, evidence=None, model=None)` — PASS/FAIL review; pass `format_evidence(results)` for evidence-grounded critique, or omit to auto-pull from session sources
+- `llm_query(prompt)` — raw LLM call (advanced; prefer research/draft_answer for most tasks)
 - `search_log`, `source_registry` — session state
 
 ## Taxonomy

@@ -310,27 +310,14 @@ function detectActivityFromToolCalls(iteration: Iteration): IterationActivity {
         : "Rated search results";
       return { label: "Evaluating", metric, icon: ShieldCheck };
     }
-    case "critique_answer": {
+    case "critique_answer":
+    case "batched_critique": {
       const verdict = primary.result_summary.verdict as string | undefined;
       return {
         label: "Critiquing",
         metric: verdict ? `Verdict: ${verdict}` : "Reviewed draft",
         icon: ShieldCheck,
       };
-    }
-    case "batched_critique": {
-      const s = primary.result_summary;
-      const verdict = s.verdict as string | undefined;
-      const contentOk = s.content_passed as boolean | undefined;
-      const citationOk = s.citation_passed as boolean | undefined;
-      let metric = verdict ? `Dual-review: ${verdict}` : "Dual-reviewer critique";
-      if (verdict === "FAIL" && contentOk !== undefined && citationOk !== undefined) {
-        const failed = [];
-        if (!contentOk) failed.push("content");
-        if (!citationOk) failed.push("citations");
-        metric = `Dual-review FAIL (${failed.join(", ")})`;
-      }
-      return { label: "Critiquing", metric, icon: ShieldCheck };
     }
     case "reformulate": {
       const count = primary.result_summary.num_queries as number | undefined;

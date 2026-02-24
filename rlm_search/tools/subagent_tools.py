@@ -277,7 +277,7 @@ def critique_answer(
     with tool_call_tracker(
         ctx,
         "critique_answer",
-        {"question": question[:100], "has_evidence": evidence is not None},
+        {"question": question[:100], "has_evidence": bool(evidence)},
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         if len(draft) > MAX_DRAFT_LEN:
@@ -324,7 +324,7 @@ def critique_answer(
         feedback = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
         tc.set_summary({
             "verdict": verdict_str,
-            "has_evidence": evidence is not None,
+            "has_evidence": bool(evidence),
             "feedback": feedback[:200],
             # Backward compat for frontend CritiqueDetail renderer
             "reason": feedback[:200],

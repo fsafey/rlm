@@ -46,6 +46,13 @@ class SearchContext:
     _sub_iterations: int | None = None
     pipeline_mode: str = ""
 
+    # --- Backward compat (removed after Task 11 tool migration) ---
+    current_parent_idx: int | None = None
+    _parent_logger: Any = None
+    progress_callback: Any = None
+    existing_answer: str | None = None
+    w3_state: dict = dataclasses.field(default_factory=dict)
+
     def __post_init__(self) -> None:
         if not self.headers and self.api_key:
             self.headers = {
@@ -55,3 +62,18 @@ class SearchContext:
         # QualityGate needs evidence reference — auto-create if not provided
         if self.quality is None:
             self.quality = QualityGate(evidence=self.evidence)
+
+    # --- Backward compat properties (delegate to departments) ---
+
+    @property
+    def source_registry(self) -> dict[str, dict[str, Any]]:
+        """Live reference — tools write via register_hit(), LM reads via print()."""
+        return self.evidence.live_dict
+
+    @property
+    def search_log(self) -> list[dict[str, Any]]:
+        return self.evidence.search_log
+
+    @property
+    def evaluated_ratings(self) -> dict[str, dict[str, Any]]:
+        return self.evidence._ratings

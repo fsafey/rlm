@@ -91,3 +91,35 @@ class TestEventBusCancellation:
         bus.cancel()
         with pytest.raises(SearchCancelled):
             bus.raise_if_cancelled()
+
+
+class TestSetupCodeV2Integration:
+    """Verify the new setup code executes in a LocalREPL without errors."""
+
+    def test_setup_code_executes_cleanly(self):
+        from rlm_search.repl_tools_v2 import build_search_setup_code_v2
+        from rlm.environments.local_repl import LocalREPL
+
+        code = build_search_setup_code_v2(
+            api_url="https://test.com",
+            kb_overview_data=None,
+            rlm_model="test-model",
+            rlm_backend="anthropic",
+            depth=0,
+            max_delegation_depth=1,
+            sub_iterations=3,
+            query="test question",
+            classify_model="test-model",
+        )
+
+        # The setup code should execute without errors in a real LocalREPL
+        repl = LocalREPL(setup_code=code, depth=1)
+
+        # Verify key functions exist in REPL namespace
+        assert "search" in repl.locals
+        assert "research" in repl.locals
+        assert "draft_answer" in repl.locals
+        assert "check_progress" in repl.locals
+        assert "source_registry" in repl.locals
+
+        repl.cleanup()

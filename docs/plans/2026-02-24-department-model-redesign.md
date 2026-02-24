@@ -8,6 +8,42 @@
 
 **Tech Stack:** Python 3.11+, FastAPI, dataclasses, threading.Lock, existing RLM core (no core changes)
 
+**Branch:** `feature/department-redesign` (worktree: `.worktrees/department-redesign`)
+
+---
+
+## Progress
+
+| Task | Phase | Status | Tests | Commit | Notes |
+|------|-------|--------|-------|--------|-------|
+| 0: Prompt Caching | 0 | DONE | 18 pass | `59ece03` | 5-line change, both sync+async paths |
+| 1: EventBus | 1 | DONE | 9 pass | `991b881` | emit/drain/replay/cancel, thread-safe |
+| 2: EvidenceStore | 1 | DONE | 13 pass | `2c6bb4c` | register_hit, ratings, merge, live_dict |
+| 3: QualityGate | 1 | DONE | 12 pass | `0b380db` | 5-factor confidence, phase detection |
+| 4: SearchContext | 2 | DONE | 4 pass | `09d3777` | ~10 fields, auto-creates QualityGate |
+| 5: Tracker rewire | 2 | DONE | 4 new + 148 legacy pass | `5ca5a1f` | Dual-path: bus or legacy callback |
+| 6: SessionManager | 3 | DONE | 11 pass | `8f008e9` | Session lifecycle, follow-up swap, expiration |
+| 7: StreamingLoggerV2 | 4 | DONE | 5 pass | `1f1aa84` | RLMLogger subclass, EventBus delegation, JSONL |
+| 8: SSE endpoint | 5 | DONE | 3 pass | `7be27a9` | EventBus drain, replay, 100ms poll |
+| 9: setup_code v2 | 6 | DONE | 1 pass | `3b55ae4` | SearchContext + departments, backward compat props |
+| 10: api_v2 orchestrator | 6 | DONE | 2 pass | `c83603a` | SessionManager, EventBus per search, SSE router |
+| 11: Migrate tools | 7 | PENDING | — | — | Largest blast radius |
+| 12: Swap api.py | 7 | PENDING | — | — | |
+| 13: Remove legacy | 7 | PENDING | — | — | |
+| 14: Prompt dedup | 7 | PENDING | — | — | |
+| 15: Frontend events | 8 | PENDING | — | — | |
+
+**Full suite:** 491 passed, 8 skipped, 6 pre-existing failures (3 TestInitClassify, 3 test_empty_iteration_breaker)
+
+**Next batch:** Tasks 11-14 (Phase 7: Cutover + Cleanup). Task 11 is the critical migration — rewire all tools from `ctx.source_registry`/`ctx.search_log`/`ctx.evaluated_ratings` to `ctx.evidence.*` methods. Backward-compat properties on SearchContext (`context_v2.py`) already bridge the gap so existing tests pass through migration. After Task 11, swap api.py (12), remove legacy files (13), deduplicate prompts (14).
+
+**Key context for next session:**
+- Working in worktree at `.worktrees/department-redesign` on branch `feature/department-redesign`
+- SearchContext (`context_v2.py`) already has backward-compat properties: `source_registry` → `evidence.live_dict`, `search_log` → `evidence.search_log`, `evaluated_ratings` → `evidence._ratings`
+- Tracker (`tracker.py`) already dual-paths: emits to `ctx.bus` if present, else falls back to `progress_callback`
+- `api_v2.py` uses `build_search_setup_code_v2()` which creates SearchContext — but tools still directly access old ToolContext fields internally
+- Task 11 strategy: duck-type check `hasattr(ctx, 'evidence')` in each tool file, migrate writes to department methods
+
 ---
 
 ## Phase 0: Quick Wins (Independent of Redesign)

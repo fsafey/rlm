@@ -70,58 +70,33 @@ def research(
             ]
             eval_question = query
 
-        use_multi = ctx.pipeline_mode == "w3"
+        is_w3 = ctx.pipeline_mode == "w3"
 
         for spec in specs:
             q = spec["query"]
             f = spec.get("filters")
             k = spec.get("top_k", top_k)
             try:
-                if use_multi:
+                if is_w3:
                     r = search_multi(ctx, q, final_top_k=k)
                 else:
-                    r = search_multi(ctx, q, filters=f, top_k=k)
+                    r = search(ctx, q, filters=f, top_k=k)
                 all_results.extend(r["results"])
                 search_count += 1
             except Exception as e:
-                if not use_multi:
-                    try:
-                        r = search(ctx, q, filters=f, top_k=k)
-                        all_results.extend(r["results"])
-                        search_count += 1
-                    except Exception as e2:
-                        errors.append(str(e2))
-                        print(f"[research] WARNING: search failed: {e2}")
-                else:
-                    errors.append(str(e))
-                    print(f"[research] WARNING: search failed: {e}")
+                errors.append(str(e))
+                print(f"[research] WARNING: search failed: {e}")
             for eq in spec.get("extra_queries") or []:
                 try:
-                    if use_multi:
+                    if is_w3:
                         r = search_multi(ctx, eq["query"], final_top_k=eq.get("top_k", k))
                     else:
-                        r = search_multi(
-                            ctx, eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k)
-                        )
+                        r = search(ctx, eq["query"], filters=eq.get("filters"), top_k=eq.get("top_k", k))
                     all_results.extend(r["results"])
                     search_count += 1
                 except Exception as e:
-                    if not use_multi:
-                        try:
-                            r = search(
-                                ctx,
-                                eq["query"],
-                                filters=eq.get("filters"),
-                                top_k=eq.get("top_k", k),
-                            )
-                            all_results.extend(r["results"])
-                            search_count += 1
-                        except Exception as e2:
-                            errors.append(str(e2))
-                            print(f"[research] WARNING: search failed: {e2}")
-                    else:
-                        errors.append(str(e))
-                        print(f"[research] WARNING: search failed: {e}")
+                    errors.append(str(e))
+                    print(f"[research] WARNING: search failed: {e}")
 
         if not all_results:
             print("[research] ERROR: all searches failed")
@@ -250,7 +225,12 @@ def draft_answer(
         ctx.current_parent_idx = tc.idx
 
         prompt_parts = [
-            "You are an Islamic Q&A scholar synthesizing from verified sources.\n\n",
+            "You are the search concierge for I.M.A.M. (imam-us.org), a Shia Ithna Ashari organization. "
+            "Synthesize from the scholar-answered sources below following Ja'fari fiqh. "
+            "Present rulings as the scholars stated them — do not hedge with Sunni counterpositions.\n\n"
+            "Provide a thorough answer: address every dimension of the question, include conditions "
+            "and caveats the scholars mentioned, and cite each claim. When multiple sources agree, "
+            "synthesize into a unified answer rather than listing separately.\n\n",
             f"QUESTION:\n{question}\n\n",
             "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
         ]
@@ -259,7 +239,8 @@ def draft_answer(
         prompt_parts.append(
             "FORMAT: ## Answer (with [Source: <id>] citations), "
             "## Evidence (source summaries), ## Confidence (High/Medium/Low).\n"
-            "Only cite IDs from the evidence. Flag gaps explicitly.\n"
+            "Only cite IDs from the evidence. Flag gaps explicitly — say "
+            "'the I.M.A.M. corpus does not address this aspect' rather than guessing.\n"
         )
 
         answer = ctx.llm_query("".join(prompt_parts), model=model)

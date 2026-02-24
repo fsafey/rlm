@@ -1558,7 +1558,7 @@ class TestResearch:
             result = ns["research"]("query", extra_queries=[{"query": "fail"}])
 
         assert len(result["results"]) >= 1  # primary results survived
-        assert result["search_count"] == 2  # primary + fallback both counted
+        assert result["search_count"] == 1  # primary succeeded, extra failed (no fallback)
 
 
 class TestResearchListQuery:
@@ -1678,7 +1678,7 @@ class TestResearchListQuery:
             )
 
         assert len(result["results"]) >= 1
-        assert result["search_count"] == 2  # both specs succeed (first via fallback)
+        assert result["search_count"] == 1  # first spec failed (no fallback), second succeeded
 
     def test_list_query_empty_list(self, capsys):
         """Empty list returns immediately with no-results dict."""

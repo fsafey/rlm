@@ -346,9 +346,21 @@ def init_classify(
                 " and suggest search filters.\n\n"
                 f'Question: "{question}"\n\n'
                 f"Categories and their clusters:\n{cat_info}\n\n"
+                "Examples:\n"
+                'Q: "Is it permissible to take a mortgage from a bank?"\n'
+                "CATEGORY: FN\n"
+                "CLUSTERS: Banking Riba Operations, Riba in Loan Contracts\n"
+                'FILTERS: {"parent_code": "FN"}\n'
+                "STRATEGY: Search for riba, mortgage, and bank loan rulings\n\n"
+                'Q: "How do I perform ghusl janabah?"\n'
+                "CATEGORY: PT\n"
+                "CLUSTERS: Ghusl\n"
+                'FILTERS: {"parent_code": "PT", "cluster_label": "Ghusl"}\n'
+                "STRATEGY: Search for ghusl types and requirements\n\n"
+                "Now classify the question above.\n"
                 "Respond with exactly (no other text):\n"
                 "CATEGORY: <code>\n"
-                "CLUSTERS: <comma-separated relevant cluster labels>\n"
+                "CLUSTERS: <comma-separated relevant cluster labels from the list above>\n"
                 'FILTERS: <json dict, e.g. {"parent_code": "BE"}>\n'
                 "STRATEGY: <1 sentence search plan>"
             ),

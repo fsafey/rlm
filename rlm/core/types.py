@@ -171,12 +171,30 @@ class RLMIteration:
     iteration_time: float | None = None
 
     def to_dict(self):
+        # Aggregate usage across all code blocks' rlm_calls
+        aggregated: dict[str, ModelUsageSummary] = {}
+        for block in self.code_blocks:
+            for call in block.result.rlm_calls:
+                for model, usage in call.usage_summary.model_usage_summaries.items():
+                    if model in aggregated:
+                        agg = aggregated[model]
+                        agg.total_calls += usage.total_calls
+                        agg.total_input_tokens += usage.total_input_tokens
+                        agg.total_output_tokens += usage.total_output_tokens
+                    else:
+                        aggregated[model] = ModelUsageSummary(
+                            total_calls=usage.total_calls,
+                            total_input_tokens=usage.total_input_tokens,
+                            total_output_tokens=usage.total_output_tokens,
+                        )
+
         return {
             "prompt": self.prompt,
             "response": self.response,
             "code_blocks": [code_block.to_dict() for code_block in self.code_blocks],
             "final_answer": self.final_answer,
             "iteration_time": self.iteration_time,
+            "usage_summary": UsageSummary(model_usage_summaries=aggregated).to_dict(),
         }
 
 

@@ -2016,9 +2016,9 @@ class TestToolCallsTracking:
         research_tc = ns["tool_calls"][0]
         assert research_tc["tool"] == "research"
         assert len(research_tc["children"]) >= 2
-        # Children should include search_multi and evaluate_results
+        # Children should include search and evaluate_results
         child_tools = [ns["tool_calls"][i]["tool"] for i in research_tc["children"]]
-        assert "search_multi" in child_tools
+        assert "search" in child_tools
         assert "evaluate_results" in child_tools
         assert research_tc["result_summary"]["search_count"] == 1
 

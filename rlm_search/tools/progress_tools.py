@@ -18,7 +18,9 @@ def _compute_confidence(
     categories_explored: set,
 ) -> int:
     """Numeric confidence score (0-100) from evidence signals."""
-    evidence = min(relevant / 3, 1.0) * 35
+    # PARTIAL boosts evidence only when at least 1 relevant result exists
+    partial_boost = partial * 0.5 if relevant > 0 else 0
+    evidence = min((relevant + partial_boost) / 3, 1.0) * 35
     # Cascade scores > 0.5 already indicate strong semantic match; saturate early
     quality = min(top_score / 0.5, 1.0) * 25
     breadth = min(partial / 2, 1.0) * 10
@@ -34,6 +36,49 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
         return "Try broader search terms or different filters."
 
     all_categories = kb.get("categories", {})
+
+    # When pre-classification exists, suggest within classified domain first
+    if ctx.classification and ctx.classification.get("category"):
+        classified_code = ctx.classification["category"]
+        classified_cat = all_categories.get(classified_code)
+
+        if not classified_cat:
+            print(
+                f"[strategy] WARNING: classified category '{classified_code}' "
+                "not found in kb_overview"
+            )
+            # Fall through to heuristic below
+        else:
+            # Find which classified clusters haven't been searched yet
+            classified_clusters = [
+                c.strip()
+                for c in ctx.classification.get("clusters", "").split(",")
+                if c.strip()
+            ]
+            used_clusters = {
+                e.get("filters", {}).get("cluster_label")
+                for e in ctx.search_log
+                if e.get("filters")
+            } - {None}
+
+            unsearched = [c for c in classified_clusters if c not in used_clusters]
+
+            if unsearched:
+                cluster = unsearched[0]
+                return (
+                    f'Try classified cluster "{cluster}" in {classified_cat["name"]}: '
+                    f"research(query, "
+                    f'filters={{"parent_code": "{classified_code}", '
+                    f'"cluster_label": "{cluster}"}})'
+                )
+
+            # All classified clusters explored — use classification strategy
+            strategy = ctx.classification.get("strategy", "")
+            if strategy:
+                return f"Classified clusters explored. Strategy: {strategy}"
+            return "All classified clusters explored. Draft with current evidence."
+
+    # No classification — fall back to biggest-unexplored heuristic
     unexplored = {
         code: cat
         for code, cat in all_categories.items()

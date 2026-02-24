@@ -62,9 +62,9 @@ def evaluate_results(
                 f"Q: {q}\n"
                 f"A: {a}\n\n"
                 f"Respond with exactly one line: RELEVANT|PARTIAL|OFF-TOPIC followed by CONFIDENCE:<1-5>\n"
-                f"RELEVANT = directly answers the question\n"
-                f"PARTIAL = related but incomplete\n"
-                f"OFF-TOPIC = not about this question"
+                f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
+                f"PARTIAL = tangentially related but does not address the core issue\n"
+                f"OFF-TOPIC = about a completely different subject"
             )
             prompts.append(prompt)
 
@@ -330,12 +330,38 @@ def init_classify(
     if ctx._parent_logger is not None:
         ctx._parent_logger.emit_progress("classifying", f"Pre-classifying with {model}")
 
-    # Build category + cluster summary
+    # Build category + cluster summary with doc counts and sample questions
     cat_lines = []
     for code, cat in ctx.kb_overview_data.get("categories", {}).items():
         name = cat.get("name", code)
-        clusters = list(cat.get("clusters", {}).keys())[:10]
-        cat_lines.append(f"{code} — {name}: {', '.join(clusters)}")
+        doc_count = cat.get("document_count", 0)
+        # Get cluster counts from facets (richer than just names)
+        facet_clusters = {
+            c["value"]: c["count"]
+            for c in cat.get("facets", {}).get("clusters", [])
+        }
+        # Merge with cluster sample questions
+        cluster_samples = cat.get("clusters", {})
+        cluster_parts = []
+        # Show largest clusters first (most representative of category)
+        sorted_labels = sorted(
+            cluster_samples.keys(),
+            key=lambda l: facet_clusters.get(l, 0),
+            reverse=True,
+        )
+        for label in sorted_labels[:20]:
+            count = facet_clusters.get(label, "")
+            sample = (cluster_samples.get(label) or "")[:80]
+            entry = label
+            if count:
+                entry += f" ({count})"
+            if sample:
+                entry += f' — "{sample}"'
+            cluster_parts.append(entry)
+        cat_lines.append(
+            f"{code} — {name} [{doc_count} docs]\n"
+            + "\n".join(f"  · {c}" for c in cluster_parts)
+        )
     cat_info = "\n".join(cat_lines)
 
     prompt = [
@@ -357,6 +383,16 @@ def init_classify(
                 "CLUSTERS: Ghusl\n"
                 'FILTERS: {"parent_code": "PT", "cluster_label": "Ghusl"}\n'
                 "STRATEGY: Search for ghusl types and requirements\n\n"
+                'Q: "Is it permissible for a wife to refuse intimacy?"\n'
+                "CATEGORY: MF\n"
+                "CLUSTERS: Marital Rights and Duties, Intimacy in Marriage\n"
+                'FILTERS: {"parent_code": "MF"}\n'
+                "STRATEGY: Search marital rights, refusal, and intimate relations rulings\n\n"
+                'Q: "What are the different types of shirk?"\n'
+                "CATEGORY: BE\n"
+                "CLUSTERS: Shirk and Polytheism, Tawhid Fundamentals\n"
+                'FILTERS: {"parent_code": "BE"}\n'
+                "STRATEGY: Broad topic — search shirk types, major vs minor shirk\n\n"
                 "Now classify the question above.\n"
                 "Respond with exactly (no other text):\n"
                 "CATEGORY: <code>\n"

@@ -235,6 +235,7 @@ def search_multi(
             {
                 "type": "search_multi",
                 "query": query,
+                "filters": filters,
                 "collections": collections,
                 "top_k_per_collection": top_k_per_collection,
                 "final_top_k": final_top_k,

@@ -263,6 +263,8 @@ def draft_answer(
                 "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
                 "Fix flagged issues. Keep valid citations. Same format.\n"
                 "Return ONLY the revised answer — no preamble, no explanation of changes.\n"
+                "Do NOT say 'Here is the revised answer' or describe what you changed.\n"
+                "Do NOT include revision notes, commentary, or meta-text.\n"
                 "Start directly with ## Answer.\n",
             ]
             answer = ctx.llm_query("".join(rev_parts), model=model)

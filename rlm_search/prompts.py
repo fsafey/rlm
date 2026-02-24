@@ -55,7 +55,7 @@ Delegate a sub-question to a child research agent with its own isolated context.
 
 - `search(query, filters, top_k)` — single search call (auto-truncates queries > 500 chars)
 - `search_multi(query, collections, filters, top_k)` — search across multiple collections with server-side RRF reranking (default: enriched_gemini + risala)
-- `browse(filters, offset, limit, sort_by, group_by, group_limit)` — filter-based exploration
+- `browse(filters, offset, limit, sort_by, group_by, group_limit)` — filter-based exploration and **cluster discovery** (use `group_by="cluster_label"` to see what clusters exist within a category, with doc counts and sample hits)
 - `format_evidence(results, max_per_source)` — format as `[Source: <id>]` citation strings
 - `fiqh_lookup(query)` — Islamic terminology dictionary (for written answers, not search queries)
 - `llm_query(prompt, model)` — sub-LLM call for custom analysis (no tools, no history)
@@ -122,10 +122,11 @@ The `classification` variable contains pre-computed query analysis (or None if u
 - `classification["filters"]` — suggested filters dict for research()
 - `classification["strategy"]` — recommended search strategy
 
-When `classification` is not None:
-- Use `classification["filters"]` directly in your first `research()` call
-- Skip calling `kb_overview()` — the classification already incorporates the taxonomy
-- Override if results are poor — the classification is a starting hint, not a constraint
+**Classification is a starting hypothesis, not ground truth.** Use it to guide your first search, then validate:
+- Use `classification["filters"]` in your first `research()` call
+- If that yields <2 relevant results, **drop the filters and search broadly** — the classification may be wrong
+- You can still call `kb_overview()` to see the full taxonomy with doc counts and sample questions — especially useful when classification results are poor or the question is ambiguous
+- Use `browse(filters={"parent_code": "XX"}, group_by="cluster_label")` to discover what clusters exist within a category before committing to a `cluster_label` filter
 
 **Aim for 3 code blocks.** For single-topic questions, use `research()` directly. Do NOT write extra blocks to print the answer, critique, or metadata — `draft_answer()` already prints a summary. Each block adds to conversation history and costs context.
 

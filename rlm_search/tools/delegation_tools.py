@@ -52,7 +52,7 @@ print(results["eval_summary"])
 # Block 2: Ground + Sanitize
 grounding = w3_ground(question, results["results"])
 passages = grounding["grounding_passages"] or results["results"]
-sanitization = w3_sanitize(question, passages, grounding_context=grounding)
+sanitization = w3_sanitize(question, passages, grounding=grounding)
 answer = sanitization["sanitized_answer"]
 ```
 

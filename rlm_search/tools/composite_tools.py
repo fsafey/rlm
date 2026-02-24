@@ -150,24 +150,34 @@ def research(
                 seen[rid] = r
         deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
 
-        # Evaluate top results
-        ratings_map: dict = {}
-        try:
-            eval_out = evaluate_results(
-                ctx, eval_question, deduped[:15], top_n=15, model=eval_model
-            )
-            for rt in eval_out["ratings"]:
-                ratings_map[rt["id"]] = rt["rating"]
-        except Exception as e:
-            print(f"[research] WARNING: evaluation failed, returning unrated: {e}")
+        # Separate new vs already-rated results (cross-call dedup)
+        new_results = [r for r in deduped if r["id"] not in ctx.evaluated_ratings]
+        prior_rated = {rid for rid in ctx.evaluated_ratings if rid in seen}
+
+        # Evaluate ONLY new results — carry forward prior ratings
+        ratings_map: dict = dict(ctx.evaluated_ratings)  # start with prior ratings
+        if new_results:
+            try:
+                eval_out = evaluate_results(
+                    ctx, eval_question, new_results[:15], top_n=15, model=eval_model
+                )
+                for rt in eval_out["ratings"]:
+                    ratings_map[rt["id"]] = rt["rating"]
+                    ctx.evaluated_ratings[rt["id"]] = rt["rating"]  # persist for next call
+            except Exception as e:
+                print(f"[research] WARNING: evaluation failed, returning unrated: {e}")
+        elif prior_rated:
+            print(f"[research] all {len(deduped)} results already rated — skipping evaluation")
 
         # Filter OFF-TOPIC
         filtered = [r for r in deduped if ratings_map.get(r["id"], "UNRATED") != "OFF-TOPIC"]
 
-        relevant = sum(1 for v in ratings_map.values() if v == "RELEVANT")
-        partial = sum(1 for v in ratings_map.values() if v == "PARTIAL")
-        off_topic = sum(1 for v in ratings_map.values() if v == "OFF-TOPIC")
+        relevant = sum(1 for rid, v in ratings_map.items() if rid in seen and v == "RELEVANT")
+        partial = sum(1 for rid, v in ratings_map.items() if rid in seen and v == "PARTIAL")
+        off_topic = sum(1 for rid, v in ratings_map.items() if rid in seen and v == "OFF-TOPIC")
         summary = f"{relevant} relevant, {partial} partial, {off_topic} off-topic"
+        if new_results and prior_rated:
+            summary += f" ({len(new_results)} new, {len(prior_rated)} prior)"
 
         print(
             f"[research] {search_count} searches | {len(all_results)} raw > {len(deduped)} unique > {len(filtered)} filtered"
@@ -185,6 +195,8 @@ def research(
                 "search_count": search_count,
                 "raw": len(all_results),
                 "unique": len(deduped),
+                "new_evaluated": len(new_results),
+                "prior_rated": len(prior_rated),
                 "filtered": len(filtered),
                 "eval_summary": summary,
             }

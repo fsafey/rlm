@@ -81,34 +81,26 @@ Filter keys: `parent_code`, `cluster_label`, `primary_topic`, `subtopics`. Combi
 ## Workflow
 
 ```repl
-# Block 1: Orient + research (ALL sub-questions in ONE call)
+# Block 1: Orient + research using pre-classification
 overview = kb_overview()
-# Single topic:
-results = research(context, filters={"parent_code": "FN"}, extra_queries=[
-    {"query": "specific angle one", "filters": {"parent_code": "FN"}},
+# Use classification filters on first search (fall back to unfiltered if None)
+filters = classification["filters"] if classification else None
+results = research(context, filters=filters, extra_queries=[
+    {"query": "specific angle one", "filters": filters},
     {"query": "specific angle two"},
 ])
 progress = check_progress()  # Check if we have enough evidence
 # Multi-topic (pass a list — merged, deduped, evaluated together):
 # results = research([
-#     {"query": "sub-question 1", "filters": {"parent_code": "FN"}, "extra_queries": [
-#         {"query": "angle 1a"}, {"query": "angle 1b"},
-#     ]},
+#     {"query": "sub-question 1", "filters": classification["filters"] if classification else None,
+#      "extra_queries": [{"query": "angle 1a"}, {"query": "angle 1b"}]},
 #     {"query": "sub-question 2", "filters": {"parent_code": "MF"}},
-#     {"query": "sub-question 3"},
 # ])
 ```
 
 ```repl
-# Block 2: Read top results, optionally do more targeted research
-for r in results["results"][:8]:
-    print(f"[{r['id']}] {r['score']:.2f} Q: {r['question'][:200]}")
-    print(f"  A: {r['answer'][:400]}")
-```
-
-```repl
-# Block 3: Synthesize + finalize
-result = draft_answer(context, results["results"], instructions="address each scenario separately")
+# Block 2: Synthesize + finalize (skip reading results — draft_answer handles it)
+result = draft_answer(context, results["results"])
 answer = result["answer"]
 ```
 
@@ -128,7 +120,7 @@ The `classification` variable contains pre-computed query analysis (or None if u
 - You can still call `kb_overview()` to see the full taxonomy with doc counts and sample questions — especially useful when classification results are poor or the question is ambiguous
 - Use `browse(filters={"parent_code": "XX"}, group_by="cluster_label")` to discover what clusters exist within a category before committing to a `cluster_label` filter
 
-**Aim for 3 code blocks.** For single-topic questions, use `research()` directly. Do NOT write extra blocks to print the answer, critique, or metadata — `draft_answer()` already prints a summary. Each block adds to conversation history and costs context.
+**Aim for 2 code blocks.** Block 1: research + check_progress. Block 2: draft_answer + FINAL_VAR. Do NOT write extra blocks to read results, print metadata, or inspect the answer — `draft_answer()` handles critique and revision internally. Each block costs one iteration.
 
 ## When to Use rlm_query()
 For multi-part questions (e.g., "Is X halal in school A but not B?"), decompose:
@@ -173,9 +165,9 @@ def build_system_prompt(max_iterations: int = 15) -> str:
 
 You have **{max_iterations} iterations** total. Each ```repl``` block costs one iteration.
 
-- **Iterations 1-3**: Research — kb_overview(), research(), check_progress()
-- **Iterations 4-5**: Draft — draft_answer(), FINAL_VAR
-- **Iterations 6+**: Only if check_progress() says "continue"
+- **Iterations 1-2**: Research — research(context, filters=classification["filters"]), check_progress()
+- **Iterations 2-3**: Draft — draft_answer(), FINAL_VAR
+- **Iterations 4+**: Only if check_progress() says "continue" or evidence is insufficient
 
 **Call `check_progress()` after each `research()` call.** It returns:
 - A confidence score (0-100%) — proceed to draft_answer() when ≥60%

@@ -28,6 +28,7 @@ class ToolContext:
     # Mutable per-session state
     search_log: list = dataclasses.field(default_factory=list)
     source_registry: dict = dataclasses.field(default_factory=dict)
+    evaluated_ratings: dict = dataclasses.field(default_factory=dict)  # id -> rating from prior research() calls
     tool_calls: list = dataclasses.field(default_factory=list)
     current_parent_idx: int | None = None
 

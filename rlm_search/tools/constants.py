@@ -6,6 +6,13 @@ META_FIELDS = {
     "cluster_label",
     "primary_topic",
     "subtopics",
+    # W3 processors need these for passage formatting and chapter derivation
+    "ruling",
+    "ruling_number",
+    "chapter",
+    "risala_chapter",
+    "source_collection",
+    "heading",
 }
 
 MAX_QUERY_LEN = 500

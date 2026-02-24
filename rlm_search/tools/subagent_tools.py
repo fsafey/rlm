@@ -11,6 +11,40 @@ if TYPE_CHECKING:
     from rlm_search.tools.context import ToolContext
 
 
+def _parse_rating_line(line: str) -> tuple[str, str, int] | None:
+    """Parse a single rating line like '[1234] RELEVANT CONFIDENCE:4'.
+
+    Returns (id, rating, confidence) or None if unparseable.
+    """
+    line = line.strip()
+    if not line or not line.startswith("["):
+        return None
+    # Extract ID between brackets
+    bracket_end = line.find("]")
+    if bracket_end < 0:
+        return None
+    rid = line[1:bracket_end].strip()
+    rest = line[bracket_end + 1:].strip().upper()
+    # Parse rating
+    if "OFF-TOPIC" in rest or "OFF_TOPIC" in rest:
+        rating = "OFF-TOPIC"
+    elif "PARTIAL" in rest:
+        rating = "PARTIAL"
+    elif "RELEVANT" in rest:
+        rating = "RELEVANT"
+    else:
+        return None
+    # Parse confidence
+    confidence = 3
+    if "CONFIDENCE:" in rest:
+        try:
+            conf_str = rest.split("CONFIDENCE:")[1].strip()[:1]
+            confidence = max(1, min(5, int(conf_str)))
+        except (ValueError, IndexError):
+            confidence = 3
+    return rid, rating, confidence
+
+
 def evaluate_results(
     ctx: ToolContext,
     question: str,
@@ -18,10 +52,10 @@ def evaluate_results(
     top_n: int = 5,
     model: str | None = None,
 ) -> dict:
-    """Sub-agent: evaluate search result relevance with per-result confidence scores.
+    """Sub-agent: evaluate search result relevance in a single batched prompt.
 
-    Call after ``search()`` to check whether results match the question
-    before spending a turn examining them in detail.
+    Sends all results in one LLM call for consistent cross-result calibration.
+    Falls back to per-result calls if batch parsing fails.
 
     Args:
         ctx: Per-session tool context.
@@ -47,56 +81,104 @@ def evaluate_results(
         {"question": question[:100], "top_n": top_n},
         parent_idx=ctx.current_parent_idx,
     ) as tc:
-        prompts = []
-        ids: list[str] = []
-        for r in results[:top_n]:
+        to_eval = results[:top_n]
+        ids = [str(r.get("id", "?")) for r in to_eval]
+
+        # Build single batched prompt with all results
+        result_blocks = []
+        for r in to_eval:
             rid = str(r.get("id", "?"))
-            ids.append(rid)
             score = r.get("score", 0)
             q = (r.get("question", "") or "")[:300]
             a = (r.get("answer", "") or "")[:1000]
-            prompt = (
-                f"Evaluate this search result for the question:\n"
-                f'"{question}"\n\n'
-                f"Result [{rid}] score={score:.2f}\n"
+            result_blocks.append(
+                f"[{rid}] score={score:.2f}\n"
                 f"Q: {q}\n"
-                f"A: {a}\n\n"
-                f"Respond with exactly one line: RELEVANT|PARTIAL|OFF-TOPIC followed by CONFIDENCE:<1-5>\n"
-                f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
-                f"PARTIAL = tangentially related but does not address the core issue\n"
-                f"OFF-TOPIC = about a completely different subject"
+                f"A: {a}"
             )
-            prompts.append(prompt)
 
-        responses = ctx.llm_query_batched(prompts, model=model)
+        batch_prompt = (
+            f"Evaluate these search results for relevance to the question:\n"
+            f'"{question}"\n\n'
+            + "\n\n".join(result_blocks)
+            + "\n\n"
+            f"For each result, respond with exactly one line:\n"
+            f"[<id>] RELEVANT|PARTIAL|OFF-TOPIC CONFIDENCE:<1-5>\n\n"
+            f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
+            f"PARTIAL = tangentially related but does not address the core issue\n"
+            f"OFF-TOPIC = about a completely different subject\n\n"
+            f"Respond with {len(to_eval)} lines, one per result, in the same order."
+        )
+
+        raw = ctx.llm_query(batch_prompt, model=model)
+
+        # Parse batch response line by line
         ratings = []
-        raw_parts = []
-        for i, resp in enumerate(responses):
-            rid = ids[i] if i < len(ids) else "?"
-            raw_parts.append(resp)
-            if resp.strip().startswith("Error:"):
-                ratings.append({"id": rid, "rating": "UNKNOWN", "confidence": 0})
-                continue
-            upper = resp.strip().upper()
-            if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
-                rating = "OFF-TOPIC"
-            elif "PARTIAL" in upper:
-                rating = "PARTIAL"
-            elif "RELEVANT" in upper:
-                rating = "RELEVANT"
-            else:
-                rating = "UNKNOWN"
-            confidence = 3
-            if "CONFIDENCE:" in upper:
-                try:
-                    conf_str = upper.split("CONFIDENCE:")[1].strip()[:1]
-                    confidence = int(conf_str)
-                    confidence = max(1, min(5, confidence))
-                except (ValueError, IndexError):
-                    confidence = 3
-            ratings.append({"id": rid, "rating": rating, "confidence": confidence})
+        parsed_ids: set[str] = set()
+        if not raw.strip().startswith("Error:"):
+            for line in raw.strip().split("\n"):
+                parsed = _parse_rating_line(line)
+                if parsed is not None:
+                    rid, rating, confidence = parsed
+                    ratings.append({"id": rid, "rating": rating, "confidence": confidence})
+                    parsed_ids.add(rid)
 
-        raw = "\n---\n".join(raw_parts)
+        # Check if we got ratings for enough results (>50% threshold)
+        if len(ratings) < len(to_eval) * 0.5:
+            # Fallback: per-result prompts via batched call
+            print(
+                f"[evaluate_results] batch parse got {len(ratings)}/{len(to_eval)}, "
+                f"falling back to per-result"
+            )
+            prompts = []
+            for r in to_eval:
+                rid = str(r.get("id", "?"))
+                score = r.get("score", 0)
+                q = (r.get("question", "") or "")[:300]
+                a = (r.get("answer", "") or "")[:1000]
+                prompts.append(
+                    f"Evaluate this search result for the question:\n"
+                    f'"{question}"\n\n'
+                    f"Result [{rid}] score={score:.2f}\n"
+                    f"Q: {q}\nA: {a}\n\n"
+                    f"Respond with exactly one line: RELEVANT|PARTIAL|OFF-TOPIC followed by CONFIDENCE:<1-5>\n"
+                    f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
+                    f"PARTIAL = tangentially related but does not address the core issue\n"
+                    f"OFF-TOPIC = about a completely different subject"
+                )
+            responses = ctx.llm_query_batched(prompts, model=model)
+            ratings = []
+            raw_parts = [raw, "---FALLBACK---"]
+            for i, resp in enumerate(responses):
+                rid = ids[i] if i < len(ids) else "?"
+                raw_parts.append(resp)
+                if resp.strip().startswith("Error:"):
+                    ratings.append({"id": rid, "rating": "UNKNOWN", "confidence": 0})
+                    continue
+                upper = resp.strip().upper()
+                if "OFF-TOPIC" in upper or "OFF_TOPIC" in upper:
+                    rating = "OFF-TOPIC"
+                elif "PARTIAL" in upper:
+                    rating = "PARTIAL"
+                elif "RELEVANT" in upper:
+                    rating = "RELEVANT"
+                else:
+                    rating = "UNKNOWN"
+                confidence = 3
+                if "CONFIDENCE:" in upper:
+                    try:
+                        conf_str = upper.split("CONFIDENCE:")[1].strip()[:1]
+                        confidence = max(1, min(5, int(conf_str)))
+                    except (ValueError, IndexError):
+                        confidence = 3
+                ratings.append({"id": rid, "rating": rating, "confidence": confidence})
+            raw = "\n---\n".join(raw_parts)
+        else:
+            # Fill in any missing IDs from the batch parse as UNKNOWN
+            for rid in ids:
+                if rid not in parsed_ids:
+                    ratings.append({"id": rid, "rating": "UNKNOWN", "confidence": 0})
+
         relevant_count = sum(1 for r in ratings if r["rating"] == "RELEVANT")
         partial_count = sum(1 for r in ratings if r["rating"] == "PARTIAL")
         off_topic_count = sum(1 for r in ratings if r["rating"] == "OFF-TOPIC")
@@ -232,10 +314,10 @@ def batched_critique(
     draft: str,
     model: str | None = None,
 ) -> tuple[str, bool]:
-    """Dual-reviewer critique via ``llm_query_batched``.
+    """Unified single-pass critique (content + citations in one LLM call).
 
     Returns:
-        Tuple of (combined_verdict, passed).
+        Tuple of (verdict_text, passed).
     """
     with tool_call_tracker(
         ctx,
@@ -245,55 +327,40 @@ def batched_critique(
     ) as tc:
         if len(draft) > MAX_DRAFT_LEN:
             draft = draft[:MAX_DRAFT_LEN]
-        content_prompt = (
-            f"You are a content expert. Review this draft answer to the question:\n"
+        prompt = (
+            f"Review this draft answer to the question:\n"
             f'"{question}"\n\n'
             f"Draft:\n{draft}\n\n"
-            f"Check:\n"
+            f"Check BOTH content and citations:\n\n"
+            f"CONTENT:\n"
             f"1. Does it answer the actual question asked?\n"
             f"2. Are there unsupported claims or fabricated rulings?\n"
             f"3. Is anything important missing?\n\n"
-            f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
-        )
-        citation_prompt = (
-            f"You are a citation auditor. Review this draft answer to the question:\n"
-            f'"{question}"\n\n'
-            f"Draft:\n{draft}\n\n"
-            f"Check:\n"
+            f"CITATIONS:\n"
             f"1. Are [Source: <id>] citations present for factual claims?\n"
             f"2. Are any cited IDs missing or fabricated?\n"
             f"3. Are there key claims without any citation?\n\n"
-            f"Respond: PASS or FAIL, then brief feedback (under 100 words)."
+            f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
+            f"If ANY check fails, the overall verdict is FAIL."
         )
-        responses = ctx.llm_query_batched([content_prompt, citation_prompt], model=model)
-        content_verdict = responses[0] if len(responses) > 0 else "Error: no response"
-        citation_verdict = responses[1] if len(responses) > 1 else "Error: no response"
-        content_passed = content_verdict.strip().strip("*").upper().startswith("PASS")
-        citation_passed = citation_verdict.strip().strip("*").upper().startswith("PASS")
-        passed = content_passed and citation_passed
-        failed_parts = []
-        if not content_passed:
-            failed_parts.append("content")
-        if not citation_passed:
-            failed_parts.append("citations")
+        verdict = ctx.llm_query(prompt, model=model)
+        passed = verdict.strip().strip("*").upper().startswith("PASS")
         verdict_str = "PASS" if passed else "FAIL"
-        failed_str = f" (failed: {', '.join(failed_parts)})" if failed_parts else ""
+        failed_str = "" if passed else " (failed: unified review)"
         print(f"[critique_answer] dual-review verdict={verdict_str}{failed_str}")
-        combined = f"CONTENT: {content_verdict}\n\nCITATIONS: {citation_verdict}"
-        content_feedback = content_verdict.split("\n", 1)[1].strip() if "\n" in content_verdict else ""
-        citation_feedback = citation_verdict.split("\n", 1)[1].strip() if "\n" in citation_verdict else ""
+        feedback = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
         tc.set_summary({
             "verdict": verdict_str,
-            "content_passed": content_passed,
-            "citation_passed": citation_passed,
-            "content_feedback": content_feedback[:150],
-            "citation_feedback": citation_feedback[:150],
-            "failed": [
-                *([] if content_passed else ["content"]),
-                *([] if citation_passed else ["citations"]),
-            ],
+            "content_passed": passed,
+            "citation_passed": passed,
+            "feedback": feedback[:200],
+            # Backward compat for frontend CritiqueDetail renderer
+            "reason": feedback[:200],
+            "content_feedback": feedback[:150],
+            "citation_feedback": feedback[:150],
+            "failed": [] if passed else ["unified"],
         })
-        return combined, passed
+        return verdict, passed
 
 
 def init_classify(

@@ -1077,6 +1077,225 @@ class TestEvaluateResults:
         assert result["ratings"][0]["rating"] == "RELEVANT"
 
 
+class TestParseRatingLine:
+    """Unit tests for _parse_rating_line helper."""
+
+    def test_standard_format(self):
+        from rlm_search.tools.subagent_tools import _parse_rating_line
+
+        assert _parse_rating_line("[q1] RELEVANT CONFIDENCE:4") == ("q1", "RELEVANT", 4)
+        assert _parse_rating_line("[q2] PARTIAL CONFIDENCE:2") == ("q2", "PARTIAL", 2)
+        assert _parse_rating_line("[q3] OFF-TOPIC CONFIDENCE:5") == ("q3", "OFF-TOPIC", 5)
+
+    def test_missing_confidence(self):
+        from rlm_search.tools.subagent_tools import _parse_rating_line
+
+        result = _parse_rating_line("[q1] RELEVANT")
+        assert result == ("q1", "RELEVANT", 3)  # default confidence
+
+    def test_unparseable_lines(self):
+        from rlm_search.tools.subagent_tools import _parse_rating_line
+
+        assert _parse_rating_line("") is None
+        assert _parse_rating_line("Here are my evaluations:") is None
+        assert _parse_rating_line("q1 RELEVANT CONFIDENCE:4") is None  # no brackets
+
+    def test_off_topic_underscore_variant(self):
+        from rlm_search.tools.subagent_tools import _parse_rating_line
+
+        result = _parse_rating_line("[q1] OFF_TOPIC CONFIDENCE:3")
+        assert result == ("q1", "OFF-TOPIC", 3)
+
+    def test_extra_text_after_rating(self):
+        from rlm_search.tools.subagent_tools import _parse_rating_line
+
+        result = _parse_rating_line("[q1] RELEVANT (directly answers the question) CONFIDENCE:4")
+        assert result == ("q1", "RELEVANT", 4)
+
+
+class TestBatchFirstEvaluateResults:
+    """Tests for the batch-first (single prompt) evaluate_results path."""
+
+    def test_batch_first_happy_path(self):
+        """When llm_query returns well-formatted batch response, llm_query_batched is NOT called."""
+        ns = _make_sub_agent_ns()
+        batch_calls = []
+
+        def mock_llm(prompt, model=None):
+            return "[q1] RELEVANT CONFIDENCE:4\n[q2] PARTIAL CONFIDENCE:3\n[q3] OFF-TOPIC CONFIDENCE:2"
+
+        def mock_batched(prompts, model=None):
+            batch_calls.append(len(prompts))
+            return ["RELEVANT CONFIDENCE:4"] * len(prompts)
+
+        ns["_ctx"].llm_query = mock_llm
+        ns["_ctx"].llm_query_batched = mock_batched
+
+        hits = [
+            {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
+            {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
+            {"id": "q3", "score": 0.5, "question": "Q3", "answer": "A3"},
+        ]
+        result = ns["evaluate_results"]("test question", hits, top_n=3)
+
+        assert len(batch_calls) == 0, "llm_query_batched should NOT be called for batch-first path"
+        assert len(result["ratings"]) == 3
+        ratings_by_id = {r["id"]: r for r in result["ratings"]}
+        assert ratings_by_id["q1"]["rating"] == "RELEVANT"
+        assert ratings_by_id["q2"]["rating"] == "PARTIAL"
+        assert ratings_by_id["q3"]["rating"] == "OFF-TOPIC"
+
+    def test_batch_first_with_preamble(self):
+        """Batch parse handles LLM preamble text before rating lines."""
+        ns = _make_sub_agent_ns()
+
+        def mock_llm(prompt, model=None):
+            return "Here are my evaluations:\n\n[q1] RELEVANT CONFIDENCE:4\n[q2] PARTIAL CONFIDENCE:3"
+
+        ns["_ctx"].llm_query = mock_llm
+
+        hits = [
+            {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
+            {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
+        ]
+        result = ns["evaluate_results"]("test question", hits, top_n=2)
+
+        assert len(result["ratings"]) == 2
+        ratings_by_id = {r["id"]: r for r in result["ratings"]}
+        assert ratings_by_id["q1"]["rating"] == "RELEVANT"
+        assert ratings_by_id["q2"]["rating"] == "PARTIAL"
+
+    def test_batch_first_fallback_on_bad_response(self, capsys):
+        """When batch parse gets <50% of results, falls back to per-result calls."""
+        ns = _make_sub_agent_ns()
+        batch_calls = []
+
+        def mock_llm(prompt, model=None):
+            return "I cannot evaluate these results."  # no parseable lines
+
+        def mock_batched(prompts, model=None):
+            batch_calls.append(len(prompts))
+            return ["RELEVANT CONFIDENCE:4"] * len(prompts)
+
+        ns["_ctx"].llm_query = mock_llm
+        ns["_ctx"].llm_query_batched = mock_batched
+
+        hits = [
+            {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
+            {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
+        ]
+        result = ns["evaluate_results"]("test question", hits, top_n=2)
+
+        assert len(batch_calls) == 1, "llm_query_batched should be called as fallback"
+        assert batch_calls[0] == 2
+        captured = capsys.readouterr()
+        assert "falling back to per-result" in captured.out
+
+    def test_batch_first_missing_ids_filled_as_unknown(self):
+        """IDs not parsed from batch response get UNKNOWN rating."""
+        ns = _make_sub_agent_ns()
+
+        def mock_llm(prompt, model=None):
+            return "[q1] RELEVANT CONFIDENCE:4"  # only 1 of 2
+
+        ns["_ctx"].llm_query = mock_llm
+
+        hits = [
+            {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
+            {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
+        ]
+        result = ns["evaluate_results"]("test question", hits, top_n=2)
+
+        # 1/2 = 50% which meets the threshold (>= 50%), so batch path is used
+        ratings_by_id = {r["id"]: r for r in result["ratings"]}
+        assert ratings_by_id["q1"]["rating"] == "RELEVANT"
+        assert ratings_by_id["q2"]["rating"] == "UNKNOWN"
+
+
+class TestCrossCallDedup:
+    """Tests for cross-call deduplication in research()."""
+
+    def test_second_research_skips_already_rated(self, capsys):
+        """When research() is called twice with overlapping results, evaluation is skipped for prior IDs."""
+        from unittest.mock import MagicMock, patch
+
+        ns = _make_sub_agent_ns()
+
+        # Mock search_multi to return controlled hits
+        hit_sets = iter([
+            # First call returns q1, q2
+            [
+                {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
+                {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
+            ],
+            # Second call returns q2 (overlap), q3 (new)
+            [
+                {"id": "q2", "score": 0.75, "question": "Q2", "answer": "A2"},
+                {"id": "q3", "score": 0.6, "question": "Q3", "answer": "A3"},
+            ],
+        ])
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+
+        def mock_post(*args, **kwargs):
+            try:
+                hits = next(hit_sets)
+            except StopIteration:
+                hits = []
+            mock_resp.json.return_value = {"hits": hits, "total": len(hits)}
+            return mock_resp
+
+        eval_calls = []
+
+        def mock_llm(prompt, model=None):
+            """Track evaluate_results batch prompts by checking for the batch format."""
+            if "For each result" in prompt:
+                eval_calls.append(prompt)
+            # Return ratings for any IDs found in the prompt
+            lines = []
+            for rid in ["q1", "q2", "q3"]:
+                if f"[{rid}]" in prompt:
+                    lines.append(f"[{rid}] RELEVANT CONFIDENCE:4")
+            return "\n".join(lines) if lines else "PASS"
+
+        ns["_ctx"].llm_query = mock_llm
+
+        with patch("rlm_search.tools.api_tools.requests.post", side_effect=mock_post):
+            # First research call — should evaluate q1, q2
+            r1 = ns["research"]("question 1")
+            assert len(eval_calls) == 1
+            assert "[q1]" in eval_calls[0]
+            assert "[q2]" in eval_calls[0]
+
+            # Second research call — should only evaluate q3 (q2 already rated)
+            r2 = ns["research"]("question 2")
+            assert len(eval_calls) == 2
+            assert "[q3]" in eval_calls[1]
+            assert "[q2]" not in eval_calls[1]  # q2 was already rated
+
+    def test_evaluated_ratings_persist_on_context(self):
+        """evaluated_ratings accumulates across research() calls."""
+        from unittest.mock import MagicMock, patch
+
+        ns = _make_sub_agent_ns()
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "hits": [{"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"}],
+            "total": 1,
+        }
+
+        ns["_ctx"].llm_query = lambda prompt, model=None: "[q1] RELEVANT CONFIDENCE:4"
+
+        with patch("rlm_search.tools.api_tools.requests.post", return_value=mock_resp):
+            ns["research"]("question")
+
+        assert "q1" in ns["_ctx"].evaluated_ratings
+        assert ns["_ctx"].evaluated_ratings["q1"] == "RELEVANT"
+
+
 class TestReformulate:
     """Tests for the reformulate sub-agent function."""
 
@@ -1553,15 +1772,15 @@ class TestDraftAnswer:
 
     def test_pass_on_first_try(self, capsys):
         ns = _make_sub_agent_ns()
-        calls = []
-        ns["_ctx"].llm_query = lambda prompt, model=None: (
-            calls.append(prompt),
-            "## Answer\nTest answer [Source: 1]\n## Evidence\n- [Source: 1]\n## Confidence\nHigh",
-        )[1]
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
-            "PASS — content ok",
-            "PASS — citations ok",
-        ]
+        call_count = {"n": 0}
+
+        def mock_llm(prompt, model=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # synthesis
+                return "## Answer\nTest answer [Source: 1]\n## Evidence\n- [Source: 1]\n## Confidence\nHigh"
+            return "PASS — content and citations ok"  # unified critique
+
+        ns["_ctx"].llm_query = mock_llm
 
         results = [
             {"id": "1", "score": 0.9, "question": "Q", "answer": "A"},
@@ -1580,27 +1799,22 @@ class TestDraftAnswer:
 
         def mock_llm(prompt, model=None):
             call_count["n"] += 1
-            if call_count["n"] == 1:
+            if call_count["n"] == 1:  # synthesis
                 return "Bad draft"
-            return "## Answer\nRevised [Source: 1]\n## Evidence\n## Confidence\nHigh"
+            if call_count["n"] == 2:  # first critique -> FAIL
+                return "FAIL — missing citations and sources"
+            if call_count["n"] == 3:  # revision
+                return "## Answer\nRevised [Source: 1]\n## Evidence\n## Confidence\nHigh"
+            return "PASS — fixed"  # second critique -> PASS
 
         ns["_ctx"].llm_query = mock_llm
-        critique_count = {"n": 0}
-
-        def mock_batched(prompts, model=None):
-            critique_count["n"] += 1
-            if critique_count["n"] == 1:
-                return ["FAIL — missing citations", "FAIL — no sources cited"]
-            return ["PASS — fixed", "PASS — citations ok"]
-
-        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         out = ns["draft_answer"]("question", results)
 
         assert out["revised"] is True
         assert out["passed"] is True
-        assert call_count["n"] == 2  # synthesis + revision
+        assert call_count["n"] == 4  # synthesis + critique + revision + critique
         captured = capsys.readouterr()
         assert "(revised)" in captured.out
 
@@ -1616,95 +1830,69 @@ class TestDraftAnswer:
     def test_instructions_included_in_prompt(self):
         ns = _make_sub_agent_ns()
         captured_prompt = []
-        ns["_ctx"].llm_query = lambda prompt, model=None: (
-            captured_prompt.append(prompt),
-            "## Answer\nTest [Source: 1]",
-        )[1]
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: ["PASS", "PASS"]
+        call_count = {"n": 0}
+
+        def mock_llm(prompt, model=None):
+            call_count["n"] += 1
+            captured_prompt.append(prompt)
+            if call_count["n"] == 1:  # synthesis
+                return "## Answer\nTest [Source: 1]"
+            return "PASS — ok"  # critique
+
+        ns["_ctx"].llm_query = mock_llm
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results, instructions="address all 4 scenarios")
 
         assert "address all 4 scenarios" in captured_prompt[0]
 
-    def test_dual_reviewer_both_pass(self, capsys):
-        """Both reviewers PASS -> overall PASS, critique has CONTENT + CITATIONS."""
+    def test_unified_critique_pass(self, capsys):
+        """Unified critique PASS -> overall PASS."""
         ns = _make_sub_agent_ns()
-        ns["_ctx"].llm_query = lambda prompt, model=None: "## Answer\nTest [Source: 1]"
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
-            "PASS — content ok",
-            "PASS — citations ok",
-        ]
+        call_count = {"n": 0}
+
+        def mock_llm(prompt, model=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # synthesis
+                return "## Answer\nTest [Source: 1]"
+            return "PASS — content and citations ok"  # critique
+
+        ns["_ctx"].llm_query = mock_llm
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         out = ns["draft_answer"]("question", results)
 
         assert out["passed"] is True
-        assert "CONTENT:" in out["critique"]
-        assert "CITATIONS:" in out["critique"]
         captured = capsys.readouterr()
         assert "dual-review verdict=PASS" in captured.out
 
-    def test_dual_reviewer_content_fails(self, capsys):
-        """Content FAIL triggers revision."""
+    def test_unified_critique_fail_triggers_revision(self, capsys):
+        """Unified critique FAIL triggers revision."""
         ns = _make_sub_agent_ns()
         call_count = {"n": 0}
 
         def mock_llm(prompt, model=None):
             call_count["n"] += 1
-            if call_count["n"] == 1:
+            if call_count["n"] == 1:  # synthesis
                 return "Bad draft"
-            return "## Answer\nRevised [Source: 1]"
+            if call_count["n"] == 2:  # first critique -> FAIL
+                return "FAIL — missing citations for key claims"
+            if call_count["n"] == 3:  # revision
+                return "## Answer\nRevised [Source: 1]"
+            return "PASS — fixed"  # second critique -> PASS
 
         ns["_ctx"].llm_query = mock_llm
-        batch_count = {"n": 0}
-
-        def mock_batched(prompts, model=None):
-            batch_count["n"] += 1
-            if batch_count["n"] == 1:
-                return ["FAIL — doesn't answer the question", "PASS — citations ok"]
-            return ["PASS — fixed", "PASS — citations ok"]
-
-        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         out = ns["draft_answer"]("question", results)
 
         assert out["revised"] is True
+        assert out["passed"] is True
         captured = capsys.readouterr()
-        assert "failed: content" in captured.out
+        assert "failed: unified review" in captured.out
 
-    def test_dual_reviewer_citation_fails(self, capsys):
-        """Citation FAIL triggers revision."""
-        ns = _make_sub_agent_ns()
-        call_count = {"n": 0}
-
-        def mock_llm(prompt, model=None):
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return "Bad draft"
-            return "## Answer\nRevised [Source: 1]"
-
-        ns["_ctx"].llm_query = mock_llm
-        batch_count = {"n": 0}
-
-        def mock_batched(prompts, model=None):
-            batch_count["n"] += 1
-            if batch_count["n"] == 1:
-                return ["PASS — content ok", "FAIL — missing [Source: X] for key claim"]
-            return ["PASS — fixed", "PASS — citations ok"]
-
-        ns["_ctx"].llm_query_batched = mock_batched
-
-        results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
-        out = ns["draft_answer"]("question", results)
-
-        assert out["revised"] is True
-        captured = capsys.readouterr()
-        assert "failed: citations" in captured.out
-
-    def test_dual_reviewer_revision_feedback_combined(self):
-        """Revision prompt includes both reviewers' feedback."""
+    def test_unified_critique_feedback_in_revision(self):
+        """Revision prompt includes the unified critique feedback."""
         ns = _make_sub_agent_ns()
         captured_prompts = []
         call_count = {"n": 0}
@@ -1712,27 +1900,21 @@ class TestDraftAnswer:
         def mock_llm(prompt, model=None):
             call_count["n"] += 1
             captured_prompts.append(prompt)
-            if call_count["n"] == 1:
+            if call_count["n"] == 1:  # synthesis
                 return "Bad draft"
-            return "## Answer\nRevised [Source: 1]"
+            if call_count["n"] == 2:  # first critique -> FAIL
+                return "FAIL — missing citations for key claims about riba"
+            if call_count["n"] == 3:  # revision
+                return "## Answer\nRevised [Source: 1]"
+            return "PASS"  # second critique -> PASS
 
         ns["_ctx"].llm_query = mock_llm
-        batch_count = {"n": 0}
-
-        def mock_batched(prompts, model=None):
-            batch_count["n"] += 1
-            if batch_count["n"] == 1:
-                return ["FAIL — content incomplete", "FAIL — missing citation for claim X"]
-            return ["PASS", "PASS"]
-
-        ns["_ctx"].llm_query_batched = mock_batched
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results)
 
-        revision_prompt = captured_prompts[1]
-        assert "CONTENT:" in revision_prompt
-        assert "CITATIONS:" in revision_prompt
+        revision_prompt = captured_prompts[2]  # 3rd call is revision
+        assert "missing citations" in revision_prompt
 
 
 class TestToolCallsTracking:
@@ -1852,13 +2034,15 @@ class TestToolCallsTracking:
     def test_draft_answer_records_parent_children(self):
         """draft_answer() has batched_critique as child."""
         ns = self._exec_ns()
-        ns["_ctx"].llm_query = lambda prompt, model=None: (
-            "## Answer\nTest [Source: 1]\n## Evidence\n## Confidence\nHigh"
-        )
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
-            "PASS — good",
-            "PASS — citations ok",
-        ]
+        call_count = {"n": 0}
+
+        def mock_llm(prompt, model=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # synthesis
+                return "## Answer\nTest [Source: 1]\n## Evidence\n## Confidence\nHigh"
+            return "PASS — good"  # unified critique
+
+        ns["_ctx"].llm_query = mock_llm
 
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results)
@@ -1872,21 +2056,23 @@ class TestToolCallsTracking:
         assert "batched_critique" in child_tools
 
     def test_batched_critique_tracked(self):
-        """_batched_critique records tool call with dual-verdict summary."""
+        """batched_critique records tool call with unified verdict summary."""
         ns = self._exec_ns()
-        ns["_ctx"].llm_query = lambda prompt, model=None: "## Answer\nTest [Source: 1]"
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: [
-            "PASS — content ok",
-            "FAIL — missing citation",
-        ]
+        call_count = {"n": 0}
+
+        def mock_llm(prompt, model=None):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # synthesis
+                return "## Answer\nTest [Source: 1]"
+            return "FAIL — missing citation for key claim"  # unified critique -> FAIL
+
+        ns["_ctx"].llm_query = mock_llm
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results)
 
         critique_entries = [tc for tc in ns["tool_calls"] if tc["tool"] == "batched_critique"]
         assert len(critique_entries) >= 1
         tc = critique_entries[0]
-        assert tc["result_summary"]["content_passed"] is True
-        assert tc["result_summary"]["citation_passed"] is False
         assert tc["result_summary"]["verdict"] == "FAIL"
         assert tc["duration_ms"] >= 0
 
@@ -2111,9 +2297,9 @@ class TestCheckProgress:
         )
 
         result = ns["check_progress"]()
-        # evidence: min(2/3,1)*35=23.3, quality: min(0.4/0.5,1)*25=20, breadth: min(2/2,1)*10=10,
-        # diversity: min(1/2,1)*10=5, draft=0 → total ~58
-        assert 30 <= result["confidence"] < 60  # moderate range
+        # With partial_boost: evidence: min((2+2*0.5)/3,1)*35=35, quality: min(0.4/0.5,1)*25=20,
+        # breadth: min(2/2,1)*10=10, diversity: min(1/2,1)*10=5, draft=0 → total=70
+        assert 60 <= result["confidence"] <= 80  # boosted by partial_boost
 
     def test_strategy_suggests_unexplored_category(self):
         """Only FN searched, KB has PT with 2500 docs → suggestion mentions PT."""

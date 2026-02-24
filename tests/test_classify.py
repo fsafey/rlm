@@ -238,3 +238,53 @@ class TestInitClassifyTwoPhase:
         init_classify(ctx, "test question", model="test-model")
 
         assert ctx.classification is None
+
+
+from rlm_search.tools.progress_tools import _suggest_strategy
+
+
+class TestSuggestStrategyWithBrowseClusters:
+    """Verify _suggest_strategy works with browse-enhanced classification."""
+
+    def _make_ctx_with_classification(self, category, clusters_str, kb_data):
+        ctx = ToolContext(api_url="http://test:8091")
+        ctx.kb_overview_data = kb_data
+        ctx.classification = {
+            "category": category,
+            "clusters": clusters_str,
+            "filters": {"parent_code": category},
+            "strategy": "Browse-matched clusters",
+        }
+        ctx.search_log = []
+        return ctx
+
+    def test_suggests_first_unsearched_classified_cluster(self):
+        kb = {
+            "categories": {
+                "FN": {
+                    "name": "Finance & Transactions",
+                    "document_count": 1891,
+                    "facets": {"clusters": [{"value": "Banking Riba Operations", "count": 150}]},
+                },
+            }
+        }
+        ctx = self._make_ctx_with_classification("FN", "Banking Riba Operations, Riba in Loan Contracts", kb)
+        result = _suggest_strategy(ctx, set())
+        assert "Banking Riba Operations" in result
+        assert "research(query" in result
+
+    def test_returns_strategy_when_all_clusters_explored(self):
+        kb = {
+            "categories": {
+                "FN": {
+                    "name": "Finance & Transactions",
+                    "document_count": 1891,
+                    "facets": {"clusters": []},
+                },
+            }
+        }
+        ctx = self._make_ctx_with_classification("FN", "Banking Riba Operations", kb)
+        # Mark the cluster as already searched
+        ctx.search_log = [{"type": "search_multi", "query": "test", "filters": {"cluster_label": "Banking Riba Operations"}}]
+        result = _suggest_strategy(ctx, set())
+        assert "Browse-matched clusters" in result

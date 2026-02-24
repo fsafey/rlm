@@ -25,7 +25,7 @@ def _parse_rating_line(line: str) -> tuple[str, str, int] | None:
     if bracket_end < 0:
         return None
     rid = line[1:bracket_end].strip()
-    rest = line[bracket_end + 1:].strip().upper()
+    rest = line[bracket_end + 1 :].strip().upper()
     # Parse rating
     if "OFF-TOPIC" in rest or "OFF_TOPIC" in rest:
         rating = "OFF-TOPIC"
@@ -92,17 +92,11 @@ def evaluate_results(
             score = r.get("score", 0)
             q = (r.get("question", "") or "")[:300]
             a = (r.get("answer", "") or "")[:1000]
-            result_blocks.append(
-                f"[{rid}] score={score:.2f}\n"
-                f"Q: {q}\n"
-                f"A: {a}"
-            )
+            result_blocks.append(f"[{rid}] score={score:.2f}\nQ: {q}\nA: {a}")
 
         batch_prompt = (
             f"Evaluate these search results for relevance to the question:\n"
-            f'"{question}"\n\n'
-            + "\n\n".join(result_blocks)
-            + "\n\n"
+            f'"{question}"\n\n' + "\n\n".join(result_blocks) + "\n\n"
             f"For each result, respond with exactly one line:\n"
             f"[<id>] RELEVANT|PARTIAL|OFF-TOPIC CONFIDENCE:<1-5>\n\n"
             f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
@@ -197,20 +191,22 @@ def evaluate_results(
             summary += f", {unknown_count} unknown"
         print(f"[evaluate_results] {len(ratings)} rated: {summary}")
         print(f"[evaluate_results] suggestion: {suggestion}")
-        tc.set_summary({
-            "num_rated": len(ratings),
-            "relevant": relevant_count,
-            "partial": partial_count,
-            "off_topic": off_topic_count,
-            "ratings": [
-                {
-                    "id": r.get("id", ""),
-                    "rating": r.get("rating", "UNKNOWN"),
-                    "confidence": r.get("confidence", 0),
-                }
-                for r in ratings
-            ],
-        })
+        tc.set_summary(
+            {
+                "num_rated": len(ratings),
+                "relevant": relevant_count,
+                "partial": partial_count,
+                "off_topic": off_topic_count,
+                "ratings": [
+                    {
+                        "id": r.get("id", ""),
+                        "rating": r.get("rating", "UNKNOWN"),
+                        "confidence": r.get("confidence", 0),
+                    }
+                    for r in ratings
+                ],
+            }
+        )
         return {"ratings": ratings, "suggestion": suggestion, "raw": raw}
 
 
@@ -251,10 +247,12 @@ def reformulate(
         queries = [line.strip() for line in response.strip().split("\n") if line.strip()]
         queries = queries[:3]
         print(f"[reformulate] generated {len(queries)} queries")
-        tc.set_summary({
-            "num_queries": len(queries),
-            "queries": queries,
-        })
+        tc.set_summary(
+            {
+                "num_queries": len(queries),
+                "queries": queries,
+            }
+        )
         return queries
 
 
@@ -340,14 +338,16 @@ def critique_answer(
         failed_str = "" if passed else " (failed: evidence-grounded review)"
         print(f"[critique_answer] verdict={verdict_str}{failed_str}")
         feedback = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
-        tc.set_summary({
-            "verdict": verdict_str,
-            "has_evidence": bool(evidence),
-            "feedback": feedback[:200],
-            # Backward compat for frontend CritiqueDetail renderer
-            "reason": feedback[:200],
-            "failed": [] if passed else ["evidence_review"],
-        })
+        tc.set_summary(
+            {
+                "verdict": verdict_str,
+                "has_evidence": bool(evidence),
+                "feedback": feedback[:200],
+                # Backward compat for frontend CritiqueDetail renderer
+                "reason": feedback[:200],
+                "failed": [] if passed else ["evidence_review"],
+            }
+        )
         return verdict, passed
 
 
@@ -451,7 +451,13 @@ def init_classify(
         model = RLM_CLASSIFY_MODEL
 
     # Emit progress: classifying
-    if ctx._parent_logger is not None:
+    bus = getattr(ctx, "bus", None)
+    if bus is not None:
+        bus.emit(
+            "tool_progress",
+            {"phase": "classifying", "message": f"Pre-classifying with {model}"},
+        )
+    elif ctx._parent_logger is not None:
         ctx._parent_logger.emit_progress("classifying", f"Pre-classifying with {model}")
 
     t0 = time.monotonic()
@@ -536,10 +542,7 @@ def init_classify(
 
             ctx.classification = parsed
             classify_ms = int((time.monotonic() - t0) * 1000)
-            print(
-                f"[classify] category={category} clusters={clusters_str!r} "
-                f"time={classify_ms}ms"
-            )
+            print(f"[classify] category={category} clusters={clusters_str!r} time={classify_ms}ms")
             tc.set_summary(
                 {
                     "category": category,
@@ -549,7 +552,17 @@ def init_classify(
             )
 
             # Emit progress: classified
-            if ctx._parent_logger is not None:
+            if bus is not None:
+                bus.emit(
+                    "tool_progress",
+                    {
+                        "phase": "classified",
+                        "message": f"Pre-classified in {classify_ms}ms",
+                        "duration_ms": classify_ms,
+                        "classification": parsed,
+                    },
+                )
+            elif ctx._parent_logger is not None:
                 ctx._parent_logger.emit_progress(
                     "classified",
                     f"Pre-classified in {classify_ms}ms",
@@ -565,7 +578,16 @@ def init_classify(
             tc.set_summary({"error": str(e), "duration_ms": classify_ms})
 
             # Emit classified with no classification on failure
-            if ctx._parent_logger is not None:
+            if bus is not None:
+                bus.emit(
+                    "tool_progress",
+                    {
+                        "phase": "classified",
+                        "message": f"Classification skipped ({classify_ms}ms)",
+                        "duration_ms": classify_ms,
+                    },
+                )
+            elif ctx._parent_logger is not None:
                 ctx._parent_logger.emit_progress(
                     "classified",
                     f"Classification skipped ({classify_ms}ms)",

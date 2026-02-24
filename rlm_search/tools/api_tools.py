@@ -82,12 +82,14 @@ def search(
                 "num_results": len(results),
             }
         )
-        tc.set_summary({
-            "num_results": len(results),
-            "total": data.get("total", len(results)),
-            "query": query,
-            "hits": _truncate_hits(results),
-        })
+        tc.set_summary(
+            {
+                "num_results": len(results),
+                "total": data.get("total", len(results)),
+                "query": query,
+                "hits": _truncate_hits(results),
+            }
+        )
         return {"results": results, "total": data.get("total", len(results))}
 
 
@@ -150,11 +152,13 @@ def browse(
             log_entry["group_by"] = group_by
         ctx.search_log.append(log_entry)
         print(f"[browse] filters={filters} results={len(results)} total={data.get('total', 0)}")
-        tc.set_summary({
-            "num_results": len(results),
-            "total": data.get("total", 0),
-            "hits": _truncate_hits(results),
-        })
+        tc.set_summary(
+            {
+                "num_results": len(results),
+                "total": data.get("total", 0),
+                "hits": _truncate_hits(results),
+            }
+        )
         return {
             "results": results,
             "total": data.get("total", 0),
@@ -242,13 +246,15 @@ def search_multi(
                 "num_results": len(results),
             }
         )
-        tc.set_summary({
-            "num_results": len(results),
-            "total": data.get("total", len(results)),
-            "query": query,
-            "collections": collections,
-            "hits": _truncate_hits(results),
-        })
+        tc.set_summary(
+            {
+                "num_results": len(results),
+                "total": data.get("total", len(results)),
+                "query": query,
+                "collections": collections,
+                "hits": _truncate_hits(results),
+            }
+        )
         return {
             "results": results,
             "total": data.get("total", len(results)),
@@ -285,13 +291,18 @@ def fiqh_lookup(ctx: ToolContext, query: str) -> dict:
         bridges = data.get("bridges", [])
         related = data.get("related", [])
         print(f"[fiqh_lookup] query={query!r} bridges={len(bridges)} related={len(related)}")
-        tc.set_summary({
-            "num_bridges": len(bridges),
-            "num_related": len(related),
-            "bridges": [
-                {"term": b.get("canonical", b.get("term", "")), "translation": b.get("english", "")}
-                for b in bridges[:10]
-            ],
-            "related": [{"term": r.get("term", "")} for r in related[:10]],
-        })
+        tc.set_summary(
+            {
+                "num_bridges": len(bridges),
+                "num_related": len(related),
+                "bridges": [
+                    {
+                        "term": b.get("canonical", b.get("term", "")),
+                        "translation": b.get("english", ""),
+                    }
+                    for b in bridges[:10]
+                ],
+                "related": [{"term": r.get("term", "")} for r in related[:10]],
+            }
+        )
         return {"bridges": bridges, "related": related}

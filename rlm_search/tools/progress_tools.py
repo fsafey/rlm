@@ -51,9 +51,7 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
         else:
             # Find which classified clusters haven't been searched yet
             classified_clusters = [
-                c.strip()
-                for c in ctx.classification.get("clusters", "").split(",")
-                if c.strip()
+                c.strip() for c in ctx.classification.get("clusters", "").split(",") if c.strip()
             ]
             used_clusters = {
                 e.get("filters", {}).get("cluster_label")
@@ -140,29 +138,33 @@ def _format_audit_trail(ctx: ToolContext) -> str:
 
 
 def check_progress(ctx: ToolContext) -> dict:
-    """Assess search progress: signals, confidence, strategy, audit trail.
-
-    Returns a dict consumed by the LM and the frontend confidence ring.
-    """
+    """Assess search progress: signals, confidence, strategy, audit trail."""
     with tool_call_tracker(
         ctx,
         "check_progress",
         {},
         parent_idx=ctx.current_parent_idx,
     ) as tc:
+        quality = getattr(ctx, "quality", None)
+
         # -- Signal computation --
         n_searches = sum(1 for e in ctx.search_log if e["type"] in ("search", "search_multi"))
         n_sources = len(ctx.source_registry)
 
-        # Relevant/partial counts from the last evaluate_results tool_call
-        relevant_count = 0
-        partial_count = 0
-        for call in reversed(ctx.tool_calls):
-            if call["tool"] == "evaluate_results":
-                rs = call.get("result_summary", {})
-                relevant_count = rs.get("relevant", 0)
-                partial_count = rs.get("partial", 0)
-                break
+        # Relevant/partial counts — prefer QualityGate if available
+        if quality is not None:
+            counts = quality.evidence.rating_counts()
+            relevant_count = counts.get("RELEVANT", 0)
+            partial_count = counts.get("PARTIAL", 0)
+        else:
+            relevant_count = 0
+            partial_count = 0
+            for call in reversed(ctx.tool_calls):
+                if call["tool"] == "evaluate_results":
+                    rs = call.get("result_summary", {})
+                    relevant_count = rs.get("relevant", 0)
+                    partial_count = rs.get("partial", 0)
+                    break
 
         top_score = max((r.get("score", 0) for r in ctx.source_registry.values()), default=0.0)
 
@@ -178,30 +180,37 @@ def check_progress(ctx: ToolContext) -> dict:
             if e.get("filters") and e["filters"].get("parent_code")
         }
 
-        # -- Confidence --
-        confidence = _compute_confidence(
-            relevant_count, partial_count, top_score, has_draft, categories_explored
-        )
-
-        # -- Phase + guidance --
-        if has_draft:
-            phase = "finalize"
-            guidance = "Draft complete. Emit FINAL_VAR."
-        elif confidence >= 60:
-            phase = "ready"
-            guidance = f"Sufficient evidence (confidence {confidence}%). Proceed to draft_answer()."
-        elif n_searches >= 6 and relevant_count < 2:
-            phase = "stalled"
-            strategy = _suggest_strategy(ctx, categories_explored)
-            guidance = f"6+ searches with <2 relevant. {strategy}"
-        elif diversity < 0.5 and n_searches >= 3:
-            phase = "repeating"
-            strategy = _suggest_strategy(ctx, categories_explored)
-            guidance = f"Low query diversity. {strategy}"
+        # -- Confidence — prefer QualityGate --
+        if quality is not None:
+            confidence = quality.confidence
+            phase = quality.phase
+            guidance = quality.guidance()
         else:
-            phase = "continue"
-            strategy = _suggest_strategy(ctx, categories_explored)
-            guidance = f"Confidence at {confidence}%. {strategy}"
+            confidence = _compute_confidence(
+                relevant_count, partial_count, top_score, has_draft, categories_explored
+            )
+
+            # -- Phase + guidance --
+            if has_draft:
+                phase = "finalize"
+                guidance = "Draft complete. Emit FINAL_VAR."
+            elif confidence >= 60:
+                phase = "ready"
+                guidance = (
+                    f"Sufficient evidence (confidence {confidence}%). Proceed to draft_answer()."
+                )
+            elif n_searches >= 6 and relevant_count < 2:
+                phase = "stalled"
+                strategy = _suggest_strategy(ctx, categories_explored)
+                guidance = f"6+ searches with <2 relevant. {strategy}"
+            elif diversity < 0.5 and n_searches >= 3:
+                phase = "repeating"
+                strategy = _suggest_strategy(ctx, categories_explored)
+                guidance = f"Low query diversity. {strategy}"
+            else:
+                phase = "continue"
+                strategy = _suggest_strategy(ctx, categories_explored)
+                guidance = f"Confidence at {confidence}%. {strategy}"
 
         # -- Audit trail --
         audit = _format_audit_trail(ctx)
@@ -215,16 +224,18 @@ def check_progress(ctx: ToolContext) -> dict:
         )
         print(f"  Searches tried:\n{audit}")
 
-        tc.set_summary({
-            "phase": phase,
-            "confidence": confidence,
-            "relevant": relevant_count,
-            "searches": n_searches,
-            "guidance": guidance,
-            "partial": partial_count,
-            "top_score": round(top_score, 3),
-            "categories_explored": sorted(categories_explored),
-        })
+        tc.set_summary(
+            {
+                "phase": phase,
+                "confidence": confidence,
+                "relevant": relevant_count,
+                "searches": n_searches,
+                "guidance": guidance,
+                "partial": partial_count,
+                "top_score": round(top_score, 3),
+                "categories_explored": sorted(categories_explored),
+            }
+        )
 
         return {
             "phase": phase,

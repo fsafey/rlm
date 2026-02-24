@@ -10,6 +10,47 @@
 
 ---
 
+## Phase 0: Quick Wins (Independent of Redesign)
+
+---
+
+### Task 0: Prompt Caching in AnthropicClient
+
+**Files:**
+- Modify: `rlm/clients/anthropic.py`
+
+**Context:** The system prompt is passed as a plain string on every API call. Anthropic's prompt caching (`cache_control: {"type": "ephemeral"}`) can save ~60-80% on system prompt tokens with a 5-line change. This is independent of the department redesign and delivers the highest ROI of any single change.
+
+**Step 1: Modify system prompt handling**
+
+In `rlm/clients/anthropic.py`, change the system prompt from a plain string to a cached content block:
+
+```python
+# Before (current):
+if system:
+    kwargs["system"] = system
+
+# After:
+if system:
+    kwargs["system"] = [
+        {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+    ]
+```
+
+**Step 2: Run tests**
+
+Run: `uv run pytest tests/ -v -x -k "anthropic or client"`
+Expected: ALL PASS (the API accepts both string and list format for system)
+
+**Step 3: Commit**
+
+```bash
+git add rlm/clients/anthropic.py
+git commit -m "feat(clients): enable prompt caching for Anthropic system prompts"
+```
+
+---
+
 ## Phase 1: Foundation — EventBus + EvidenceStore
 
 Build the two most fundamental departments. Everything else depends on these.
@@ -329,13 +370,23 @@ class TestEvidenceStoreEvidence:
         ids = [h["id"] for h in top]
         assert ids == ["b", "a"]  # both RELEVANT, b has higher confidence
 
-    def test_as_dict_for_repl_locals(self):
-        """EvidenceStore must expose a plain dict view for REPL locals compatibility."""
+    def test_as_dict_returns_snapshot_copy(self):
+        """as_dict() returns a copy — writes after the call are NOT visible."""
         store = EvidenceStore()
         store.register_hit({"id": "x", "question": "Q", "answer": "A", "score": 0.5, "metadata": {}})
         d = store.as_dict()
         assert isinstance(d, dict)
         assert "x" in d
+        store.register_hit({"id": "y", "question": "Q2", "answer": "A2", "score": 0.6, "metadata": {}})
+        assert "y" not in d  # snapshot — doesn't see new writes
+
+    def test_live_dict_reflects_writes(self):
+        """live_dict exposes the internal dict — LM sees tool writes immediately."""
+        store = EvidenceStore()
+        live = store.live_dict
+        assert len(live) == 0
+        store.register_hit({"id": "x", "question": "Q", "answer": "A", "score": 0.5, "metadata": {}})
+        assert "x" in live  # live reference — sees the write
 ```
 
 **Step 2: Run tests to verify they fail**
@@ -461,8 +512,22 @@ class EvidenceStore:
     # --- REPL compatibility ---
 
     def as_dict(self) -> dict[str, dict[str, Any]]:
-        """Plain dict view for REPL locals (LM can print(source_registry))."""
+        """Snapshot copy for serialization or logging."""
         return dict(self._registry)
+
+    @property
+    def live_dict(self) -> dict[str, dict[str, Any]]:
+        """Live reference for REPL locals — LM sees tool writes immediately.
+
+        IMPORTANT: The current source_registry = _ctx.source_registry is a live
+        dict reference. Tools write via normalize_hit(), LM reads via
+        print(source_registry). Using as_dict() here would break this contract
+        because it returns a copy. Expose _registry directly so mutations from
+        register_hit() are visible to the LM without re-assignment.
+
+        The LM should NOT write to this dict directly — use register_hit().
+        """
+        return self._registry
 ```
 
 **Step 4: Run tests to verify they pass**
@@ -619,7 +684,6 @@ class QualityGate:
     _has_draft: bool = dataclasses.field(default=False, init=False)
     _draft_length: int = dataclasses.field(default=0, init=False)
     _last_critique: dict[str, Any] | None = dataclasses.field(default=None, init=False)
-    _categories_explored: set = dataclasses.field(default_factory=set, init=False)
 
     # --- Draft tracking ---
 
@@ -844,7 +908,7 @@ class SearchContext:
     # --- Department references ---
     bus: EventBus = dataclasses.field(default_factory=EventBus)
     evidence: EvidenceStore = dataclasses.field(default_factory=EvidenceStore)
-    quality: QualityGate = dataclasses.field(init=False)
+    quality: QualityGate | None = None  # auto-created in __post_init__ if not provided
 
     # --- LLM callables (injected from REPL globals) ---
     llm_query: Any = None
@@ -869,9 +933,9 @@ class SearchContext:
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             }
-        # QualityGate needs evidence reference
-        if not hasattr(self, "quality") or self.quality is None:
-            object.__setattr__(self, "quality", QualityGate(evidence=self.evidence))
+        # QualityGate needs evidence reference — auto-create if not provided
+        if self.quality is None:
+            self.quality = QualityGate(evidence=self.evidence)
 ```
 
 **Step 4: Run tests to verify they pass**
@@ -1830,7 +1894,9 @@ Due to the complexity and length of this generated code string, this task should
 - Replace `_ctx = _ToolContext(...)` with `SearchContext(...)` construction
 - Replace `_ctx.progress_callback = ...` with `_ctx.bus` (EventBus handles it)
 - Remove `_parent_logger_ref` wiring (EventBus replaces it)
-- Add `source_registry = _ctx.evidence.as_dict()` alias for REPL
+- Add `source_registry = _ctx.evidence.live_dict` alias for REPL (NOT `as_dict()` — must be a live reference so LM sees tool writes immediately)
+- Note: `source_registry` is read-only from the LM's perspective. Tools write through `register_hit()`. Direct LM writes to `source_registry["new_id"] = {...}` bypass EvidenceStore methods (dedup, score comparison) but are still visible. This matches current behavior.
+- Route `init_classify()` through `ctx.llm_query()` if available (the LMHandler is already running when setup_code executes). This eliminates the shadow `get_client()` call in `subagent_tools.py:476` that bypasses usage tracking. If `ctx.llm_query` is not yet wired at init time, defer this to a follow-up task.
 
 **Step 4: Run test to verify it passes**
 
@@ -1920,7 +1986,14 @@ def _run_search_v2(search_id, query, settings, session_id):
             session_mgr.create_session(rlm=rlm, bus=bus, session_id=session_id)
 
         result = rlm.completion(query, root_prompt=query)
-        # ... extract sources, mark done ...
+
+        # Extract sources from EvidenceStore (replaces _extract_sources() which
+        # read from REPL locals snapshot). EvidenceStore.top_rated() returns
+        # sources sorted by rating tier + confidence — a strict upgrade over
+        # the old unordered source_registry dump.
+        evidence = _get_evidence_store(rlm)  # walk persistent_env locals
+        sources = evidence.top_rated(n=20) if evidence else []
+        logger.mark_done(answer=result.answer, sources=sources, ...)
 
     except SearchCancelled:
         bus.emit("cancelled", {})
@@ -1964,16 +2037,48 @@ This is done tool-by-tool. For each tool file:
 2. Replace `ctx.search_log.append(...)` → `ctx.evidence.log_search(...)`
 3. Replace `ctx.evaluated_ratings[id] = ...` → `ctx.evidence.set_rating(id, ...)`
 4. Replace `_compute_confidence(...)` → `ctx.quality.confidence`
-5. Remove `current_parent_idx` save/restore → use `contextlib.contextmanager` pattern
+5. Remove `current_parent_idx` save/restore → use `_child_scope` context manager:
+
+```python
+@contextlib.contextmanager
+def _child_scope(ctx, parent_idx):
+    """Safe parent index scoping — exception-safe, replaces manual save/restore."""
+    saved = ctx.current_parent_idx
+    ctx.current_parent_idx = parent_idx
+    try:
+        yield
+    finally:
+        ctx.current_parent_idx = saved
+```
+
+Then `research()` and `draft_answer()` in `composite_tools.py` become:
+```python
+with _child_scope(ctx, tc.idx):
+    # ... all nested tool calls ...
+```
+
+6. Add Cascade API resilience to `api_tools.py` — currently all `requests.post()` calls have no try/except. On timeout, partial results pass as complete and the LM can't distinguish "searched and found nothing" from "search failed mid-flight":
+
+```python
+# Wrap Cascade calls with retry + error signal:
+try:
+    resp = requests.post(f"{ctx.api_url}/search", json=payload, headers=ctx.headers, timeout=ctx.timeout)
+    resp.raise_for_status()
+except (requests.Timeout, requests.ConnectionError) as exc:
+    print(f"[search] ERROR: Cascade unreachable — {exc}")
+    return {"results": [], "error": f"Cascade timeout: {exc}", "total": 0}
+```
+
+7. Update existing test files (`test_repl_tools.py`, `test_search_api.py`) to use `SearchContext` where they directly instantiate `ToolContext`. This prevents test rot after the cutover.
 
 **Step 1:** Run existing tests to establish baseline
 
 Run: `uv run pytest tests/test_repl_tools.py tests/test_search_api.py -v --tb=short`
 Expected: ALL PASS (196 tests)
 
-**Step 2-5:** Migrate each file, run tests after each to verify no regressions.
+**Step 2-7:** Migrate each file, run tests after each to verify no regressions.
 
-**Step 6: Commit**
+**Step 8: Commit**
 
 ```bash
 git add rlm_search/tools/
@@ -2050,29 +2155,54 @@ git commit -m "chore(rlm-search): remove legacy files, rename v2 → final"
 ### Task 14: Update system prompt — single source of truth
 
 **Files:**
+- Create: `rlm_search/prompt_constants.py`
 - Modify: `rlm_search/prompts.py`
+- Modify: `rlm_search/quality.py`
 
-**Context:** Remove duplicated thresholds, reduce iteration patterns from 5 to 2, reference QualityGate thresholds by name. Remove I.M.A.M. identity duplication from tool prompts (keep it only in the system prompt).
+**Context:** Remove duplicated thresholds, reduce iteration patterns from 5 to 2, reference QualityGate thresholds by name. Remove I.M.A.M. identity duplication from tool prompts (keep it only in the system prompt). Create a shared constants module so thresholds exist in exactly one place.
 
-**Step 1:** Edit `prompts.py`:
+**Step 1:** Create `rlm_search/prompt_constants.py` — the single source of truth for all thresholds and identity:
+
+```python
+"""rlm_search/prompt_constants.py — shared constants for prompts + QualityGate."""
+
+# Quality thresholds
+READY_THRESHOLD = 60
+STALL_SEARCH_COUNT = 6
+LOW_CONFIDENCE_THRESHOLD = 40
+
+# Confidence weights (must sum to 100)
+WEIGHT_RELEVANCE = 35
+WEIGHT_QUALITY = 25
+WEIGHT_BREADTH = 10
+WEIGHT_DRAFT = 15
+WEIGHT_CRITIQUE = 15
+
+# Rating definitions
+RATING_ORDER = {"RELEVANT": 0, "PARTIAL": 1, "OFF-TOPIC": 2, "UNKNOWN": 3}
+```
+
+Then update `quality.py` to import from `prompt_constants` instead of hardcoding, and update `prompts.py` to reference these constants.
+
+**Step 2:** Edit `prompts.py`:
 - Remove `confidence >= 60%` numeric threshold → replace with "when `check_progress()` returns phase `ready`"
 - Reduce iteration patterns A-E to just 2: "straightforward" and "complex"
 - Keep tool documentation section but note that `research()` auto-calls `check_progress()`
 
-**Step 2:** Remove school context from tool prompts:
+**Step 3:** Remove school context from tool prompts:
 - `composite_tools.py:233-235` → remove inline I.M.A.M. context
 - `subagent_tools.py:295-299` → remove inline school context
 - `delegation_tools.py:15-16` → reference system prompt instead
 
-**Step 3:** Run tests
+**Step 4:** Run tests
 
 Run: `uv run pytest tests/ -v --tb=short`
 Expected: ALL PASS
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
-git add rlm_search/prompts.py rlm_search/tools/
+git add rlm_search/prompt_constants.py rlm_search/prompts.py rlm_search/quality.py rlm_search/tools/
 git commit -m "refactor(rlm-search): deduplicate prompt — single source of truth for thresholds and identity"
 ```
 
@@ -2135,7 +2265,8 @@ rlm_search/
 ├── repl_tools.py       ← REWRITTEN: builds SearchContext with departments
 ├── config.py           ← unchanged
 ├── models.py           ← unchanged
-├── prompts.py          ← SIMPLIFIED: single source of truth
+├── prompt_constants.py ← NEW: shared thresholds + weights (single source of truth)
+├── prompts.py          ← SIMPLIFIED: references prompt_constants
 ├── kb_overview.py      ← unchanged
 └── tools/
     ├── context.py      ← REPLACED: thin SearchContext (~10 fields)
@@ -2150,3 +2281,23 @@ rlm_search/
     ├── kb.py           ← unchanged
     └── constants.py    ← unchanged
 ```
+
+---
+
+## Appendix: Review Additions
+
+Changes incorporated from code review (original plan was 8/10, these bring it to 9.5/10):
+
+| # | Addition | Where | Effort | Impact |
+|---|----------|-------|--------|--------|
+| 1 | Prompt caching in AnthropicClient | New Task 0 (Phase 0) | 5 lines | Highest cost savings (~60-80% on system tokens) |
+| 2 | Cascade retry + error signals | Task 11 addendum | ~30 lines | LM can distinguish "no results" from "search failed" |
+| 3 | `_child_scope` context manager | Task 11, explicit impl | 10 lines | Fixes fragile save/restore (exception-safe) |
+| 4 | Prompt constants module | Task 14 expansion | ~20 lines | Completes "single source of truth" goal |
+| 5 | `source_registry` live reference | Task 9 + EvidenceStore | ~5 lines | **Bug fix**: `as_dict()` snapshot breaks live reference contract |
+| 6 | Update existing tests for SearchContext | Task 11 addendum | ~50 lines | Prevents test rot after cutover |
+| 7 | `init_classify` via `llm_query` | Task 9 note | ~15 lines | Visible token tracking for classification calls |
+| 8 | SearchContext `quality` init fix | Task 4 | 3 lines | **Bug fix**: `init=False` field rejected by constructor |
+| 9 | Source extraction path in api_v2 | Task 10 | explicit | Clarifies that `EvidenceStore.top_rated()` replaces REPL locals walk |
+| 10 | Remove dead `_categories_explored` field | Task 3 (QualityGate) | 1 line | Dead code — old diversity factor replaced by critique weight |
+| 11 | Confidence formula change documented | Task 3 context | 0 lines | Weights changed: diversity(10%) + draft(20%) → critique(15%) + draft(15%) |

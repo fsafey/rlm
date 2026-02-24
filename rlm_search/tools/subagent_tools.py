@@ -404,6 +404,36 @@ def _match_clusters(question: str, grouped_results: list) -> list[str]:
     return [s[0] for s in scores[:2]]
 
 
+def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
+    """Build Phase 1 prompt: 6-way category classification (no clusters).
+
+    Returns the user-role content string for the classification LLM call.
+    Deliberately excludes cluster labels — Phase 3 handles cluster selection
+    via browse() + deterministic matching.
+    """
+    cat_lines = []
+    for code, cat in kb_overview_data.get("categories", {}).items():
+        name = cat.get("name", code)
+        doc_count = cat.get("document_count", 0)
+        cat_lines.append(f"{code} — {name} [{doc_count} docs]")
+    cat_info = "\n".join(cat_lines)
+
+    return (
+        "Classify this Islamic Q&A question into one category.\n\n"
+        f'Question: "{question}"\n\n'
+        f"Categories:\n{cat_info}\n\n"
+        "Examples:\n"
+        '"Is it permissible to take a mortgage?" → FN\n'
+        '"How do I perform ghusl?" → PT\n'
+        '"Is it permissible for a wife to refuse intimacy?" → MF\n'
+        '"What are the types of shirk?" → BE\n'
+        '"Can I pray Eid salah at home?" → WP\n'
+        '"Is it permissible to cremate the dead?" → OT\n\n'
+        "Respond with exactly one line:\n"
+        "CATEGORY: <code>"
+    )
+
+
 def init_classify(
     ctx: ToolContext,
     question: str,

@@ -87,3 +87,52 @@ class TestMatchClusters:
         # "is" and "in" are stop words — shouldn't boost "General Fiqh"
         result = _match_clusters("is riba in mortgage", grouped)
         assert result[0] == "Riba in Transactions"
+
+
+from rlm_search.tools.subagent_tools import _build_category_prompt
+
+
+class TestBuildCategoryPrompt:
+    """Phase 1 prompt: simple 6-way category classification."""
+
+    SAMPLE_KB = {
+        "categories": {
+            "PT": {"name": "Prayer & Tahara", "document_count": 4938},
+            "FN": {"name": "Finance & Transactions", "document_count": 1891},
+        }
+    }
+
+    def test_includes_all_category_codes(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        assert "PT" in prompt
+        assert "FN" in prompt
+
+    def test_includes_doc_counts(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        assert "4938" in prompt
+        assert "1891" in prompt
+
+    def test_includes_question(self):
+        prompt = _build_category_prompt("is mortgage halal?", self.SAMPLE_KB)
+        assert "is mortgage halal?" in prompt
+
+    def test_does_not_include_cluster_labels(self):
+        """Phase 1 prompt must NOT include cluster labels — that's Phase 3's job."""
+        kb_with_clusters = {
+            "categories": {
+                "FN": {
+                    "name": "Finance",
+                    "document_count": 100,
+                    "clusters": {"Banking Riba Operations": "sample"},
+                    "facets": {"clusters": [{"value": "Banking Riba Operations", "count": 50}]},
+                },
+            }
+        }
+        prompt = _build_category_prompt("test", kb_with_clusters)
+        assert "Banking Riba Operations" not in prompt
+
+    def test_output_format_instruction(self):
+        prompt = _build_category_prompt("test", self.SAMPLE_KB)
+        assert "CATEGORY:" in prompt
+        # Must NOT ask for CLUSTERS, FILTERS, or STRATEGY
+        assert "CLUSTERS:" not in prompt.split("Respond")[1]  # not in the response format section

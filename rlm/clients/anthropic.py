@@ -40,7 +40,9 @@ class AnthropicClient(BaseLM):
 
         kwargs = {"model": model, "max_tokens": self.max_tokens, "messages": messages}
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+            ]
 
         response = self.client.messages.create(**kwargs)
         self._track_cost(response, model)
@@ -57,7 +59,9 @@ class AnthropicClient(BaseLM):
 
         kwargs = {"model": model, "max_tokens": self.max_tokens, "messages": messages}
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+            ]
 
         response = await self.async_client.messages.create(**kwargs)
         self._track_cost(response, model)

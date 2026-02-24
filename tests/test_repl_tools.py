@@ -1328,7 +1328,7 @@ class TestReformulate:
 
 
 class TestCritiqueAnswer:
-    """Tests for the critique_answer sub-agent function."""
+    """Tests for critique_answer (delegates to batched_critique)."""
 
     def test_pass_verdict(self):
         ns = _make_sub_agent_ns()
@@ -1344,38 +1344,13 @@ class TestCritiqueAnswer:
         captured = capsys.readouterr()
         assert "verdict=FAIL" in captured.out
 
-    def test_truncation_warning(self, capsys):
+    def test_returns_string_not_tuple(self):
+        """critique_answer returns verdict string for REPL backward compat."""
         ns = _make_sub_agent_ns()
-        ns["_ctx"].llm_query = lambda prompt, model=None: "PASS"
-        ns["critique_answer"]("question", "x" * 10000)
-        captured = capsys.readouterr()
-        assert "WARNING" in captured.out
-        assert "truncated" in captured.out
-
-    def test_no_warning_under_limit(self, capsys):
-        ns = _make_sub_agent_ns()
-        ns["_ctx"].llm_query = lambda prompt, model=None: "PASS"
-        ns["critique_answer"]("question", "short draft")
-        captured = capsys.readouterr()
-        assert "truncated" not in captured.out
-
-    def test_critique_answer_still_works_standalone(self):
-        """critique_answer() still uses llm_query, not batched."""
-        ns = _make_sub_agent_ns()
-        calls = []
-        ns["_ctx"].llm_query = lambda prompt, model=None: (
-            calls.append("llm_query"),
-            "PASS — ok",
-        )[1]
-        batched_calls = []
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: (
-            batched_calls.append("batched"),
-            ["ok"] * len(prompts),
-        )[1]
-
-        ns["critique_answer"]("question", "draft")
-        assert len(calls) == 1
-        assert len(batched_calls) == 0
+        ns["_ctx"].llm_query = lambda prompt, model=None: "PASS — ok"
+        result = ns["critique_answer"]("question", "draft")
+        assert isinstance(result, str)
+        assert "PASS" in result
 
 
 class TestClassificationInSetupCode:
@@ -1397,16 +1372,32 @@ class TestClassificationInSetupCode:
         # Without query, init_classify is not called, so classification is None
         assert ns["classification"] is None
 
-    @patch("rlm.clients.get_client")
+    @patch("rlm_search.tools.api_tools.requests.post")
+    @patch("rlm_search.tools.subagent_tools.get_client")
     @patch("rlm_search.config.RLM_BACKEND", "claude_cli")
     @patch("rlm_search.config.ANTHROPIC_API_KEY", "")
-    def test_init_classify_called_with_query(self, mock_get_client):
+    def test_init_classify_called_with_query(self, mock_get_client, mock_post):
         """When query is provided, init_classify runs and sets classification."""
         mock_client = MagicMock()
-        mock_client.completion.return_value = (
-            'CATEGORY: PT\nCLUSTERS: Ghusl\nFILTERS: {"parent_code": "PT"}\nSTRATEGY: Search ghusl'
-        )
+        mock_client.completion.return_value = "CATEGORY: PT"
         mock_get_client.return_value = mock_client
+
+        # Mock browse response for Phase 2
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "hits": [],
+            "total": 50,
+            "has_more": False,
+            "facets": {"clusters": [], "subtopics": []},
+            "grouped_results": {
+                "clusters": [
+                    {"label": "Ghusl", "total_count": 50, "hits": [{"question": "How to perform ghusl?"}]},
+                ]
+            },
+        }
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
 
         kb = {
             "categories": {

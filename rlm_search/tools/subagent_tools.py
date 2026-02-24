@@ -258,57 +258,6 @@ def reformulate(
         return queries
 
 
-def critique_answer(
-    ctx: ToolContext,
-    question: str,
-    draft: str,
-    model: str | None = None,
-) -> str:
-    """Sub-agent: review draft answer before finalizing.
-
-    Call before FINAL/FINAL_VAR to catch citation errors, topic drift,
-    and unsupported claims.
-
-    Args:
-        ctx: Per-session tool context.
-        question: The user's original question.
-        draft: The draft answer text to review.
-
-    Returns:
-        String: PASS or FAIL verdict with specific feedback.
-    """
-    with tool_call_tracker(
-        ctx,
-        "critique_answer",
-        {"question": question[:100]},
-        parent_idx=ctx.current_parent_idx,
-    ) as tc:
-        if len(draft) > MAX_DRAFT_LEN:
-            print(
-                f"[critique_answer] WARNING: draft truncated from {len(draft)} to {MAX_DRAFT_LEN} chars"
-            )
-        prompt = (
-            f"Review this draft answer to the question:\n"
-            f'"{question}"\n\n'
-            f"Draft:\n{draft[:MAX_DRAFT_LEN]}\n\n"
-            f"Check:\n"
-            f"1. Does it answer the actual question asked?\n"
-            f"2. Are [Source: <id>] citations present for factual claims?\n"
-            f"3. Are there unsupported claims or fabricated rulings?\n"
-            f"4. Is anything important missing?\n\n"
-            f"Respond: PASS or FAIL, then brief feedback (under 150 words)."
-        )
-        verdict = ctx.llm_query(prompt, model=model)
-        status = "PASS" if verdict.strip().strip("*").upper().startswith("PASS") else "FAIL"
-        print(f"[critique_answer] verdict={status}")
-        reason_text = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
-        tc.set_summary({
-            "verdict": status,
-            "reason": reason_text[:150],
-        })
-        return verdict
-
-
 def batched_critique(
     ctx: ToolContext,
     question: str,

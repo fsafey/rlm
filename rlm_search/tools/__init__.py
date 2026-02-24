@@ -15,7 +15,6 @@ from rlm_search.tools.normalize import normalize_hit
 from rlm_search.tools.progress_tools import check_progress
 from rlm_search.tools.subagent_tools import (
     batched_critique,
-    critique_answer,
     evaluate_results,
     init_classify,
     reformulate,
@@ -35,7 +34,6 @@ __all__ = [
     "fiqh_lookup",
     "evaluate_results",
     "reformulate",
-    "critique_answer",
     "batched_critique",
     "init_classify",
     "research",

@@ -218,6 +218,7 @@ class RLM:
                 self.logger.on_environment_ready()
 
             message_history = self._setup_prompt(prompt)
+            consecutive_empty = 0
 
             for i in range(self.max_iterations):
                 self._check_cancelled()
@@ -247,6 +248,25 @@ class RLM:
                 # Check if RLM is done and has a final answer.
                 final_answer = find_final_answer(iteration.response, environment=environment)
                 iteration.final_answer = final_answer
+
+                # Circuit breaker: detect consecutive empty iterations
+                if not iteration.code_blocks:
+                    consecutive_empty += 1
+                else:
+                    consecutive_empty = 0
+
+                if consecutive_empty >= 2:
+                    message_history.append({
+                        "role": "user",
+                        "content": (
+                            "You have not executed any code for 2 iterations. "
+                            "You MUST either:\n"
+                            "1. Write a ```repl``` block to search or draft, OR\n"
+                            "2. Call FINAL_VAR(answer) or FINAL(your answer) to finish.\n"
+                            "Do one of these NOW."
+                        ),
+                    })
+                    consecutive_empty = 0
 
                 # If logger is used, log the iteration.
                 if self.logger:

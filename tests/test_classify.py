@@ -136,3 +136,105 @@ class TestBuildCategoryPrompt:
         assert "CATEGORY:" in prompt
         # Must NOT ask for CLUSTERS, FILTERS, or STRATEGY
         assert "CLUSTERS:" not in prompt.split("Respond")[1]  # not in the response format section
+
+
+from unittest.mock import MagicMock, patch
+
+from rlm_search.tools.subagent_tools import init_classify
+from rlm_search.tools.context import ToolContext
+
+
+class TestInitClassifyTwoPhase:
+    """Integration: init_classify uses Phase 1 (LLM) + Phase 2 (browse) + Phase 3 (match)."""
+
+    def _make_ctx(self) -> ToolContext:
+        ctx = ToolContext(api_url="http://test:8091")
+        ctx.kb_overview_data = {
+            "categories": {
+                "FN": {"name": "Finance & Transactions", "document_count": 1891},
+                "PT": {"name": "Prayer & Tahara", "document_count": 4938},
+            }
+        }
+        ctx.llm_query = None
+        ctx.llm_query_batched = None
+        ctx._parent_logger = None
+        return ctx
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    @patch("rlm_search.tools.api_tools.requests.post")
+    def test_two_phase_sets_classification(self, mock_post, mock_get_client):
+        """Phase 1 LLM → Phase 2 browse → Phase 3 match → ctx.classification set."""
+        # Phase 1: LLM returns category
+        mock_client = MagicMock()
+        mock_client.completion.return_value = "CATEGORY: FN"
+        mock_get_client.return_value = mock_client
+
+        # Phase 2: browse returns grouped results
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "hits": [],
+            "total": 1891,
+            "has_more": False,
+            "facets": {
+                "clusters": [
+                    {"value": "Banking Riba Operations", "count": 150},
+                    {"value": "Shariah Investment Screening", "count": 80},
+                ],
+                "subtopics": [{"value": "riba", "count": 80}],
+            },
+            "grouped_results": {
+                "clusters": [
+                    {
+                        "label": "Banking Riba Operations",
+                        "total_count": 150,
+                        "hits": [{"id": "1", "question": "Is mortgage permissible in Islam?", "answer": "..."}],
+                    },
+                    {
+                        "label": "Shariah Investment Screening",
+                        "total_count": 80,
+                        "hits": [{"id": "2", "question": "How to screen halal funds?", "answer": "..."}],
+                    },
+                ]
+            },
+        }
+        mock_resp.raise_for_status = MagicMock()
+        mock_post.return_value = mock_resp
+
+        ctx = self._make_ctx()
+        init_classify(ctx, "can I take a mortgage?", model="test-model")
+
+        assert ctx.classification is not None
+        assert ctx.classification["category"] == "FN"
+        assert "Banking Riba Operations" in ctx.classification["clusters"]
+        assert ctx.classification["filters"] == {"parent_code": "FN"}
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    @patch("rlm_search.tools.api_tools.requests.post")
+    def test_browse_failure_falls_back_to_category_only(self, mock_post, mock_get_client):
+        """When browse() fails, classification still has category but empty clusters."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = "CATEGORY: PT"
+        mock_get_client.return_value = mock_client
+
+        # Browse fails
+        mock_post.side_effect = Exception("connection refused")
+
+        ctx = self._make_ctx()
+        init_classify(ctx, "how to perform ghusl?", model="test-model")
+
+        assert ctx.classification is not None
+        assert ctx.classification["category"] == "PT"
+        assert ctx.classification["filters"] == {"parent_code": "PT"}
+        # Clusters empty because browse failed, but classification still valid
+        assert ctx.classification["clusters"] == ""
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_llm_failure_sets_none(self, mock_get_client):
+        """When Phase 1 LLM fails entirely, ctx.classification is None."""
+        mock_get_client.side_effect = Exception("API key invalid")
+
+        ctx = self._make_ctx()
+        init_classify(ctx, "test question", model="test-model")
+
+        assert ctx.classification is None

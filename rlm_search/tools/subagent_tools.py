@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rlm.clients import get_client
 from rlm_search.tools.constants import MAX_DRAFT_LEN
 from rlm_search.tools.tracker import tool_call_tracker
 
@@ -439,16 +440,14 @@ def init_classify(
     question: str,
     model: str = "",
 ) -> None:
-    """Pre-classify query at setup_code time (zero iteration cost).
+    """Pre-classify query via two-phase approach (zero iteration cost).
 
-    Creates its own LM client for model flexibility, parses the raw LLM
-    output into a structured dict, and stores it on ``ctx.classification``.
-    Emits ``classifying`` / ``classified`` progress events via
-    ``ctx._parent_logger``.
+    Phase 1: LLM picks parent_code from 6 categories (simple, reliable).
+    Phase 2: browse() gets live cluster landscape for that category.
+    Phase 3: Deterministic token matching ranks clusters by relevance.
 
     On any failure, sets ``ctx.classification = None`` and logs a warning.
     """
-    import json as _json
     import logging
     import time
 
@@ -468,79 +467,6 @@ def init_classify(
     if ctx._parent_logger is not None:
         ctx._parent_logger.emit_progress("classifying", f"Pre-classifying with {model}")
 
-    # Build category + cluster summary with doc counts and sample questions
-    cat_lines = []
-    for code, cat in ctx.kb_overview_data.get("categories", {}).items():
-        name = cat.get("name", code)
-        doc_count = cat.get("document_count", 0)
-        # Get cluster counts from facets (richer than just names)
-        facet_clusters = {
-            c["value"]: c["count"]
-            for c in cat.get("facets", {}).get("clusters", [])
-        }
-        # Merge with cluster sample questions
-        cluster_samples = cat.get("clusters", {})
-        cluster_parts = []
-        # Show largest clusters first (most representative of category)
-        sorted_labels = sorted(
-            cluster_samples.keys(),
-            key=lambda l: facet_clusters.get(l, 0),
-            reverse=True,
-        )
-        for label in sorted_labels[:20]:
-            count = facet_clusters.get(label, "")
-            sample = (cluster_samples.get(label) or "")[:80]
-            entry = label
-            if count:
-                entry += f" ({count})"
-            if sample:
-                entry += f' — "{sample}"'
-            cluster_parts.append(entry)
-        cat_lines.append(
-            f"{code} — {name} [{doc_count} docs]\n"
-            + "\n".join(f"  · {c}" for c in cluster_parts)
-        )
-    cat_info = "\n".join(cat_lines)
-
-    prompt = [
-        {
-            "role": "user",
-            "content": (
-                "Classify this Islamic Q&A question into one of these categories"
-                " and suggest search filters.\n\n"
-                f'Question: "{question}"\n\n'
-                f"Categories and their clusters:\n{cat_info}\n\n"
-                "Examples:\n"
-                'Q: "Is it permissible to take a mortgage from a bank?"\n'
-                "CATEGORY: FN\n"
-                "CLUSTERS: Banking Riba Operations, Riba in Loan Contracts\n"
-                'FILTERS: {"parent_code": "FN"}\n'
-                "STRATEGY: Search for riba, mortgage, and bank loan rulings\n\n"
-                'Q: "How do I perform ghusl janabah?"\n'
-                "CATEGORY: PT\n"
-                "CLUSTERS: Ghusl\n"
-                'FILTERS: {"parent_code": "PT", "cluster_label": "Ghusl"}\n'
-                "STRATEGY: Search for ghusl types and requirements\n\n"
-                'Q: "Is it permissible for a wife to refuse intimacy?"\n'
-                "CATEGORY: MF\n"
-                "CLUSTERS: Marital Rights and Duties, Intimacy in Marriage\n"
-                'FILTERS: {"parent_code": "MF"}\n'
-                "STRATEGY: Search marital rights, refusal, and intimate relations rulings\n\n"
-                'Q: "What are the different types of shirk?"\n'
-                "CATEGORY: BE\n"
-                "CLUSTERS: Shirk and Polytheism, Tawhid Fundamentals\n"
-                'FILTERS: {"parent_code": "BE"}\n'
-                "STRATEGY: Broad topic — search shirk types, major vs minor shirk\n\n"
-                "Now classify the question above.\n"
-                "Respond with exactly (no other text):\n"
-                "CATEGORY: <code>\n"
-                "CLUSTERS: <comma-separated relevant cluster labels from the list above>\n"
-                'FILTERS: <json dict, e.g. {"parent_code": "BE"}>\n'
-                "STRATEGY: <1 sentence search plan>"
-            ),
-        },
-    ]
-
     t0 = time.monotonic()
 
     with tool_call_tracker(
@@ -550,7 +476,7 @@ def init_classify(
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         try:
-            from rlm.clients import get_client
+            # ── Phase 1: Category classification (LLM) ──────────────────
             from rlm_search.config import ANTHROPIC_API_KEY, RLM_BACKEND
 
             if RLM_BACKEND == "claude_cli":
@@ -561,37 +487,76 @@ def init_classify(
                     client_kwargs["api_key"] = ANTHROPIC_API_KEY
 
             client = get_client(RLM_BACKEND, client_kwargs)
-            raw = client.completion(prompt)
+            prompt_text = _build_category_prompt(question, ctx.kb_overview_data)
+            raw = client.completion([{"role": "user", "content": prompt_text}])
 
-            # Parse structured fields from raw output
-            parsed: dict = {
-                "raw": raw,
-                "category": "",
-                "clusters": "",
-                "filters": {},
-                "strategy": "",
-            }
+            # Parse category code from response
+            category = ""
             for line in raw.strip().split("\n"):
                 line_s = line.strip()
                 if line_s.upper().startswith("CATEGORY:"):
-                    parsed["category"] = line_s.split(":", 1)[1].strip()
-                elif line_s.upper().startswith("CLUSTERS:"):
-                    parsed["clusters"] = line_s.split(":", 1)[1].strip()
-                elif line_s.upper().startswith("FILTERS:"):
-                    try:
-                        parsed["filters"] = _json.loads(line_s.split(":", 1)[1].strip())
-                    except (_json.JSONDecodeError, ValueError):
-                        parsed["filters"] = {}
-                elif line_s.upper().startswith("STRATEGY:"):
-                    parsed["strategy"] = line_s.split(":", 1)[1].strip()
+                    category = line_s.split(":", 1)[1].strip().upper()
+                    break
+
+            if not category:
+                _log.warning("Phase 1 returned no category, raw=%r", raw[:200])
+                ctx.classification = None
+                classify_ms = int((time.monotonic() - t0) * 1000)
+                tc.set_summary({"error": "no category parsed", "duration_ms": classify_ms})
+                return
+
+            # ── Phase 2: Browse category clusters (API call) ────────────
+            clusters_str = ""
+            strategy = ""
+            try:
+                from rlm_search.tools.api_tools import browse as _browse
+
+                browse_result = _browse(
+                    ctx,
+                    filters={"parent_code": category},
+                    group_by="cluster_label",
+                    group_limit=3,
+                    limit=1,
+                )
+
+                # ── Phase 3: Deterministic cluster matching ─────────────
+                grouped = browse_result.get("grouped_results", [])
+                matched = _match_clusters(question, grouped)
+                clusters_str = ", ".join(matched)
+
+                # Build strategy from subtopic facets
+                facets = browse_result.get("facets", {})
+                subtopic_facets = facets.get("subtopics", [])
+                if subtopic_facets:
+                    top_subs = [f["value"] for f in subtopic_facets[:5]]
+                    strategy = f"Browse-matched clusters. Top subtopics: {', '.join(top_subs)}"
+                else:
+                    strategy = f"Browse-matched {len(matched)} clusters in {category}"
+
+            except Exception as e:
+                _log.warning("Phase 2 browse failed, using category-only: %s", e)
+                print(f"[classify] browse failed: {e}")
+                strategy = "Browse unavailable — search broadly within category"
+
+            # ── Assemble classification ─────────────────────────────────
+            parsed: dict = {
+                "raw": raw,
+                "category": category,
+                "clusters": clusters_str,
+                "filters": {"parent_code": category},
+                "strategy": strategy,
+            }
 
             ctx.classification = parsed
             classify_ms = int((time.monotonic() - t0) * 1000)
-            print(f"[classify] category={parsed['category']} time={classify_ms}ms")
+            print(
+                f"[classify] category={category} clusters={clusters_str!r} "
+                f"time={classify_ms}ms"
+            )
             tc.set_summary(
                 {
-                    "category": parsed["category"],
-                    "clusters": parsed["clusters"],
+                    "category": category,
+                    "clusters": clusters_str,
                     "duration_ms": classify_ms,
                 }
             )

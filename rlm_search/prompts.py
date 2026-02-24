@@ -100,12 +100,12 @@ After every `research()` call, `check_progress()` prints signals and returns a p
 
 ## Iteration Patterns
 
-### Pattern A: Straightforward question (2 iterations)
+### Pattern A: Straightforward question (1 iteration)
 The I.M.A.M. corpus has a direct match. Most questions follow this pattern.
+Multiple ```repl``` blocks in one response execute in the same iteration.
 
 ```repl
-# Iteration 1: Research with classification filters + extra angles
-overview = kb_overview()
+# Search with classification filters + extra angles
 filters = classification["filters"] if classification else None
 results = research(context, filters=filters, extra_queries=[
     {"query": "rephrase the question as a search", "filters": filters},
@@ -115,14 +115,14 @@ progress = check_progress()
 ```
 
 ```repl
-# Iteration 2: Draft and finalize
+# Draft and finalize (same iteration — no extra cost)
 result = draft_answer(context, results["results"])
 answer = result["answer"]
 ```
 
 FINAL_VAR(answer)
 
-### Pattern B: Multi-angle, same topic (3 iterations)
+### Pattern B: Multi-angle, same topic (2 iterations)
 Question spans conditions, exceptions, or practical applications.
 
 ```repl
@@ -143,7 +143,7 @@ progress = check_progress()
 ```
 
 ```repl
-# Iteration 3: Draft from all accumulated results
+# Draft in same iteration as final search (no extra cost)
 all_results = results["results"] + results2["results"]
 result = draft_answer(context, all_results)
 answer = result["answer"]
@@ -151,7 +151,7 @@ answer = result["answer"]
 
 FINAL_VAR(answer)
 
-### Pattern C: Stalled — reformulate (4 iterations)
+### Pattern C: Stalled — reformulate (2-3 iterations)
 First search yields low relevance. Try different phrasing.
 
 ```repl
@@ -161,7 +161,7 @@ progress = check_progress()  # → stalled or low confidence
 ```
 
 ```repl
-# Iteration 2: Reformulate and retry without filters
+# Iteration 2: Reformulate, retry, and draft in one turn
 alts = reformulate(context, context, top_score=progress["top_score"])
 results2 = research(alts[0], extra_queries=[
     {"query": alts[1]}, {"query": alts[2]},
@@ -170,7 +170,7 @@ progress = check_progress()
 ```
 
 ```repl
-# Iteration 3: Draft from combined results
+# Draft in same iteration
 all_results = results["results"] + results2["results"]
 result = draft_answer(context, all_results)
 answer = result["answer"]
@@ -201,6 +201,7 @@ FINAL_VAR(result["answer"])
 
 ## Efficient Tool Usage
 
+- **Multiple ```repl``` blocks per response** — all blocks in one response execute in the same iteration. Chain search → check → draft to finish in fewer iterations.
 - **`extra_queries` in one `research()` call** — all results merged, deduped, and evaluated together in one pass. Much cheaper than separate `research()` calls.
 - **Second `research()` call** — doesn't re-evaluate results from the first call (cross-call rating cache). Add new angles without wasted LLM calls.
 - **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth.
@@ -229,6 +230,9 @@ FINAL_VAR(result["answer"])
 - **FINAL(your answer here)** — inline text
 
 Both MUST appear at the START of a line, OUTSIDE of code blocks.
+
+**Important**: The variable must exist in REPL locals from a prior ```repl``` block.
+If unsure, use `SHOW_VARS()` to verify. FINAL_VAR on a nonexistent variable silently fails.
 """
 
 
@@ -238,7 +242,7 @@ def build_system_prompt(max_iterations: int = 15) -> str:
 
 ## Iteration Budget
 
-You have **{max_iterations} iterations** total. Each ```repl``` block costs one iteration.
+You have **{max_iterations} iterations** total. Each response you send costs one iteration — but you can include **multiple ```repl``` blocks in a single response** and they execute sequentially within the same iteration. Use this to chain dependent steps (search → check → draft) in one turn.
 
 **Read check_progress() after every research() call.** It tells you whether to draft or keep searching.
 
@@ -247,6 +251,6 @@ You have **{max_iterations} iterations** total. Each ```repl``` block costs one 
 - **confidence < 30% after 3+ searches** → reformulate or try different category
 - **After iteration {max_iterations - 3}** → draft and finalize regardless of evidence quality
 
-Most questions resolve in 2-3 iterations. Use more only when check_progress says to."""
+Most questions resolve in 1-2 iterations. Use more only when check_progress says to."""
 
     return AGENTIC_SEARCH_SYSTEM_PROMPT + budget_section

@@ -126,7 +126,12 @@ def research(
         deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
 
         # Separate new vs already-rated results (cross-call dedup)
-        new_results = [r for r in deduped if r["id"] not in ctx.evaluated_ratings]
+        # Re-evaluate prior OFF-TOPIC results — they may be relevant under a different query angle
+        new_results = [
+            r for r in deduped
+            if r["id"] not in ctx.evaluated_ratings
+            or ctx.evaluated_ratings[r["id"]] == "OFF-TOPIC"
+        ]
         prior_rated = {rid for rid in ctx.evaluated_ratings if rid in seen}
 
         # Evaluate ONLY new results — carry forward prior ratings

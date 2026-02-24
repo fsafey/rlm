@@ -258,57 +258,77 @@ def reformulate(
         return queries
 
 
-def batched_critique(
+def critique_answer(
     ctx: ToolContext,
     question: str,
     draft: str,
+    evidence: list[str] | None = None,
     model: str | None = None,
 ) -> tuple[str, bool]:
-    """Unified single-pass critique (content + citations in one LLM call).
+    """Evidence-grounded critique: cross-check draft citations against sources.
+
+    When evidence is provided, checks citation accuracy, attribution fidelity,
+    unsupported claims, and completeness against actual sources. Falls back to
+    a generic review when evidence is unavailable.
 
     Returns:
         Tuple of (verdict_text, passed).
     """
     with tool_call_tracker(
         ctx,
-        "batched_critique",
-        {"question": question[:100]},
+        "critique_answer",
+        {"question": question[:100], "has_evidence": evidence is not None},
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         if len(draft) > MAX_DRAFT_LEN:
             draft = draft[:MAX_DRAFT_LEN]
-        prompt = (
-            f"Review this draft answer to the question:\n"
-            f'"{question}"\n\n'
-            f"Draft:\n{draft}\n\n"
-            f"Check BOTH content and citations:\n\n"
-            f"CONTENT:\n"
-            f"1. Does it answer the actual question asked?\n"
-            f"2. Are there unsupported claims or fabricated rulings?\n"
-            f"3. Is anything important missing?\n\n"
-            f"CITATIONS:\n"
-            f"1. Are [Source: <id>] citations present for factual claims?\n"
-            f"2. Are any cited IDs missing or fabricated?\n"
-            f"3. Are there key claims without any citation?\n\n"
-            f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
-            f"If ANY check fails, the overall verdict is FAIL."
-        )
+
+        if evidence:
+            evidence_block = "\n".join(evidence)
+            prompt = (
+                f"Review this draft answer against the provided evidence.\n\n"
+                f"QUESTION:\n{question}\n\n"
+                f"EVIDENCE:\n{evidence_block}\n\n"
+                f"DRAFT:\n{draft}\n\n"
+                f"Check these four criteria:\n\n"
+                f"1. CITATION ACCURACY — Every [Source: N] in the draft must map to "
+                f"a real source in the evidence above. Flag any fabricated IDs.\n\n"
+                f"2. ATTRIBUTION FIDELITY — Claims attributed to specific scholars, "
+                f"texts, or rulings must actually appear in the cited source.\n\n"
+                f"3. UNSUPPORTED CLAIMS — Flag substantive Islamic rulings or factual "
+                f"claims that have no [Source: N] citation.\n\n"
+                f"4. COMPLETENESS — Key points from high-relevance evidence should "
+                f"not be omitted if they directly answer the question.\n\n"
+                f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
+                f"If ANY check fails, the overall verdict is FAIL."
+            )
+        else:
+            prompt = (
+                f"Review this draft answer to the question:\n"
+                f'"{question}"\n\n'
+                f"Draft:\n{draft}\n\n"
+                f"Check:\n"
+                f"1. Does it answer the actual question asked?\n"
+                f"2. Are there unsupported claims or fabricated rulings?\n"
+                f"3. Is anything important missing?\n"
+                f"4. Are [Source: N] citations present for factual claims?\n\n"
+                f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
+                f"If ANY check fails, the overall verdict is FAIL."
+            )
+
         verdict = ctx.llm_query(prompt, model=model)
         passed = verdict.strip().strip("*").upper().startswith("PASS")
         verdict_str = "PASS" if passed else "FAIL"
-        failed_str = "" if passed else " (failed: unified review)"
-        print(f"[critique_answer] dual-review verdict={verdict_str}{failed_str}")
+        failed_str = "" if passed else " (failed: evidence-grounded review)"
+        print(f"[critique_answer] verdict={verdict_str}{failed_str}")
         feedback = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
         tc.set_summary({
             "verdict": verdict_str,
-            "content_passed": passed,
-            "citation_passed": passed,
+            "has_evidence": evidence is not None,
             "feedback": feedback[:200],
             # Backward compat for frontend CritiqueDetail renderer
             "reason": feedback[:200],
-            "content_feedback": feedback[:150],
-            "citation_feedback": feedback[:150],
-            "failed": [] if passed else ["unified"],
+            "failed": [] if passed else ["evidence_review"],
         })
         return verdict, passed
 

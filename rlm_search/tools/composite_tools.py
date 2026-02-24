@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from rlm_search.tools.api_tools import search, search_multi
 from rlm_search.tools.format_tools import format_evidence
-from rlm_search.tools.subagent_tools import batched_critique, evaluate_results
+from rlm_search.tools.subagent_tools import critique_answer, evaluate_results
 from rlm_search.tools.tracker import tool_call_tracker
 
 if TYPE_CHECKING:
@@ -264,7 +264,7 @@ def draft_answer(
 
         answer = ctx.llm_query("".join(prompt_parts), model=model)
 
-        critique_text, passed = batched_critique(ctx, question, answer, model=model)
+        critique_text, passed = critique_answer(ctx, question, answer, evidence=evidence, model=model)
         revised = False
 
         if not passed:
@@ -280,7 +280,7 @@ def draft_answer(
                 "Start directly with ## Answer.\n",
             ]
             answer = ctx.llm_query("".join(rev_parts), model=model)
-            critique_text, passed = batched_critique(ctx, question, answer, model=model)
+            critique_text, passed = critique_answer(ctx, question, answer, evidence=evidence, model=model)
             revised = True
 
         print(

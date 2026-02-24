@@ -288,3 +288,83 @@ class TestSuggestStrategyWithBrowseClusters:
         ctx.search_log = [{"type": "search_multi", "query": "test", "filters": {"cluster_label": "Banking Riba Operations"}}]
         result = _suggest_strategy(ctx, set())
         assert "Browse-matched clusters" in result
+
+
+from rlm_search.tools.subagent_tools import critique_answer
+from rlm_search.tools.context import ToolContext as _ToolContext
+
+
+class TestCritiqueAnswerEvidence:
+    """Evidence-grounded critique tests."""
+
+    def _make_ctx(self) -> _ToolContext:
+        ctx = _ToolContext(api_url="http://test:8091")
+        ctx.llm_query = None
+        ctx.llm_query_batched = None
+        ctx._parent_logger = None
+        return ctx
+
+    def test_critique_with_evidence_passes_valid_draft(self):
+        """Draft citing real source IDs from evidence should PASS."""
+        ctx = self._make_ctx()
+        ctx.llm_query = lambda prompt, model=None: "PASS\nAll citations verified against evidence."
+        evidence = [
+            "[Source: 101] Q: Is mortgage halal? A: Majority view is it is not permissible.",
+            "[Source: 102] Q: Riba in banking A: Riba is strictly prohibited.",
+        ]
+        draft = (
+            "Mortgage is not permissible according to the majority [Source: 101]. "
+            "Riba is prohibited [Source: 102]."
+        )
+        verdict, passed = critique_answer(ctx, "Is mortgage halal?", draft, evidence=evidence)
+        assert passed is True
+        assert "PASS" in verdict
+
+    def test_critique_catches_fabricated_citation(self):
+        """Draft citing a source ID not in evidence should FAIL."""
+        ctx = self._make_ctx()
+        # Simulate LLM catching the fabricated citation
+        ctx.llm_query = lambda prompt, model=None: (
+            "FAIL\n[Source: 999] does not appear in the evidence. Fabricated citation."
+        )
+        evidence = [
+            "[Source: 101] Q: Is mortgage halal? A: Majority view is not permissible.",
+        ]
+        draft = "Mortgage is haram [Source: 101] and also per [Source: 999]."
+        verdict, passed = critique_answer(ctx, "Is mortgage halal?", draft, evidence=evidence)
+        assert passed is False
+        assert "FAIL" in verdict
+
+    def test_critique_without_evidence_uses_generic_prompt(self):
+        """Without evidence, falls back to generic review (no evidence block)."""
+        prompts_seen: list[str] = []
+
+        def capture_prompt(prompt, model=None):
+            prompts_seen.append(prompt)
+            return "PASS\nLooks reasonable."
+
+        ctx = self._make_ctx()
+        ctx.llm_query = capture_prompt
+        verdict, passed = critique_answer(ctx, "test question", "test draft", evidence=None)
+        assert passed is True
+        # Generic prompt should NOT contain "EVIDENCE:" section
+        assert "EVIDENCE:" not in prompts_seen[0]
+        # Should contain the generic check items
+        assert "Does it answer the actual question" in prompts_seen[0]
+
+    def test_critique_with_evidence_includes_evidence_in_prompt(self):
+        """When evidence provided, the prompt must include the evidence block."""
+        prompts_seen: list[str] = []
+
+        def capture_prompt(prompt, model=None):
+            prompts_seen.append(prompt)
+            return "PASS\nOK"
+
+        ctx = self._make_ctx()
+        ctx.llm_query = capture_prompt
+        evidence = ["[Source: 1] Q: Test A: Answer"]
+        critique_answer(ctx, "question", "draft [Source: 1]", evidence=evidence)
+        assert "EVIDENCE:" in prompts_seen[0]
+        assert "CITATION ACCURACY" in prompts_seen[0]
+        assert "ATTRIBUTION FIDELITY" in prompts_seen[0]
+        assert "[Source: 1] Q: Test A: Answer" in prompts_seen[0]

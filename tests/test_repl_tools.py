@@ -1328,7 +1328,7 @@ class TestReformulate:
 
 
 class TestCritiqueAnswer:
-    """Tests for critique_answer (delegates to batched_critique)."""
+    """Tests for critique_answer."""
 
     def test_pass_verdict(self):
         ns = _make_sub_agent_ns()
@@ -1855,7 +1855,7 @@ class TestDraftAnswer:
 
         assert out["passed"] is True
         captured = capsys.readouterr()
-        assert "dual-review verdict=PASS" in captured.out
+        assert "verdict=PASS" in captured.out
 
     def test_unified_critique_fail_triggers_revision(self, capsys):
         """Unified critique FAIL triggers revision."""
@@ -1880,7 +1880,7 @@ class TestDraftAnswer:
         assert out["revised"] is True
         assert out["passed"] is True
         captured = capsys.readouterr()
-        assert "failed: unified review" in captured.out
+        assert "failed: evidence-grounded review" in captured.out
 
     def test_unified_critique_feedback_in_revision(self):
         """Revision prompt includes the unified critique feedback."""
@@ -2023,7 +2023,7 @@ class TestToolCallsTracking:
         assert research_tc["result_summary"]["search_count"] == 1
 
     def test_draft_answer_records_parent_children(self):
-        """draft_answer() has batched_critique as child."""
+        """draft_answer() has critique_answer as child."""
         ns = self._exec_ns()
         call_count = {"n": 0}
 
@@ -2031,7 +2031,7 @@ class TestToolCallsTracking:
             call_count["n"] += 1
             if call_count["n"] == 1:  # synthesis
                 return "## Answer\nTest [Source: 1]\n## Evidence\n## Confidence\nHigh"
-            return "PASS — good"  # unified critique
+            return "PASS — good"  # critique
 
         ns["_ctx"].llm_query = mock_llm
 
@@ -2044,10 +2044,10 @@ class TestToolCallsTracking:
         assert draft_tc["result_summary"]["passed"] is True
         assert len(draft_tc["children"]) >= 1
         child_tools = [ns["tool_calls"][i]["tool"] for i in draft_tc["children"]]
-        assert "batched_critique" in child_tools
+        assert "critique_answer" in child_tools
 
-    def test_batched_critique_tracked(self):
-        """batched_critique records tool call with unified verdict summary."""
+    def test_critique_answer_tracked(self):
+        """critique_answer records tool call with verdict summary."""
         ns = self._exec_ns()
         call_count = {"n": 0}
 
@@ -2055,13 +2055,13 @@ class TestToolCallsTracking:
             call_count["n"] += 1
             if call_count["n"] == 1:  # synthesis
                 return "## Answer\nTest [Source: 1]"
-            return "FAIL — missing citation for key claim"  # unified critique -> FAIL
+            return "FAIL — missing citation for key claim"
 
         ns["_ctx"].llm_query = mock_llm
         results = [{"id": "1", "score": 0.9, "question": "Q", "answer": "A"}]
         ns["draft_answer"]("question", results)
 
-        critique_entries = [tc for tc in ns["tool_calls"] if tc["tool"] == "batched_critique"]
+        critique_entries = [tc for tc in ns["tool_calls"] if tc["tool"] == "critique_answer"]
         assert len(critique_entries) >= 1
         tc = critique_entries[0]
         assert tc["result_summary"]["verdict"] == "FAIL"

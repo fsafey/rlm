@@ -101,7 +101,7 @@ def reformulate(question, failed_query, top_score=0.0, model=None):
     return _sub.reformulate(_ctx, question, failed_query, top_score=top_score, model=model)
 
 def critique_answer(question, draft, model=None):
-    verdict, _passed = _sub.batched_critique(_ctx, question, draft, model=model)
+    verdict, _passed = _sub.critique_answer(_ctx, question, draft, model=model)
     return verdict
 
 def check_progress():

@@ -22,27 +22,71 @@
 | 3: QualityGate | 1 | DONE | 12 pass | `0b380db` | 5-factor confidence, phase detection |
 | 4: SearchContext | 2 | DONE | 4 pass | `09d3777` | ~10 fields, auto-creates QualityGate |
 | 5: Tracker rewire | 2 | DONE | 4 new + 148 legacy pass | `5ca5a1f` | Dual-path: bus or legacy callback |
-| 6: SessionManager | 3 | DONE | 11 pass | `8f008e9` | Session lifecycle, follow-up swap, expiration |
-| 7: StreamingLoggerV2 | 4 | DONE | 5 pass | `1f1aa84` | RLMLogger subclass, EventBus delegation, JSONL |
-| 8: SSE endpoint | 5 | DONE | 3 pass | `7be27a9` | EventBus drain, replay, 100ms poll |
-| 9: setup_code v2 | 6 | DONE | 1 pass | `3b55ae4` | SearchContext + departments, backward compat props |
-| 10: api_v2 orchestrator | 6 | DONE | 2 pass | `c83603a` | SessionManager, EventBus per search, SSE router |
-| 11: Migrate tools | 7 | PENDING | — | — | Largest blast radius |
+| 6: SessionManager | 3 | DONE | 12 pass | `8f008e9` | create/delete/prepare_follow_up/cleanup |
+| 7: StreamingLoggerV2 | 4 | DONE | 5 pass | `1f1aa84` | Emits to EventBus, writes JSONL, cancellation |
+| 8: SSE endpoint | 5 | DONE | 3 pass | `7be27a9` | Reads from EventBus, replay support |
+| 9: setup_code v2 | 6 | DONE | 1 integration pass | `3b55ae4` | SearchContext + departments in LocalREPL |
+| 10: api_v2 orchestrator | 6 | DONE | 2 pass | `c83603a` | SessionManager + EventBus + SSE router |
+| 11: Migrate tools | 7 | **NEXT** | — | — | Largest blast radius — see notes below |
 | 12: Swap api.py | 7 | PENDING | — | — | |
 | 13: Remove legacy | 7 | PENDING | — | — | |
 | 14: Prompt dedup | 7 | PENDING | — | — | |
 | 15: Frontend events | 8 | PENDING | — | — | |
 
-**Full suite:** 491 passed, 8 skipped, 6 pre-existing failures (3 TestInitClassify, 3 test_empty_iteration_breaker)
+**Full suite (as of Task 10):** 491 passed, 8 skipped, 6 pre-existing failures (3× TestInitClassify, 3× test_empty_iteration_breaker)
 
-**Next batch:** Tasks 11-14 (Phase 7: Cutover + Cleanup). Task 11 is the critical migration — rewire all tools from `ctx.source_registry`/`ctx.search_log`/`ctx.evaluated_ratings` to `ctx.evidence.*` methods. Backward-compat properties on SearchContext (`context_v2.py`) already bridge the gap so existing tests pass through migration. After Task 11, swap api.py (12), remove legacy files (13), deduplicate prompts (14).
+---
 
-**Key context for next session:**
-- Working in worktree at `.worktrees/department-redesign` on branch `feature/department-redesign`
-- SearchContext (`context_v2.py`) already has backward-compat properties: `source_registry` → `evidence.live_dict`, `search_log` → `evidence.search_log`, `evaluated_ratings` → `evidence._ratings`
-- Tracker (`tracker.py`) already dual-paths: emits to `ctx.bus` if present, else falls back to `progress_callback`
-- `api_v2.py` uses `build_search_setup_code_v2()` which creates SearchContext — but tools still directly access old ToolContext fields internally
-- Task 11 strategy: duck-type check `hasattr(ctx, 'evidence')` in each tool file, migrate writes to department methods
+## Task 11 Readiness Notes
+
+Task 11 is the critical migration of all tool files from direct `ToolContext` field access to `SearchContext` department methods. This section captures reconnaissance done before starting, so the next session can execute immediately.
+
+### Files to modify (5 tool files + 2 test files)
+
+| File | Changes needed |
+|------|---------------|
+| `rlm_search/tools/normalize.py` | `source_registry[id] = hit` → option to use `evidence.register_hit()` |
+| `rlm_search/tools/api_tools.py` | `ctx.search_log.append(...)` → `ctx.evidence.log_search(...)`, add Cascade API try/except resilience |
+| `rlm_search/tools/composite_tools.py` | `ctx.evaluated_ratings[id]` → `ctx.evidence.set_rating()`, add `_child_scope` context manager replacing manual save/restore of `current_parent_idx` |
+| `rlm_search/tools/progress_tools.py` | `_compute_confidence()` → `ctx.quality.confidence`, `_suggest_strategy` reads from `ctx.evidence.search_log` |
+| `rlm_search/tools/subagent_tools.py` | `ctx.evaluated_ratings[id]` → `ctx.evidence.set_rating()`, `init_classify` emit through `ctx.bus` instead of `ctx._parent_logger` |
+| `rlm_search/tools/delegation_tools.py` | `ctx.source_registry[sid]` → `ctx.evidence.register_hit()` for child merge |
+| `tests/test_repl_tools.py` | No ToolContext instantiation (uses `build_search_setup_code` → exec). One `ToolContext(...)` at line 2424 in `TestRlmQueryDelegation._make_ctx()` |
+| `tests/test_search_api.py` | 5 `ToolContext(...)` instantiations (lines 782-859) in `TestInitClassify` class |
+
+### Key safety mechanism: SearchContext backward-compat properties
+
+`SearchContext` (context_v2.py) already has backward-compat properties:
+- `ctx.source_registry` → delegates to `ctx.evidence.live_dict` (live reference)
+- `ctx.search_log` → delegates to `ctx.evidence.search_log`
+- `ctx.evaluated_ratings` → delegates to `ctx.evidence._ratings`
+
+This means **existing tool code already works with SearchContext without any changes**. The migration to explicit department methods (`ctx.evidence.register_hit()`, `ctx.evidence.log_search()`, etc.) is an improvement for clarity and protocol correctness, but not a correctness requirement.
+
+### Recommended migration order
+
+1. `normalize.py` — smallest file, standalone function
+2. `api_tools.py` — add Cascade resilience (try/except), switch to `evidence.log_search()`
+3. `progress_tools.py` — replace `_compute_confidence()` with `ctx.quality.confidence` when available
+4. `subagent_tools.py` — emit through bus, route `init_classify` through bus instead of `_parent_logger`
+5. `composite_tools.py` — add `_child_scope`, use `evidence.set_rating()`
+6. `delegation_tools.py` — merge via `evidence.register_hit()`
+7. Test files — update `TestInitClassify` and `TestRlmQueryDelegation` to use `SearchContext`
+
+### Duck-typing pattern for dual support
+
+All tool functions must support **both** `ToolContext` (legacy) and `SearchContext` (new) during migration:
+
+```python
+# Pattern: check for .evidence attribute
+evidence = getattr(ctx, "evidence", None)
+if evidence is not None:
+    evidence.register_hit(hit)
+else:
+    ctx.source_registry[hit["id"]] = hit
+```
+
+After Task 13 removes legacy files, the duck-typing guards can be simplified.
 
 ---
 

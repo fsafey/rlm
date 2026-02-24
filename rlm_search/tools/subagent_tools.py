@@ -283,9 +283,17 @@ def critique_answer(
         if len(draft) > MAX_DRAFT_LEN:
             draft = draft[:MAX_DRAFT_LEN]
 
+        school_context = (
+            "This is the I.M.A.M. platform (imam-us.org), a Shia Ithna Ashari organization. "
+            "Sources are scholar-answered Q&A following Ja'fari fiqh. Do not flag Ja'fari "
+            "positions as incorrect based on Sunni-majority views. Judge only against "
+            "the provided evidence.\n\n"
+        )
+
         if evidence:
             evidence_block = "\n".join(evidence)
             prompt = (
+                f"{school_context}"
                 f"Review this draft answer against the provided evidence.\n\n"
                 f"QUESTION:\n{question}\n\n"
                 f"EVIDENCE:\n{evidence_block}\n\n"
@@ -295,7 +303,7 @@ def critique_answer(
                 f"a real source in the evidence above. Flag any fabricated IDs.\n\n"
                 f"2. ATTRIBUTION FIDELITY — Claims attributed to specific scholars, "
                 f"texts, or rulings must actually appear in the cited source.\n\n"
-                f"3. UNSUPPORTED CLAIMS — Flag substantive Islamic rulings or factual "
+                f"3. UNSUPPORTED CLAIMS — Flag substantive rulings or factual "
                 f"claims that have no [Source: N] citation.\n\n"
                 f"4. COMPLETENESS — Key points from high-relevance evidence should "
                 f"not be omitted if they directly answer the question.\n\n"
@@ -304,6 +312,7 @@ def critique_answer(
             )
         else:
             prompt = (
+                f"{school_context}"
                 f"Review this draft answer to the question:\n"
                 f'"{question}"\n\n'
                 f"Draft:\n{draft}\n\n"

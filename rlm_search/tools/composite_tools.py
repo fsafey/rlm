@@ -261,7 +261,9 @@ def draft_answer(
                 f"CRITIQUE:\n{critique_text}\n\n",
                 f"ORIGINAL:\n{answer}\n\n",
                 "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
-                "Fix flagged issues. Keep valid citations. Same format.\n",
+                "Fix flagged issues. Keep valid citations. Same format.\n"
+                "Return ONLY the revised answer — no preamble, no explanation of changes.\n"
+                "Start directly with ## Answer.\n",
             ]
             answer = ctx.llm_query("".join(rev_parts), model=model)
             critique_text, passed = batched_critique(ctx, question, answer, model=model)

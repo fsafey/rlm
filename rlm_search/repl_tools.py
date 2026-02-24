@@ -79,9 +79,6 @@ _ctx.pipeline_mode = {pipeline_mode!r}
 def search(query, filters=None, top_k=10):
     return _api.search(_ctx, query, filters=filters, top_k=top_k)
 
-def search_multi(query, collections=None, top_k_per_collection=50, final_top_k=10):
-    return _api.search_multi(_ctx, query, collections=collections, top_k_per_collection=top_k_per_collection, final_top_k=final_top_k)
-
 def browse(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_limit=4):
     return _api.browse(_ctx, filters=filters, offset=offset, limit=limit, sort_by=sort_by, group_by=group_by, group_limit=group_limit)
 

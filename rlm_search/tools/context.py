@@ -55,7 +55,6 @@ class SearchContext:
     _parent_logger: Any = None
     progress_callback: Any = None
     existing_answer: str | None = None
-    w3_state: dict = dataclasses.field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.headers and self.api_key:

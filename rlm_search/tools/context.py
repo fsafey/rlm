@@ -46,6 +46,10 @@ class SearchContext:
     _sub_iterations: int | None = None
     pipeline_mode: str = ""
 
+    # --- Usage tracking for child RLM delegations ---
+    _record_rlm_call: Any = None  # callback to record child RLMChatCompletion in parent REPL
+    _child_rlm_usage: list = dataclasses.field(default_factory=list)  # list[UsageSummary]
+
     # --- Backward compat (removed after Task 11 tool migration) ---
     current_parent_idx: int | None = None
     _parent_logger: Any = None

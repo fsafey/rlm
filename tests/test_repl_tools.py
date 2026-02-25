@@ -2365,6 +2365,7 @@ class _FakeResult:
 
     def __init__(self, response: str = "test answer"):
         self.response = response
+        self.usage_summary = None
 
 
 class TestRlmQueryDelegation:

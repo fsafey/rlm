@@ -177,6 +177,7 @@ class LocalREPL(NonIsolatedEnv):
         self.globals["SHOW_VARS"] = self._show_vars
         self.globals["llm_query"] = self._llm_query
         self.globals["llm_query_batched"] = self._llm_query_batched
+        self.globals["_record_rlm_call"] = self._record_rlm_call
 
     def _final_var(self, variable_name: str) -> str:
         """Return the value of a variable as a final answer."""
@@ -291,6 +292,10 @@ class LocalREPL(NonIsolatedEnv):
             return results
         except Exception as e:
             return [f"Error: LM query failed - {e}"] * len(prompts)
+
+    def _record_rlm_call(self, completion: RLMChatCompletion) -> None:
+        """Record an external RLMChatCompletion (e.g. child delegation) for usage tracking."""
+        self._pending_llm_calls.append(completion)
 
     def load_context(self, context_payload: dict | list | str):
         """Load context into the environment as context_0 (and 'context' alias)."""

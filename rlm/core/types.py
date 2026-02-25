@@ -75,6 +75,21 @@ class UsageSummary:
             },
         }
 
+    def merge(self, other: "UsageSummary") -> None:
+        """Merge another UsageSummary into this one (mutates in place)."""
+        for model, usage in other.model_usage_summaries.items():
+            if model in self.model_usage_summaries:
+                agg = self.model_usage_summaries[model]
+                agg.total_calls += usage.total_calls
+                agg.total_input_tokens += usage.total_input_tokens
+                agg.total_output_tokens += usage.total_output_tokens
+            else:
+                self.model_usage_summaries[model] = ModelUsageSummary(
+                    total_calls=usage.total_calls,
+                    total_input_tokens=usage.total_input_tokens,
+                    total_output_tokens=usage.total_output_tokens,
+                )
+
     @classmethod
     def from_dict(cls, data: dict) -> "UsageSummary":
         return cls(

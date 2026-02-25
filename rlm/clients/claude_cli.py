@@ -126,7 +126,7 @@ class ClaudeCLI(BaseLM):
                 f"claude CLI returned non-JSON output (parse error: {e}). "
                 f"Raw output: {raw_output[:500]}"
             ) from e
-        result_text = data.get("result", "")
+        result_text = data.get("result") or ""
 
         # Accumulate per-model usage from modelUsage field
         model_usage = data.get("modelUsage", {})

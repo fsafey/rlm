@@ -135,6 +135,12 @@ def rlm_query(
                 "sources_merged": 0,
             }
 
+        # Propagate child RLM usage to parent tracking
+        if ctx._record_rlm_call is not None:
+            ctx._record_rlm_call(result)
+        if result.usage_summary is not None:
+            ctx._child_rlm_usage.append(result.usage_summary)
+
         # Merge child sources into parent registry
         n_merged = 0
         for sid, entry in child_sources.items():

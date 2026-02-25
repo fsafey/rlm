@@ -20,7 +20,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from rlm.core.rlm import RLM
-from rlm.core.types import RLMMetadata
+from rlm.core.types import RLMMetadata, UsageSummary
 from rlm.utils.rlm_utils import filter_sensitive_keys
 from rlm_search.bus import EventBus, SearchCancelled
 from rlm_search.config import (
@@ -204,15 +204,21 @@ def _emit_metadata(logger: StreamingLoggerV2, rlm: RLM) -> None:
     logger.log_metadata(metadata)
 
 
-def _get_evidence_store(rlm: RLM) -> Any:
-    """Walk persistent_env to find the EvidenceStore from SearchContext."""
+def _get_search_context(rlm: RLM) -> Any:
+    """Walk persistent_env to find the SearchContext from REPL locals."""
     if rlm._persistent_env is None:
         return None
     search_fn = rlm._persistent_env.locals.get("search")
     if search_fn and hasattr(search_fn, "__globals__"):
-        ctx = search_fn.__globals__.get("_ctx")
-        if ctx is not None and hasattr(ctx, "evidence"):
-            return ctx.evidence
+        return search_fn.__globals__.get("_ctx")
+    return None
+
+
+def _get_evidence_store(rlm: RLM) -> Any:
+    """Walk persistent_env to find the EvidenceStore from SearchContext."""
+    ctx = _get_search_context(rlm)
+    if ctx is not None and hasattr(ctx, "evidence"):
+        return ctx.evidence
     return None
 
 
@@ -303,7 +309,16 @@ def _run_search_v2(
             sources = evidence.top_rated(n=20)
         else:
             sources = _extract_sources(result.response or "")
-        usage = result.usage_summary.to_dict() if result.usage_summary else {}
+
+        # Merge child RLM delegation usage into the top-level summary
+        usage_summary = result.usage_summary
+        ctx = _get_search_context(rlm)
+        if ctx is not None and ctx._child_rlm_usage:
+            if usage_summary is None:
+                usage_summary = UsageSummary(model_usage_summaries={})
+            for child_usage in ctx._child_rlm_usage:
+                usage_summary.merge(child_usage)
+        usage = usage_summary.to_dict() if usage_summary else {}
 
         logger.mark_done(
             answer=result.response,

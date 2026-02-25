@@ -67,6 +67,7 @@ _ctx._depth = {depth!r}
 _ctx._max_delegation_depth = {max_delegation_depth!r}
 _ctx._sub_iterations = {sub_iterations!r}
 _ctx._parent_logger = globals().get("_parent_logger_ref")
+_ctx._record_rlm_call = globals().get("_record_rlm_call")
 _ctx.pipeline_mode = {pipeline_mode!r}
 """
 

@@ -424,13 +424,28 @@ class RLM:
 
         return response
 
-    def _fallback_answer(self, message: str | dict[str, Any]) -> str:
+    def _fallback_answer(self, message: str | dict[str, Any]) -> RLMChatCompletion:
         """
         Fallback behavior if the RLM is actually at max depth, and should be treated as an LM.
+        Returns a proper RLMChatCompletion with usage tracking.
         """
         client: BaseLM = get_client(self.backend, self.backend_kwargs)
+        start = time.perf_counter()
         response = client.completion(message)
-        return response
+        execution_time = time.perf_counter() - start
+        usage = client.get_usage_summary()
+        root_model = (
+            (self.backend_kwargs.get("model_name") or self.backend_kwargs.get("model", "unknown"))
+            if self.backend_kwargs
+            else "unknown"
+        )
+        return RLMChatCompletion(
+            root_model=root_model,
+            prompt=message,
+            response=response,
+            usage_summary=usage,
+            execution_time=execution_time,
+        )
 
     def _validate_persistent_environment_support(self) -> None:
         """

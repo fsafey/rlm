@@ -5,8 +5,21 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from rlm.clients import get_client
+from rlm_search.prompts import DOMAIN_PREAMBLE
 from rlm_search.tools.constants import MAX_DRAFT_LEN
 from rlm_search.tools.tracker import tool_call_tracker
+
+# Domain-aware relevance bridge — shared by batch and fallback evaluation paths
+_EVAL_DOMAIN_BRIDGE = (
+    "When evaluating relevance, consider that:\n"
+    "- Arabic terms and English equivalents are interchangeable "
+    "(e.g., 'ghusl' = 'ritual bath', 'riba' = 'interest/usury', "
+    "'nikah' = 'marriage contract', 'sawm' = 'fasting')\n"
+    "- A result addressing the underlying fiqhi principle is RELEVANT "
+    "even if the specific scenario or terminology differs\n"
+    "- Results from the same school of thought (Ja'fari) addressing "
+    "related conditions or exceptions are at minimum PARTIAL\n\n"
+)
 
 if TYPE_CHECKING:
     from rlm_search.tools.context import ToolContext
@@ -95,11 +108,15 @@ def evaluate_results(
             result_blocks.append(f"[{rid}] score={score:.2f}\nQ: {q}\nA: {a}")
 
         batch_prompt = (
-            f"Evaluate these search results for relevance to the question:\n"
+            DOMAIN_PREAMBLE
+            + _EVAL_DOMAIN_BRIDGE
+            + f"Evaluate these search results for relevance to the question:\n"
             f'"{question}"\n\n' + "\n\n".join(result_blocks) + "\n\n"
             f"For each result, respond with exactly one line:\n"
             f"[<id>] RELEVANT|PARTIAL|OFF-TOPIC CONFIDENCE:<1-5>\n\n"
-            f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
+            f"RELEVANT = the ruling or evidence applies to the question — even if using "
+            f"different terminology, the same concept framed differently, or the underlying "
+            f"fiqhi principle rather than the exact scenario asked\n"
             f"PARTIAL = tangentially related but does not address the core issue\n"
             f"OFF-TOPIC = about a completely different subject\n\n"
             f"Respond with {len(to_eval)} lines, one per result, in the same order."
@@ -132,12 +149,16 @@ def evaluate_results(
                 q = (r.get("question", "") or "")[:300]
                 a = (r.get("answer", "") or "")[:1000]
                 prompts.append(
-                    f"Evaluate this search result for the question:\n"
+                    DOMAIN_PREAMBLE
+                    + _EVAL_DOMAIN_BRIDGE
+                    + f"Evaluate this search result for the question:\n"
                     f'"{question}"\n\n'
                     f"Result [{rid}] score={score:.2f}\n"
                     f"Q: {q}\nA: {a}\n\n"
                     f"Respond with exactly one line: RELEVANT|PARTIAL|OFF-TOPIC followed by CONFIDENCE:<1-5>\n"
-                    f"RELEVANT = provides applicable rulings, evidence, or answers for the question (even if framed differently)\n"
+                    f"RELEVANT = the ruling or evidence applies to the question — even if using "
+                    f"different terminology, the same concept framed differently, or the underlying "
+                    f"fiqhi principle rather than the exact scenario asked\n"
                     f"PARTIAL = tangentially related but does not address the core issue\n"
                     f"OFF-TOPIC = about a completely different subject"
                 )
@@ -237,10 +258,21 @@ def reformulate(
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         prompt = (
+            DOMAIN_PREAMBLE
+            + "The corpus is Islamic Q&A following Ja'fari fiqh. "
+            "Key terminology by domain:\n"
+            "- Prayer & Purification: salah, wudhu, ghusl, najis, tahir, tayammum, qibla\n"
+            "- Worship: sawm, zakat, khums, hajj, kaffara, nadhr, itikaf\n"
+            "- Marriage & Family: nikah, mutah, talaq, mahr, nafaqa, iddah, mehrieh\n"
+            "- Finance: riba, bay', halal earnings, haram income, gharar, khums, tawbah mal\n"
+            "- Beliefs & Ethics: shirk, tawbah, wajib, haram, makruh, mustahab, mubah\n\n"
             f'The search query "{failed_query}" returned poor results '
             f"(best score: {top_score:.2f}) for the question:\n"
             f'"{question}"\n\n'
-            f"Generate exactly 3 alternative search queries that might find better results.\n"
+            f"Generate exactly 3 alternative search queries, each from a different angle:\n"
+            f"1. Use the Arabic or Ja'fari fiqh terminology for the concept\n"
+            f"2. Name the underlying Islamic ruling or principle being asked about\n"
+            f"3. Rephrase as a different scenario that would have the same Islamic answer\n\n"
             f"One query per line, no numbering, no quotes, no explanation."
         )
         response = ctx.llm_query(prompt, model=model)
@@ -290,10 +322,7 @@ def critique_answer(
         if len(draft) > MAX_DRAFT_LEN:
             draft = draft[:MAX_DRAFT_LEN]
 
-        school_context = (
-            "Sources are scholar-answered Q&A. Do not flag positions as incorrect "
-            "based on other schools of thought. Judge only against the provided evidence.\n\n"
-        )
+        school_context = DOMAIN_PREAMBLE
 
         if evidence:
             evidence_block = "\n".join(evidence)
@@ -303,15 +332,28 @@ def critique_answer(
                 f"QUESTION:\n{question}\n\n"
                 f"EVIDENCE:\n{evidence_block}\n\n"
                 f"DRAFT:\n{draft}\n\n"
-                f"Check these four criteria:\n\n"
+                f"Check these criteria:\n\n"
                 f"1. CITATION ACCURACY — Every [Source: N] in the draft must map to "
                 f"a real source in the evidence above. Flag any fabricated IDs.\n\n"
                 f"2. ATTRIBUTION FIDELITY — Claims attributed to specific scholars, "
                 f"texts, or rulings must actually appear in the cited source.\n\n"
                 f"3. UNSUPPORTED CLAIMS — Flag substantive rulings or factual "
                 f"claims that have no [Source: N] citation.\n\n"
-                f"4. COMPLETENESS — Key points from high-relevance evidence should "
-                f"not be omitted if they directly answer the question.\n\n"
+                f"4. COMPLETENESS — All materially distinct rulings, conditions, and "
+                f"caveats from high-relevance evidence should be represented. When "
+                f"multiple sources agree on the same ruling, a single merged paragraph "
+                f"with all citations is the correct synthesis — do not flag this as "
+                f"incomplete. Flag only when a distinct condition, exception, or "
+                f"directly-answering point from the evidence is absent.\n\n"
+                f"5. SCHOLARLY VOICE — The answer should frame rulings as coming from "
+                f"I.M.A.M. scholars (not as the AI's own opinion). Rulings stated "
+                f"declaratively ('The ruling is...') not tentatively ('It may be...', "
+                f"'It would seem...'). No first-person hedging ('I think', 'I believe', "
+                f"'it seems'). Arabic terms defined on first use.\n\n"
+                f"6. STRUCTURE — The answer leads with the direct ruling or main "
+                f"conclusion. Flag if: (a) the ruling is buried after extensive background, "
+                f"or (b) the answer opens with generic preamble ('This is an important "
+                f"topic', 'Islam addresses...') that delays the ruling.\n\n"
                 f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
                 f"If ANY check fails, the overall verdict is FAIL."
             )
@@ -324,8 +366,15 @@ def critique_answer(
                 f"Check:\n"
                 f"1. Does it answer the actual question asked?\n"
                 f"2. Are there unsupported claims or fabricated rulings?\n"
-                f"3. Is anything important missing?\n"
-                f"4. Are [Source: N] citations present for factual claims?\n\n"
+                f"3. Is any materially distinct ruling, condition, or caveats missing? "
+                f"(When multiple sources agree, a single merged paragraph is correct — "
+                f"do not flag consensus synthesis as incomplete.)\n"
+                f"4. Are [Source: N] citations present for factual claims?\n"
+                f"5. SCHOLARLY VOICE — Does the answer frame rulings as coming from "
+                f"I.M.A.M. scholars (not as the AI's own opinion)? Are rulings stated "
+                f"declaratively ('The ruling is...') not tentatively ('It may be...', "
+                f"'it seems')? No first-person hedging. Arabic terms defined on first use. "
+                f"No introductory padding before the ruling.\n\n"
                 f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
                 f"If ANY check fails, the overall verdict is FAIL."
             )
@@ -362,14 +411,15 @@ _CLASSIFY_STOP_WORDS = frozenset(
 )
 
 
-def _match_clusters(question: str, grouped_results: list) -> list[str]:
+def _match_clusters(question: str, grouped_results: list) -> tuple[list[str], bool]:
     """Rank clusters by token overlap with question against sample hits + labels.
 
-    Returns up to 5 cluster labels, ordered by relevance score.
-    Falls back to top 2 by document count when no tokens match.
+    Returns (cluster_labels, is_real_match).
+    is_real_match=False means no token overlap found — fell back to doc-count ordering.
+    Up to 5 cluster labels ordered by relevance score.
     """
     if not grouped_results:
-        return []
+        return [], False
 
     query_tokens = set(question.lower().split()) - _CLASSIFY_STOP_WORDS
 
@@ -391,9 +441,9 @@ def _match_clusters(question: str, grouped_results: list) -> list[str]:
 
     matched = [s[0] for s in scores if s[1] > 0]
     if matched:
-        return matched[:5]
-    # Fallback: top 2 by document count
-    return [s[0] for s in scores[:2]]
+        return matched[:5], True
+    # Fallback: top 2 by document count (no real token match)
+    return [s[0] for s in scores[:2]], False
 
 
 def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
@@ -421,8 +471,12 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         '"What are the types of shirk?" → BE\n'
         '"Can I pray Eid salah at home?" → WP\n'
         '"Is it permissible to cremate the dead?" → OT\n\n'
-        "Respond with exactly one line:\n"
-        "CATEGORY: <code>"
+        "Respond with exactly two lines:\n"
+        "CATEGORY: <code>\n"
+        "CONFIDENCE: HIGH|MEDIUM|LOW\n\n"
+        "Use LOW when the question spans two categories equally, or is genuinely ambiguous.\n"
+        "Use MEDIUM when one category fits but another is plausible.\n"
+        "Use HIGH when the question clearly belongs to one category."
     )
 
 
@@ -485,13 +539,17 @@ def init_classify(
             prompt_text = _build_category_prompt(question, ctx.kb_overview_data)
             raw = client.completion([{"role": "user", "content": prompt_text}])
 
-            # Parse category code from response
+            # Parse category code and confidence from response
             category = ""
+            confidence = "HIGH"  # default if model omits
             for line in raw.strip().split("\n"):
                 line_s = line.strip()
                 if line_s.upper().startswith("CATEGORY:"):
                     category = line_s.split(":", 1)[1].strip().upper()
-                    break
+                elif line_s.upper().startswith("CONFIDENCE:"):
+                    raw_conf = line_s.split(":", 1)[1].strip().upper()
+                    if raw_conf in ("HIGH", "MEDIUM", "LOW"):
+                        confidence = raw_conf
 
             if not category:
                 _log.warning("Phase 1 returned no category, raw=%r", raw[:200])
@@ -516,17 +574,31 @@ def init_classify(
 
                 # ── Phase 3: Deterministic cluster matching ─────────────
                 grouped = browse_result.get("grouped_results", [])
-                matched = _match_clusters(question, grouped)
+                matched, cluster_matched = _match_clusters(question, grouped)
                 clusters_str = ", ".join(matched)
 
-                # Build strategy from subtopic facets
+                # Build confidence-aware strategy
                 facets = browse_result.get("facets", {})
                 subtopic_facets = facets.get("subtopics", [])
-                if subtopic_facets:
-                    top_subs = [f["value"] for f in subtopic_facets[:5]]
-                    strategy = f"Browse-matched clusters. Top subtopics: {', '.join(top_subs)}"
+                top_subs = [f["value"] for f in subtopic_facets[:5]] if subtopic_facets else []
+
+                if confidence == "LOW":
+                    strategy = (
+                        "Low category confidence — start with broad search (no filters). "
+                        "Add category filter only if initial results confirm this category."
+                    )
+                elif not cluster_matched:
+                    sub_hint = f" Top subtopics: {', '.join(top_subs)}." if top_subs else ""
+                    strategy = (
+                        f"Category match confident ({category}), but no cluster token overlap — "
+                        f"filter by category only, skip cluster filter.{sub_hint}"
+                    )
                 else:
-                    strategy = f"Browse-matched {len(matched)} clusters in {category}"
+                    sub_hint = f" Top subtopics: {', '.join(top_subs)}." if top_subs else ""
+                    strategy = (
+                        f"Strong match — {clusters_str} in {category}."
+                        f" Use category + cluster filters for first search.{sub_hint}"
+                    )
 
             except Exception as e:
                 _log.warning("Phase 2 browse failed, using category-only: %s", e)
@@ -537,6 +609,7 @@ def init_classify(
             parsed: dict = {
                 "raw": raw,
                 "category": category,
+                "confidence": confidence,
                 "clusters": clusters_str,
                 "filters": {"parent_code": category},
                 "strategy": strategy,
@@ -544,10 +617,14 @@ def init_classify(
 
             ctx.classification = parsed
             classify_ms = int((time.monotonic() - t0) * 1000)
-            print(f"[classify] category={category} clusters={clusters_str!r} time={classify_ms}ms")
+            print(
+                f"[classify] category={category} confidence={confidence} "
+                f"clusters={clusters_str!r} time={classify_ms}ms"
+            )
             tc.set_summary(
                 {
                     "category": category,
+                    "confidence": confidence,
                     "clusters": clusters_str,
                     "duration_ms": classify_ms,
                 }

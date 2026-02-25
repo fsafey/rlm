@@ -12,6 +12,15 @@ from starlette.responses import StreamingResponse
 from rlm_search.bus import EventBus
 
 
+def _flatten(event: dict) -> dict:
+    """Flatten bus envelope into a single-level dict matching JSONL format.
+
+    Bus stores: {"type": "...", "data": {...}, "timestamp": "..."}
+    Frontend expects: {"type": "...", "timestamp": "...", ...data fields...}
+    """
+    return {"type": event["type"], "timestamp": event["timestamp"], **event.get("data", {})}
+
+
 def create_sse_router(searches: dict[str, EventBus]) -> APIRouter:
     """Create SSE streaming router.
 
@@ -38,7 +47,7 @@ def create_sse_router(searches: dict[str, EventBus]) -> APIRouter:
             # Replay: send all historical events first
             if replay:
                 for event in bus.replay():
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(_flatten(event))}\n\n"
                     last_sent = time.monotonic()
                     if event.get("type") in ("done", "error", "cancelled"):
                         searches.pop(search_id, None)
@@ -54,7 +63,7 @@ def create_sse_router(searches: dict[str, EventBus]) -> APIRouter:
 
                 events = bus.drain()
                 for event in events:
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(_flatten(event))}\n\n"
                     last_sent = time.monotonic()
                     if event.get("type") in ("done", "error", "cancelled"):
                         searches.pop(search_id, None)

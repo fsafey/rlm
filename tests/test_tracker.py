@@ -25,7 +25,7 @@ class TestTrackerEmitsToBus:
         with tool_call_tracker(ctx, "search", {"query": "test"}) as tc:
             tc.set_summary({"num_results": 5})
         events = ctx.bus.replay()
-        start_events = [e for e in events if e["type"] == "tool_start"]
+        start_events = [e for e in events if e["type"] == "tool_progress" and e["data"]["phase"] == "start"]
         assert len(start_events) == 1
         assert start_events[0]["data"]["tool"] == "search"
 
@@ -36,7 +36,7 @@ class TestTrackerEmitsToBus:
         with tool_call_tracker(ctx, "search", {"query": "test"}) as tc:
             tc.set_summary({"num_results": 5})
         events = ctx.bus.replay()
-        end_events = [e for e in events if e["type"] == "tool_end"]
+        end_events = [e for e in events if e["type"] == "tool_progress" and e["data"]["phase"] == "end"]
         assert len(end_events) == 1
         assert end_events[0]["data"]["tool"] == "search"
         assert "duration_ms" in end_events[0]["data"]
@@ -59,6 +59,6 @@ class TestTrackerEmitsToBus:
             with tool_call_tracker(ctx, "search", {"query": "test"}):
                 raise ValueError("test error")
         assert ctx.tool_calls[0]["error"] is not None
-        end_events = [e for e in ctx.bus.replay() if e["type"] == "tool_error"]
+        end_events = [e for e in ctx.bus.replay() if e["type"] == "tool_progress" and e["data"]["phase"] == "error"]
         assert len(end_events) == 1
-        assert end_events[0]["data"].get("error") is not None
+        assert end_events[0]["data"]["data"].get("error") is not None

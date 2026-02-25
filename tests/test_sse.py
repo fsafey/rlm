@@ -69,9 +69,12 @@ class TestSSEEndpoint:
         lines = [line for line in response.text.strip().split("\n") if line.startswith("data:")]
         events = [json.loads(line.removeprefix("data: ")) for line in lines]
 
-        # Each event must appear exactly once
-        type_counts = Counter((e["type"], json.dumps(e["data"], sort_keys=True)) for e in events)
-        for (event_type, _data), count in type_counts.items():
-            assert count == 1, f"Event '{event_type}' appeared {count} times, expected 1"
+        # Each event must appear exactly once (exclude timestamp which varies)
+        type_counts = Counter(
+            json.dumps({k: v for k, v in e.items() if k != "timestamp"}, sort_keys=True)
+            for e in events
+        )
+        for key, count in type_counts.items():
+            assert count == 1, f"Duplicate event: {key}"
 
         assert len(events) == 4

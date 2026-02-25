@@ -6,6 +6,7 @@ import contextlib
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
+from rlm_search.prompts import DOMAIN_PREAMBLE
 from rlm_search.tools.api_tools import search, search_multi
 from rlm_search.tools.format_tools import format_evidence
 from rlm_search.tools.subagent_tools import critique_answer, evaluate_results
@@ -249,22 +250,64 @@ def draft_answer(
     ) as tc:
         with _child_scope(ctx, tc.idx):
             prompt_parts = [
-                "Synthesize a comprehensive answer from the evidence below. "
-                "Present rulings as stated in the sources — do not add external positions.\n\n"
-                "Provide a thorough answer: address every dimension of the question, include"
-                " conditions "
-                "and caveats mentioned, and cite each claim. When multiple sources agree, "
-                "synthesize into a unified answer rather than listing separately.\n\n",
+                DOMAIN_PREAMBLE,
+                "Synthesize a comprehensive, well-structured answer from the "
+                "evidence below.\n\n"
+                "VOICE & TONE:\n"
+                "- Write as the voice of the I.M.A.M. scholarly corpus — presenting "
+                "the assembled guidance of qualified Ja'fari scholars. Frame answers "
+                "as 'I.M.A.M. scholars have addressed this:' or 'According to the "
+                "I.M.A.M. corpus...' — not as your own analysis.\n"
+                "- State rulings declaratively: 'The ruling is...' not 'It would seem "
+                "that...' or 'It may be that...'. Confidence uncertainty belongs in "
+                "## Confidence Assessment — keep the answer body authoritative.\n"
+                "- Use clear language accessible to English-speaking Muslims. "
+                "Define Arabic/fiqhi terms parenthetically on first use "
+                "(e.g., 'riba (usury/interest)'). Do not define terms the user "
+                "already used correctly in their question.\n"
+                "- Present rulings as stated in the sources — do not add external "
+                "positions or comparative fiqh unless the sources themselves "
+                "raise them.\n"
+                "- Do not open with preamble ('This is an important question', "
+                "'Islam addresses...'). Start directly with the ruling.\n\n"
+                "LENGTH:\n"
+                "- Single ruling question: 150-250 words.\n"
+                "- Ruling with conditions or exceptions: 300-450 words.\n"
+                "- Multi-part or complex fiqhi question: up to 600 words. Extend "
+                "beyond 600 only when distinct conditions from different sources "
+                "would otherwise be omitted — never to add summaries.\n"
+                "- Never pad with summary paragraphs that restate the opening ruling.\n\n"
+                "STRUCTURE:\n"
+                "- Lead with the direct ruling or answer.\n"
+                "- Follow with conditions, exceptions, and practical guidance "
+                "from the sources.\n"
+                "- When multiple sources agree, state the consensus once with "
+                "all citations.\n"
+                "- When sources present different conditions or caveats, organize "
+                "by condition.\n\n",
                 f"QUESTION:\n{question}\n\n",
                 "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
             ]
             if instructions:
                 prompt_parts.append(f"INSTRUCTIONS:\n{instructions}\n\n")
             prompt_parts.append(
-                "FORMAT: ## Answer (with [Source: <id>] citations), "
-                "## Evidence (source summaries), ## Confidence (High/Medium/Low).\n"
+                "FORMAT:\n"
+                "## Answer\n"
+                "Grounded answer with [Source: <id>] citations after each claim.\n\n"
+                "## Sources Consulted\n"
+                "One line per source cited: [Source: id] — [original question topic "
+                "in 5-8 words]. No paraphrase of rulings — the ruling is already in "
+                "## Answer.\n\n"
+                "## Confidence Assessment\n"
+                "- **High**: 3+ scholar answers consistently agree on the ruling.\n"
+                "- **Medium**: 1-2 sources directly address the question.\n"
+                "- **Low**: No direct match found; answer extrapolated from "
+                "related rulings.\n"
+                "Note which aspects of the question have direct corpus coverage "
+                "vs. which required extrapolation from related rulings.\n\n"
                 "Only cite IDs from the evidence. Flag gaps explicitly — say "
-                "'the available sources do not address this aspect' rather than guessing.\n"
+                "'the I.M.A.M. corpus does not directly address this specific "
+                "aspect' rather than guessing.\n"
             )
 
             answer = ctx.llm_query("".join(prompt_parts), model=model)
@@ -276,11 +319,22 @@ def draft_answer(
 
             if not passed:
                 rev_parts = [
+                    DOMAIN_PREAMBLE,
                     "Revise this answer based on the critique.\n\n",
                     f"CRITIQUE:\n{critique_text}\n\n",
                     f"ORIGINAL:\n{answer}\n\n",
                     "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
                     "Fix flagged issues. Keep valid citations. Same format.\n"
+                    "Maintain synthesis structure: lead with the ruling, keep consensus "
+                    "sources merged (do not expand a unified statement into per-source "
+                    "paragraphs).\n"
+                    "VOICE (preserve throughout): state rulings declaratively "
+                    "('The ruling is...' not 'It may be...'); frame as I.M.A.M. "
+                    "scholarly corpus ('According to the I.M.A.M. corpus...'); "
+                    "no first-person hedging ('I think', 'it seems'); "
+                    "define Arabic/fiqhi terms parenthetically on first use "
+                    "(e.g., 'riba (usury/interest)') if not already defined; "
+                    "no introductory padding before the ruling.\n"
                     "Return ONLY the revised answer — no preamble, no explanation of"
                     " changes.\n"
                     "Do NOT say 'Here is the revised answer' or describe what you changed.\n"

@@ -28,5 +28,13 @@ def format_evidence(results: list | dict, max_per_source: int = 3) -> list[str]:
         seen[rid] += 1
         q = (r.get("question", "") or "")[:200]
         a = (r.get("answer", "") or "")[:1500]
-        lines.append(f"[Source: {rid}] Q: {q} A: {a}")
+        meta = r.get("metadata", {})
+        topic = meta.get("primary_topic", "")
+        category = meta.get("parent_category", "")
+        tag = (
+            f" | {category} > {topic}"
+            if category and topic
+            else (f" | {topic}" if topic else "")
+        )
+        lines.append(f"[Source: {rid}{tag}] Q: {q} A: {a}")
     return lines

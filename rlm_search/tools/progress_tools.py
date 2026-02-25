@@ -49,6 +49,11 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
             )
             # Fall through to heuristic below
         else:
+            # LOW confidence: skip cluster suggestion entirely — broad search first
+            if ctx.classification.get("confidence") == "LOW":
+                strategy = ctx.classification.get("strategy", "")
+                return strategy if strategy else "Low confidence classification — search broadly without filters."
+
             # Find which classified clusters haven't been searched yet
             classified_clusters = [
                 c.strip() for c in ctx.classification.get("clusters", "").split(",") if c.strip()

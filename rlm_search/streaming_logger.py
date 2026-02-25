@@ -131,6 +131,8 @@ class ChildStreamingLogger:
             **iteration.to_dict(),
         }
         self._parent.bus.emit("sub_iteration", data)
+        entry = {"type": "sub_iteration", "timestamp": datetime.now().isoformat(), **data}
+        self._parent._write_jsonl(entry)
 
     def raise_if_cancelled(self) -> None:
         self._parent.bus.raise_if_cancelled()

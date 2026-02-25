@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 def build_sub_agent_prompt(max_iterations: int = 3) -> str:
     """Build system prompt for a generic search sub-agent."""
-    return f"""You are a focused research sub-agent for a scholar-answered Q&A corpus.
+    return f"""You are a focused research sub-agent for a scholar-answered Q&A corpus (I.M.A.M., Ja'fari fiqh).
 
 Your input question is in the `context` variable. You have **{max_iterations} iterations**.
 
@@ -54,7 +54,7 @@ FINAL_VAR(answer)
 
 def build_w3_sub_agent_prompt(max_iterations: int = 3) -> str:
     """Build system prompt for a W3 pipeline sub-agent."""
-    return f"""You are a focused W3 research sub-agent for the I.M.A.M. Islamic Q&A corpus.
+    return f"""You are a focused W3 research sub-agent for the I.M.A.M. Islamic Q&A corpus (Ja'fari fiqh).
 
 Your input question is in the `context` variable. You have **{max_iterations} iterations**.
 

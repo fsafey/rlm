@@ -258,8 +258,7 @@ def reformulate(
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         prompt = (
-            DOMAIN_PREAMBLE
-            + "The corpus is Islamic Q&A following Ja'fari fiqh. "
+            DOMAIN_PREAMBLE + "The corpus is Islamic Q&A following Ja'fari fiqh. "
             "Key terminology by domain:\n"
             "- Prayer & Purification: salah, wudhu, ghusl, najis, tahir, tayammum, qibla\n"
             "- Worship: sawm, zakat, khums, hajj, kaffara, nadhr, itikaf\n"
@@ -404,79 +403,45 @@ def critique_answer(
         return verdict, passed
 
 
-# Stop words excluded from query token matching
-_CLASSIFY_STOP_WORDS = frozenset(
-    "is it a the to can i do how what in of for and or but from with this that are was were"
-    " be been have has had my your his her its on at by an".split()
-)
-
-
-def _match_clusters(question: str, grouped_results: list) -> tuple[list[str], bool]:
-    """Rank clusters by token overlap with question against sample hits + labels.
-
-    Returns (cluster_labels, is_real_match).
-    is_real_match=False means no token overlap found — fell back to doc-count ordering.
-    Up to 5 cluster labels ordered by relevance score.
-    """
-    if not grouped_results:
-        return [], False
-
-    query_tokens = set(question.lower().split()) - _CLASSIFY_STOP_WORDS
-
-    scores: list[tuple[str, int, int]] = []
-    for group in grouped_results:
-        label = group.get("label", "")
-        label_tokens = set(label.lower().split()) - _CLASSIFY_STOP_WORDS
-        # Label matches weighted 3x (cluster name is high-signal)
-        score = len(query_tokens & label_tokens) * 3
-        # Sample hit question matches weighted 1x each
-        for hit in group.get("hits", []):
-            q = hit.get("question", "").lower()
-            hit_tokens = set(q.split()) - _CLASSIFY_STOP_WORDS
-            score += len(query_tokens & hit_tokens)
-        scores.append((label, score, group.get("total_count", 0)))
-
-    # Sort by match score desc, break ties by doc count desc
-    scores.sort(key=lambda x: (-x[1], -x[2]))
-
-    matched = [s[0] for s in scores if s[1] > 0]
-    if matched:
-        return matched[:5], True
-    # Fallback: top 2 by document count (no real token match)
-    return [s[0] for s in scores[:2]], False
-
-
 def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
-    """Build Phase 1 prompt: 6-way category classification (no clusters).
+    """Build classification prompt: category + cluster selection in a single LLM call.
 
-    Returns the user-role content string for the classification LLM call.
-    Deliberately excludes cluster labels — Phase 3 handles cluster selection
-    via browse() + deterministic matching.
+    Includes cluster labels and sample questions from kb_overview_data so the LLM
+    can do semantic matching — replaces the old token-overlap approach.
     """
     cat_lines = []
     for code, cat in kb_overview_data.get("categories", {}).items():
         name = cat.get("name", code)
         doc_count = cat.get("document_count", 0)
-        cat_lines.append(f"{code} — {name} [{doc_count} docs]")
+        clusters = cat.get("clusters", {})  # {label: sample_question}
+        line = f"{code} — {name} [{doc_count} docs]"
+        if clusters:
+            labels = list(clusters.keys())
+            line += f"\n  Clusters: {', '.join(labels)}"
+            # Include up to 3 sample questions for grounding
+            samples = [(lbl, q) for lbl, q in clusters.items() if q][:3]
+            for label, sample_q in samples:
+                line += f'\n    "{sample_q}" → {label}'
+        cat_lines.append(line)
     cat_info = "\n".join(cat_lines)
 
     return (
-        "Classify this Islamic Q&A question into one category.\n\n"
+        "Classify this Islamic Q&A question into one category and select "
+        "the most relevant clusters within that category.\n\n"
         f'Question: "{question}"\n\n'
-        f"Categories:\n{cat_info}\n\n"
-        "Examples:\n"
-        '"Is it permissible to take a mortgage?" → FN\n'
-        '"How do I perform ghusl?" → PT\n'
-        '"Is it permissible for a wife to refuse intimacy?" → MF\n'
-        '"What are the types of shirk?" → BE\n'
-        '"Can I pray Eid salah at home?" → WP\n'
-        '"Is it permissible to cremate the dead?" → OT\n\n'
-        "Respond with exactly two lines:\n"
+        f"Categories and their clusters:\n{cat_info}\n\n"
+        "Respond with exactly three lines:\n"
         "CATEGORY: <code>\n"
-        "CONFIDENCE: HIGH|MEDIUM|LOW\n\n"
-        "Use LOW when the question spans two categories equally, or is genuinely ambiguous.\n"
-        "Use MEDIUM when one category fits but another is plausible.\n"
-        "Use HIGH when the question clearly belongs to one category."
+        "CONFIDENCE: HIGH|MEDIUM|LOW\n"
+        "CLUSTERS: <comma-separated cluster labels from the chosen category, up to 5>\n\n"
+        "CATEGORY guidance:\n"
+        "- HIGH: question clearly belongs to one category\n"
+        "- MEDIUM: one category fits but another is plausible\n"
+        "- LOW: question spans two categories equally or is genuinely ambiguous\n\n"
+        "CLUSTERS guidance:\n"
+        "- Select clusters whose topic covers the question, even if wording differs\n"
+        "- Use NONE if no clusters are relevant\n"
+        "- Prefer fewer, more precise clusters over many vague ones\n"
     )
 
 
@@ -485,11 +450,10 @@ def init_classify(
     question: str,
     model: str = "",
 ) -> None:
-    """Pre-classify query via two-phase approach (zero iteration cost).
+    """Pre-classify query via single LLM call (zero iteration cost).
 
-    Phase 1: LLM picks parent_code from 6 categories (simple, reliable).
-    Phase 2: browse() gets live cluster landscape for that category.
-    Phase 3: Deterministic token matching ranks clusters by relevance.
+    One Sonnet call outputs category + clusters using semantic matching.
+    Cluster labels are validated against kb_overview_data to reject hallucinations.
 
     On any failure, sets ``ctx.classification = None`` and logs a warning.
     """
@@ -539,9 +503,10 @@ def init_classify(
             prompt_text = _build_category_prompt(question, ctx.kb_overview_data)
             raw = client.completion([{"role": "user", "content": prompt_text}])
 
-            # Parse category code and confidence from response
+            # Parse category, confidence, and clusters from response
             category = ""
             confidence = "HIGH"  # default if model omits
+            llm_clusters: list[str] = []
             for line in raw.strip().split("\n"):
                 line_s = line.strip()
                 if line_s.upper().startswith("CATEGORY:"):
@@ -550,60 +515,46 @@ def init_classify(
                     raw_conf = line_s.split(":", 1)[1].strip().upper()
                     if raw_conf in ("HIGH", "MEDIUM", "LOW"):
                         confidence = raw_conf
+                elif line_s.upper().startswith("CLUSTERS:"):
+                    raw_clusters = line_s.split(":", 1)[1].strip()
+                    if raw_clusters.upper() != "NONE":
+                        llm_clusters = [c.strip() for c in raw_clusters.split(",") if c.strip()]
 
             if not category:
-                _log.warning("Phase 1 returned no category, raw=%r", raw[:200])
+                _log.warning("LLM returned no category, raw=%r", raw[:200])
                 ctx.classification = None
                 classify_ms = int((time.monotonic() - t0) * 1000)
                 tc.set_summary({"error": "no category parsed", "duration_ms": classify_ms})
                 return
 
-            # ── Phase 2: Browse category clusters (API call) ────────────
-            clusters_str = ""
-            strategy = ""
-            try:
-                from rlm_search.tools.api_tools import browse as _browse
+            # ── Validate clusters against known labels ──────────────────
+            cat_data = ctx.kb_overview_data["categories"].get(category, {})
+            known_clusters = set(cat_data.get("clusters", {}).keys())
+            validated = [c for c in llm_clusters if c in known_clusters]
+            cluster_matched = len(validated) > 0
+            clusters_str = ", ".join(validated)
 
-                browse_result = _browse(
-                    ctx,
-                    filters={"parent_code": category},
-                    group_by="cluster_label",
-                    group_limit=3,
-                    limit=1,
+            # ── Build confidence-aware strategy ─────────────────────────
+            subtopic_facets = cat_data.get("facets", {}).get("subtopics", [])
+            top_subs = [f["value"] for f in subtopic_facets[:5]] if subtopic_facets else []
+
+            if confidence == "LOW":
+                strategy = (
+                    "Low category confidence — start with broad search (no filters). "
+                    "Add category filter only if initial results confirm this category."
                 )
-
-                # ── Phase 3: Deterministic cluster matching ─────────────
-                grouped = browse_result.get("grouped_results", [])
-                matched, cluster_matched = _match_clusters(question, grouped)
-                clusters_str = ", ".join(matched)
-
-                # Build confidence-aware strategy
-                facets = browse_result.get("facets", {})
-                subtopic_facets = facets.get("subtopics", [])
-                top_subs = [f["value"] for f in subtopic_facets[:5]] if subtopic_facets else []
-
-                if confidence == "LOW":
-                    strategy = (
-                        "Low category confidence — start with broad search (no filters). "
-                        "Add category filter only if initial results confirm this category."
-                    )
-                elif not cluster_matched:
-                    sub_hint = f" Top subtopics: {', '.join(top_subs)}." if top_subs else ""
-                    strategy = (
-                        f"Category match confident ({category}), but no cluster token overlap — "
-                        f"filter by category only, skip cluster filter.{sub_hint}"
-                    )
-                else:
-                    sub_hint = f" Top subtopics: {', '.join(top_subs)}." if top_subs else ""
-                    strategy = (
-                        f"Strong match — {clusters_str} in {category}."
-                        f" Use category + cluster filters for first search.{sub_hint}"
-                    )
-
-            except Exception as e:
-                _log.warning("Phase 2 browse failed, using category-only: %s", e)
-                print(f"[classify] browse failed: {e}")
-                strategy = "Browse unavailable — search broadly within category"
+            elif not cluster_matched:
+                sub_hint = f" Top subtopics: {', '.join(top_subs)}." if top_subs else ""
+                strategy = (
+                    f"Category match confident ({category}), but no cluster match — "
+                    f"filter by category only, skip cluster filter.{sub_hint}"
+                )
+            else:
+                sub_hint = f" Top subtopics: {', '.join(top_subs)}." if top_subs else ""
+                strategy = (
+                    f"Strong match — {clusters_str} in {category}."
+                    f" Use category + cluster filters for first search.{sub_hint}"
+                )
 
             # ── Assemble classification ─────────────────────────────────
             parsed: dict = {

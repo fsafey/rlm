@@ -1,110 +1,31 @@
-"""Tests for init_classify cluster matching logic."""
-
-from rlm_search.tools.subagent_tools import _match_clusters
-
-
-class TestMatchClusters:
-    """Deterministic cluster matching from browse grouped_results."""
-
-    def test_matches_query_tokens_in_sample_questions(self):
-        """Query terms found in sample hit questions score those clusters higher."""
-        grouped = [
-            {
-                "label": "Banking Riba Operations",
-                "total_count": 150,
-                "hits": [{"question": "Is it permissible to take a mortgage from a bank?"}],
-            },
-            {
-                "label": "Shariah Investment Screening",
-                "total_count": 80,
-                "hits": [{"question": "How to screen halal investment funds?"}],
-            },
-        ]
-        clusters, is_real = _match_clusters("can I take a mortgage?", grouped)
-        assert clusters[0] == "Banking Riba Operations"
-        assert is_real is True
-
-    def test_matches_query_tokens_in_cluster_labels(self):
-        """Query terms found in cluster labels score higher."""
-        grouped = [
-            {
-                "label": "Ghusl",
-                "total_count": 200,
-                "hits": [{"question": "How to perform ghusl after janabah?"}],
-            },
-            {
-                "label": "Wudu Ablution",
-                "total_count": 300,
-                "hits": [{"question": "Steps of ablution in Hanafi school"}],
-            },
-        ]
-        clusters, is_real = _match_clusters("how to perform ghusl", grouped)
-        assert clusters[0] == "Ghusl"
-        assert is_real is True
-
-    def test_fallback_to_top_by_count_when_no_matches(self):
-        """When no tokens match, return top 2 clusters by document count."""
-        grouped = [
-            {"label": "Cluster A", "total_count": 50, "hits": [{"question": "unrelated topic alpha"}]},
-            {"label": "Cluster B", "total_count": 200, "hits": [{"question": "unrelated topic beta"}]},
-            {"label": "Cluster C", "total_count": 100, "hits": [{"question": "unrelated topic gamma"}]},
-        ]
-        clusters, is_real = _match_clusters("completely different query xyz", grouped)
-        assert len(clusters) == 2
-        assert clusters[0] == "Cluster B"  # highest count
-        assert clusters[1] == "Cluster C"  # second highest
-        assert is_real is False
-
-    def test_stops_at_five_clusters_max(self):
-        """Never return more than 5 matched clusters."""
-        grouped = [
-            {
-                "label": f"Cluster {i}",
-                "total_count": 100 - i,
-                "hits": [{"question": f"prayer question variant {i}"}],
-            }
-            for i in range(10)
-        ]
-        clusters, is_real = _match_clusters("prayer question", grouped)
-        assert len(clusters) <= 5
-        assert is_real is True
-
-    def test_empty_grouped_results(self):
-        """Empty grouped_results returns empty list with is_real=False."""
-        clusters, is_real = _match_clusters("any question", [])
-        assert clusters == []
-        assert is_real is False
-
-    def test_ignores_stop_words(self):
-        """Common stop words don't inflate scores."""
-        grouped = [
-            {
-                "label": "Riba in Transactions",
-                "total_count": 100,
-                "hits": [{"question": "Is riba in all bank transactions?"}],
-            },
-            {
-                "label": "General Fiqh",
-                "total_count": 50,
-                "hits": [{"question": "What is the ruling on this matter?"}],
-            },
-        ]
-        # "is" and "in" are stop words — shouldn't boost "General Fiqh"
-        clusters, is_real = _match_clusters("is riba in mortgage", grouped)
-        assert clusters[0] == "Riba in Transactions"
-        assert is_real is True
-
+"""Tests for init_classify — single LLM call for category + cluster classification."""
 
 from rlm_search.tools.subagent_tools import _build_category_prompt
 
 
 class TestBuildCategoryPrompt:
-    """Phase 1 prompt: simple 6-way category classification."""
+    """Prompt includes category info with cluster labels and sample questions."""
 
     SAMPLE_KB = {
         "categories": {
             "PT": {"name": "Prayer & Tahara", "document_count": 4938},
             "FN": {"name": "Finance & Transactions", "document_count": 1891},
+        }
+    }
+
+    KB_WITH_CLUSTERS = {
+        "categories": {
+            "FN": {
+                "name": "Finance",
+                "document_count": 100,
+                "clusters": {
+                    "Banking Riba Operations": "Is mortgage permissible?",
+                    "Shariah Investment Screening": "How to screen funds?",
+                },
+                "facets": {
+                    "subtopics": [{"value": "riba", "count": 80}],
+                },
+            },
         }
     }
 
@@ -123,30 +44,30 @@ class TestBuildCategoryPrompt:
         assert "is mortgage halal?" in prompt
 
     def test_includes_confidence_output_format(self):
-        """Phase 1 prompt must ask for CONFIDENCE: HIGH|MEDIUM|LOW."""
         prompt = _build_category_prompt("test question", self.SAMPLE_KB)
         assert "CONFIDENCE: HIGH|MEDIUM|LOW" in prompt
 
-    def test_does_not_include_cluster_labels(self):
-        """Phase 1 prompt must NOT include cluster labels — that's Phase 3's job."""
-        kb_with_clusters = {
-            "categories": {
-                "FN": {
-                    "name": "Finance",
-                    "document_count": 100,
-                    "clusters": {"Banking Riba Operations": "sample"},
-                    "facets": {"clusters": [{"value": "Banking Riba Operations", "count": 50}]},
-                },
-            }
-        }
-        prompt = _build_category_prompt("test", kb_with_clusters)
-        assert "Banking Riba Operations" not in prompt
-
-    def test_output_format_instruction(self):
+    def test_includes_clusters_output_format(self):
+        """Prompt must ask for CLUSTERS in the response format."""
         prompt = _build_category_prompt("test", self.SAMPLE_KB)
-        assert "CATEGORY:" in prompt
-        # Must NOT ask for CLUSTERS, FILTERS, or STRATEGY
-        assert "CLUSTERS:" not in prompt.split("Respond")[1]  # not in the response format section
+        assert "CLUSTERS:" in prompt
+
+    def test_includes_cluster_labels_when_present(self):
+        """Cluster labels from kb_overview_data appear in the prompt."""
+        prompt = _build_category_prompt("test", self.KB_WITH_CLUSTERS)
+        assert "Banking Riba Operations" in prompt
+        assert "Shariah Investment Screening" in prompt
+
+    def test_includes_sample_questions_for_grounding(self):
+        """Sample questions from clusters appear in the prompt for semantic grounding."""
+        prompt = _build_category_prompt("test", self.KB_WITH_CLUSTERS)
+        assert "Is mortgage permissible?" in prompt
+        assert "How to screen funds?" in prompt
+
+    def test_no_clusters_when_absent_from_kb(self):
+        """Categories without clusters don't show cluster lines."""
+        prompt = _build_category_prompt("test", self.SAMPLE_KB)
+        assert "Clusters:" not in prompt
 
 
 from unittest.mock import MagicMock, patch
@@ -155,15 +76,31 @@ from rlm_search.tools.context import ToolContext
 from rlm_search.tools.subagent_tools import init_classify
 
 
-class TestInitClassifyTwoPhase:
-    """Integration: init_classify uses Phase 1 (LLM) + Phase 2 (browse) + Phase 3 (match)."""
+class TestInitClassify:
+    """Integration: init_classify uses single LLM call for category + clusters."""
 
     def _make_ctx(self) -> ToolContext:
         ctx = ToolContext(api_url="http://test:8091")
         ctx.kb_overview_data = {
             "categories": {
-                "FN": {"name": "Finance & Transactions", "document_count": 1891},
-                "PT": {"name": "Prayer & Tahara", "document_count": 4938},
+                "FN": {
+                    "name": "Finance & Transactions",
+                    "document_count": 1891,
+                    "clusters": {
+                        "Banking Riba Operations": "Is mortgage permissible?",
+                        "Shariah Investment Screening": "How to screen funds?",
+                    },
+                    "facets": {"subtopics": [{"value": "riba", "count": 80}]},
+                },
+                "PT": {
+                    "name": "Prayer & Tahara",
+                    "document_count": 4938,
+                    "clusters": {
+                        "Ghusl": "How to perform ghusl?",
+                        "Wudu Ablution": "Steps of wudu?",
+                    },
+                    "facets": {"subtopics": [{"value": "purification", "count": 120}]},
+                },
             }
         }
         ctx.llm_query = None
@@ -171,46 +108,14 @@ class TestInitClassifyTwoPhase:
         ctx._parent_logger = None
         return ctx
 
-    def _make_browse_response(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "hits": [],
-            "total": 1891,
-            "has_more": False,
-            "facets": {
-                "clusters": [
-                    {"value": "Banking Riba Operations", "count": 150},
-                    {"value": "Shariah Investment Screening", "count": 80},
-                ],
-                "subtopics": [{"value": "riba", "count": 80}],
-            },
-            "grouped_results": {
-                "clusters": [
-                    {
-                        "label": "Banking Riba Operations",
-                        "total_count": 150,
-                        "hits": [{"id": "1", "question": "Is mortgage permissible in Islam?", "answer": "..."}],
-                    },
-                    {
-                        "label": "Shariah Investment Screening",
-                        "total_count": 80,
-                        "hits": [{"id": "2", "question": "How to screen halal funds?", "answer": "..."}],
-                    },
-                ]
-            },
-        }
-        mock_resp.raise_for_status = MagicMock()
-        return mock_resp
-
     @patch("rlm_search.tools.subagent_tools.get_client")
-    @patch("rlm_search.tools.api_tools.requests.post")
-    def test_two_phase_sets_classification(self, mock_post, mock_get_client):
-        """Phase 1 LLM → Phase 2 browse → Phase 3 match → ctx.classification set."""
+    def test_single_call_sets_classification(self, mock_get_client):
+        """LLM returns category + clusters → ctx.classification set correctly."""
         mock_client = MagicMock()
-        mock_client.completion.return_value = "CATEGORY: FN\nCONFIDENCE: HIGH"
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: HIGH\nCLUSTERS: Banking Riba Operations"
+        )
         mock_get_client.return_value = mock_client
-        mock_post.return_value = self._make_browse_response()
 
         ctx = self._make_ctx()
         init_classify(ctx, "can I take a mortgage?", model="test-model")
@@ -220,18 +125,17 @@ class TestInitClassifyTwoPhase:
         assert ctx.classification["confidence"] == "HIGH"
         assert "Banking Riba Operations" in ctx.classification["clusters"]
         assert ctx.classification["filters"] == {"parent_code": "FN"}
-        # Strategy is non-empty and references the category
         assert ctx.classification["strategy"]
         assert "FN" in ctx.classification["strategy"]
 
     @patch("rlm_search.tools.subagent_tools.get_client")
-    @patch("rlm_search.tools.api_tools.requests.post")
-    def test_low_confidence_sets_broad_search_strategy(self, mock_post, mock_get_client):
+    def test_low_confidence_sets_broad_search_strategy(self, mock_get_client):
         """CONFIDENCE: LOW should produce a broad-search strategy."""
         mock_client = MagicMock()
-        mock_client.completion.return_value = "CATEGORY: FN\nCONFIDENCE: LOW"
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: LOW\nCLUSTERS: Banking Riba Operations"
+        )
         mock_get_client.return_value = mock_client
-        mock_post.return_value = self._make_browse_response()
 
         ctx = self._make_ctx()
         init_classify(ctx, "can I use haram money for charity?", model="test-model")
@@ -242,13 +146,11 @@ class TestInitClassifyTwoPhase:
         assert "no filters" in ctx.classification["strategy"].lower()
 
     @patch("rlm_search.tools.subagent_tools.get_client")
-    @patch("rlm_search.tools.api_tools.requests.post")
-    def test_missing_confidence_line_defaults_to_high(self, mock_post, mock_get_client):
+    def test_missing_confidence_line_defaults_to_high(self, mock_get_client):
         """When LLM omits CONFIDENCE line, default to HIGH."""
         mock_client = MagicMock()
-        mock_client.completion.return_value = "CATEGORY: FN"  # no CONFIDENCE line
+        mock_client.completion.return_value = "CATEGORY: FN\nCLUSTERS: Banking Riba Operations"
         mock_get_client.return_value = mock_client
-        mock_post.return_value = self._make_browse_response()
 
         ctx = self._make_ctx()
         init_classify(ctx, "can I take a mortgage?", model="test-model")
@@ -257,25 +159,69 @@ class TestInitClassifyTwoPhase:
         assert ctx.classification["confidence"] == "HIGH"
 
     @patch("rlm_search.tools.subagent_tools.get_client")
-    @patch("rlm_search.tools.api_tools.requests.post")
-    def test_browse_failure_falls_back_to_category_only(self, mock_post, mock_get_client):
-        """When browse() fails, classification still has category but empty clusters."""
+    def test_no_clusters_in_response_sets_empty(self, mock_get_client):
+        """When LLM returns CLUSTERS: NONE, classification has empty clusters."""
         mock_client = MagicMock()
-        mock_client.completion.return_value = "CATEGORY: PT\nCONFIDENCE: HIGH"
+        mock_client.completion.return_value = "CATEGORY: PT\nCONFIDENCE: HIGH\nCLUSTERS: NONE"
         mock_get_client.return_value = mock_client
-        mock_post.side_effect = Exception("connection refused")
 
         ctx = self._make_ctx()
         init_classify(ctx, "how to perform ghusl?", model="test-model")
 
         assert ctx.classification is not None
         assert ctx.classification["category"] == "PT"
-        assert ctx.classification["filters"] == {"parent_code": "PT"}
+        assert ctx.classification["clusters"] == ""
+        assert "category only" in ctx.classification["strategy"].lower()
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_hallucinated_cluster_filtered_out(self, mock_get_client):
+        """LLM-hallucinated cluster names are filtered, only valid ones kept."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: HIGH\n"
+            "CLUSTERS: Banking Riba Operations, Totally Fake Cluster"
+        )
+        mock_get_client.return_value = mock_client
+
+        ctx = self._make_ctx()
+        init_classify(ctx, "can I take a mortgage?", model="test-model")
+
+        assert ctx.classification is not None
+        assert "Banking Riba Operations" in ctx.classification["clusters"]
+        assert "Totally Fake Cluster" not in ctx.classification["clusters"]
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_all_clusters_hallucinated_falls_back_to_no_cluster(self, mock_get_client):
+        """When all LLM clusters are hallucinated, fall back to category-only."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: HIGH\nCLUSTERS: Fake One, Fake Two"
+        )
+        mock_get_client.return_value = mock_client
+
+        ctx = self._make_ctx()
+        init_classify(ctx, "can I take a mortgage?", model="test-model")
+
+        assert ctx.classification is not None
+        assert ctx.classification["clusters"] == ""
+        assert "category only" in ctx.classification["strategy"].lower()
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_missing_clusters_line_sets_empty(self, mock_get_client):
+        """When LLM omits CLUSTERS line entirely, classification has empty clusters."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = "CATEGORY: FN\nCONFIDENCE: HIGH"
+        mock_get_client.return_value = mock_client
+
+        ctx = self._make_ctx()
+        init_classify(ctx, "can I take a mortgage?", model="test-model")
+
+        assert ctx.classification is not None
         assert ctx.classification["clusters"] == ""
 
     @patch("rlm_search.tools.subagent_tools.get_client")
     def test_llm_failure_sets_none(self, mock_get_client):
-        """When Phase 1 LLM fails entirely, ctx.classification is None."""
+        """When LLM fails entirely, ctx.classification is None."""
         mock_get_client.side_effect = Exception("API key invalid")
 
         ctx = self._make_ctx()
@@ -312,7 +258,9 @@ class TestSuggestStrategyWithBrowseClusters:
                 },
             }
         }
-        ctx = self._make_ctx_with_classification("FN", "Banking Riba Operations, Riba in Loan Contracts", kb)
+        ctx = self._make_ctx_with_classification(
+            "FN", "Banking Riba Operations, Riba in Loan Contracts", kb
+        )
         result = _suggest_strategy(ctx, set())
         assert "Banking Riba Operations" in result
         assert "research(query" in result
@@ -355,7 +303,9 @@ class TestSuggestStrategyWithBrowseClusters:
         }
         ctx = self._make_ctx_with_classification("FN", "Banking Riba Operations", kb)
         ctx.evidence.log_search(
-            "test", 3, filters={"cluster_label": "Banking Riba Operations"},
+            "test",
+            3,
+            filters={"cluster_label": "Banking Riba Operations"},
             search_type="search_multi",
         )
         result = _suggest_strategy(ctx, set())

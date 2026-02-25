@@ -200,7 +200,7 @@ class ClaudeCLI(BaseLM):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=prompt_text.encode()), timeout=self.timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()  # Reap child to avoid zombie processes
             raise RuntimeError(

@@ -1,4 +1,4 @@
-"""REPL setup code that injects search tools into the LocalREPL namespace."""
+"""REPL setup code v2 — injects search tools using SearchContext + departments."""
 
 from __future__ import annotations
 
@@ -22,18 +22,20 @@ def build_search_setup_code(
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
-    Imports tool implementations from ``rlm_search.tools.*``, creates a
-    per-session ``ToolContext``, and defines thin wrapper functions that
-    bind the context — preserving the existing REPL-facing API
-    (``search(query)`` not ``search(ctx, query)``).
+    Like build_search_setup_code() but creates a SearchContext with departments
+    (EventBus, EvidenceStore, QualityGate) instead of a ToolContext. LM-facing
+    wrapper function signatures are identical.
 
-    Mutable state aliases (``search_log``, ``source_registry``, ``tool_calls``)
-    are references to the same objects on ``_ctx``, so mutations are visible
-    to ``StreamingLogger`` via ``repl.locals``.
+    The ``source_registry`` alias is a **live reference** to EvidenceStore._registry,
+    so mutations from register_hit() are visible to the LM via ``print(source_registry)``
+    without re-assignment.
     """
     code = f"""\
 import os as _os
-from rlm_search.tools.context import ToolContext as _ToolContext
+from rlm_search.bus import EventBus as _EventBus
+from rlm_search.evidence import EvidenceStore as _EvidenceStore
+from rlm_search.quality import QualityGate as _QualityGate
+from rlm_search.tools.context import SearchContext as _SearchContext
 from rlm_search.tools import api_tools as _api
 from rlm_search.tools import subagent_tools as _sub
 from rlm_search.tools import composite_tools as _comp
@@ -41,10 +43,18 @@ from rlm_search.tools import format_tools as _fmt
 from rlm_search.tools import kb as _kb_mod
 from rlm_search.tools import progress_tools as _prog
 
-_ctx = _ToolContext(
+# Create departments
+_bus = _EventBus()
+_evidence = _EvidenceStore()
+_quality = _QualityGate(evidence=_evidence)
+
+_ctx = _SearchContext(
     api_url={api_url!r},
     api_key=_os.environ.get("_RLM_CASCADE_API_KEY", ""),
     timeout={timeout!r},
+    bus=_bus,
+    evidence=_evidence,
+    quality=_quality,
 )
 
 # Wire LLM callables from LocalREPL globals (None when exec'd standalone in tests)
@@ -63,7 +73,10 @@ _ctx.pipeline_mode = {pipeline_mode!r}
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)
     if kb_overview_data is not None:
         kb_json_str = json.dumps(kb_overview_data)
-        code += f"\nimport json as _json\n_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
+        code += (
+            f"\nimport json as _json\n"
+            f"_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
+        )
 
     if existing_answer is not None:
         code += f"\n_ctx.existing_answer = {existing_answer!r}\n"
@@ -118,10 +131,11 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
 def draft_answer(question, results, instructions=None, model=None):
     return _comp.draft_answer(_ctx, question, results, instructions=instructions, model=model)
 
-# ── Mutable state aliases (same objects as _ctx.*) ──────────────────────
-# StreamingLogger reads these from repl.locals
-search_log = _ctx.search_log
-source_registry = _ctx.source_registry
+# ── Mutable state aliases (delegate to departments) ─────────────────────
+# source_registry is a LIVE reference to EvidenceStore._registry
+# so register_hit() writes are visible to the LM via print(source_registry)
+source_registry = _ctx.evidence.live_dict
+search_log = _ctx.evidence.search_log
 tool_calls = _ctx.tool_calls
 
 # Public alias for persistence extraction

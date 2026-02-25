@@ -8,8 +8,6 @@ import json
 import logging
 import os
 import re
-import threading
-import time
 import traceback
 import uuid
 from collections.abc import AsyncIterator
@@ -44,10 +42,10 @@ from rlm_search.config import (
 from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
 from rlm_search.prompts import build_system_prompt
-from rlm_search.repl_tools_v2 import build_search_setup_code_v2
+from rlm_search.repl_tools import build_search_setup_code
 from rlm_search.sessions import SessionManager
 from rlm_search.sse import create_sse_router
-from rlm_search.streaming_v2 import StreamingLoggerV2
+from rlm_search.streaming_logger import StreamingLoggerV2
 
 _log = logging.getLogger("rlm_search")
 
@@ -165,7 +163,7 @@ def _build_rlm_kwargs(
         other_backends_arg = [backend]
         other_backend_kwargs_arg = [sub_kwargs]
 
-    setup_code = build_search_setup_code_v2(
+    setup_code = build_search_setup_code(
         api_url=CASCADE_API_URL,
         kb_overview_data=_kb_overview_cache,
         rlm_model=model,

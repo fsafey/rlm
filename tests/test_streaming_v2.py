@@ -3,9 +3,9 @@ import json
 import os
 import tempfile
 
+from rlm.core.types import CodeBlock, REPLResult, RLMIteration, RLMMetadata
 from rlm_search.bus import EventBus
-from rlm_search.streaming_v2 import StreamingLoggerV2
-from rlm.core.types import RLMIteration, RLMMetadata, CodeBlock, REPLResult
+from rlm_search.streaming_logger import StreamingLoggerV2
 
 
 def _make_iteration(response: str = "test", code: str = "", stdout: str = "") -> RLMIteration:
@@ -105,6 +105,7 @@ class TestStreamingV2Cancellation:
             )
             bus.cancel()
             import pytest
+
             from rlm_search.bus import SearchCancelled
             with pytest.raises(SearchCancelled):
                 logger.raise_if_cancelled()

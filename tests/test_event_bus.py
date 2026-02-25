@@ -97,10 +97,10 @@ class TestSetupCodeV2Integration:
     """Verify the new setup code executes in a LocalREPL without errors."""
 
     def test_setup_code_executes_cleanly(self):
-        from rlm_search.repl_tools_v2 import build_search_setup_code_v2
         from rlm.environments.local_repl import LocalREPL
+        from rlm_search.repl_tools import build_search_setup_code
 
-        code = build_search_setup_code_v2(
+        code = build_search_setup_code(
             api_url="https://test.com",
             kb_overview_data=None,
             rlm_model="test-model",

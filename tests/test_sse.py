@@ -1,8 +1,8 @@
 """tests/test_sse.py"""
 import json
 
-from starlette.testclient import TestClient
 from fastapi import FastAPI
+from starlette.testclient import TestClient
 
 from rlm_search.bus import EventBus
 from rlm_search.sse import create_sse_router

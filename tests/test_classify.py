@@ -140,8 +140,8 @@ class TestBuildCategoryPrompt:
 
 from unittest.mock import MagicMock, patch
 
-from rlm_search.tools.subagent_tools import init_classify
 from rlm_search.tools.context import ToolContext
+from rlm_search.tools.subagent_tools import init_classify
 
 
 class TestInitClassifyTwoPhase:
@@ -255,7 +255,6 @@ class TestSuggestStrategyWithBrowseClusters:
             "filters": {"parent_code": category},
             "strategy": "Browse-matched clusters",
         }
-        ctx.search_log = []
         return ctx
 
     def test_suggests_first_unsearched_classified_cluster(self):
@@ -285,13 +284,16 @@ class TestSuggestStrategyWithBrowseClusters:
         }
         ctx = self._make_ctx_with_classification("FN", "Banking Riba Operations", kb)
         # Mark the cluster as already searched
-        ctx.search_log = [{"type": "search_multi", "query": "test", "filters": {"cluster_label": "Banking Riba Operations"}}]
+        ctx.evidence.log_search(
+            "test", 3, filters={"cluster_label": "Banking Riba Operations"},
+            search_type="search_multi",
+        )
         result = _suggest_strategy(ctx, set())
         assert "Browse-matched clusters" in result
 
 
-from rlm_search.tools.subagent_tools import critique_answer
 from rlm_search.tools.context import ToolContext as _ToolContext
+from rlm_search.tools.subagent_tools import critique_answer
 
 
 class TestCritiqueAnswerEvidence:

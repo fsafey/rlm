@@ -3,7 +3,7 @@
 from rlm_search.bus import EventBus
 from rlm_search.evidence import EvidenceStore
 from rlm_search.quality import QualityGate
-from rlm_search.tools.context_v2 import SearchContext
+from rlm_search.tools.context import SearchContext
 
 
 class TestSearchContextCreation:
@@ -31,7 +31,7 @@ class TestSearchContextCreation:
             evidence=EvidenceStore(),
             quality=QualityGate(evidence=EvidenceStore()),
         )
-        assert ctx.headers["Authorization"] == "Bearer test-key"
+        assert ctx.headers["x-api-key"] == "test-key"
 
     def test_llm_callables_default_none(self):
         ctx = SearchContext(

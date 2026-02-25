@@ -1,9 +1,8 @@
 """tests/test_session_manager.py"""
-import threading
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from rlm_search.sessions import SessionManager, SessionState
+from rlm_search.sessions import SessionManager
 
 
 class TestSessionManagerLifecycle:

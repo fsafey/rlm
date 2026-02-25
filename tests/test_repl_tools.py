@@ -1218,9 +1218,9 @@ class TestCritiqueAnswer:
             return "PASS\nAll good."
 
         ns["_ctx"].llm_query = capture_prompt
-        ns["_ctx"].source_registry = {
-            "42": {"id": "42", "question": "Test Q", "answer": "Test A"},
-        }
+        ns["_ctx"].evidence.register_hit(
+            {"id": "42", "question": "Test Q", "answer": "Test A"}
+        )
         result = ns["critique_answer"]("question", "draft [Source: 42]")
         assert result["passed"] is True
         # Should have used evidence-grounded path (CITATION ACCURACY check)
@@ -1237,9 +1237,9 @@ class TestCritiqueAnswer:
             return "PASS\nOK"
 
         ns["_ctx"].llm_query = capture_prompt
-        ns["_ctx"].source_registry = {
-            "99": {"id": "99", "question": "Noise", "answer": "Should not appear"},
-        }
+        ns["_ctx"].evidence.register_hit(
+            {"id": "99", "question": "Noise", "answer": "Should not appear"}
+        )
         evidence = ["[Source: 1] Q: Real A: Evidence"]
         result = ns["critique_answer"]("question", "draft", evidence=evidence)
         assert result["passed"] is True
@@ -2066,25 +2066,16 @@ class TestCheckProgress:
         assert "continue" in captured.out
 
     def test_ready_with_relevant_results(self):
-        """3 relevant sources with good scores → phase=ready, confidence≥60."""
+        """3 relevant sources with good scores → phase=ready, confidence>=60."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
-        # Simulate 3 sources with good scores
+        # Register 3 hits and rate them RELEVANT via evidence store
         for i in range(3):
-            ctx.source_registry[str(i)] = {"id": str(i), "score": 0.6}
-        # Simulate search_log
-        ctx.search_log.append({"type": "search", "query": "q1", "filters": {}, "num_results": 3})
-        # Simulate evaluate_results tool call
-        ctx.tool_calls.append(
-            {
-                "tool": "evaluate_results",
-                "args": {},
-                "result_summary": {"relevant": 3, "partial": 1, "off_topic": 0},
-                "duration_ms": 100,
-                "children": [],
-                "error": None,
-            }
-        )
+            ctx.evidence.register_hit({"id": str(i), "question": "Q", "answer": "A", "score": 0.8})
+            ctx.evidence.set_rating(str(i), "RELEVANT", confidence=4)
+        # Log searches (breadth factor needs >= 2 to cross 60 threshold)
+        ctx.evidence.log_search(query="q1", num_results=3)
+        ctx.evidence.log_search(query="q2", num_results=3)
 
         result = ns["check_progress"]()
         assert result["phase"] == "ready"
@@ -2095,133 +2086,95 @@ class TestCheckProgress:
         ns = self._exec_ns()
         ctx = ns["_ctx"]
         for i in range(6):
-            ctx.search_log.append(
-                {
-                    "type": "search",
-                    "query": f"query_{i}",
-                    "filters": {"parent_code": "FN"},
-                    "num_results": 2,
-                }
+            ctx.evidence.log_search(
+                query=f"query_{i}", num_results=2, filters={"parent_code": "FN"}
             )
-        ctx.tool_calls.append(
-            {
-                "tool": "evaluate_results",
-                "args": {},
-                "result_summary": {"relevant": 1, "partial": 0, "off_topic": 5},
-                "duration_ms": 50,
-                "children": [],
-                "error": None,
-            }
-        )
+        # Register 1 hit rated RELEVANT (<2 relevant triggers stalled)
+        ctx.evidence.register_hit({"id": "0", "question": "Q", "answer": "A", "score": 0.3})
+        ctx.evidence.set_rating("0", "RELEVANT", confidence=2)
 
         result = ns["check_progress"]()
         assert result["phase"] == "stalled"
-        assert "Unexplored" in result["guidance"]
+        assert "reformulate" in result["guidance"]
 
     def test_repeating_low_diversity(self):
-        """3 identical queries → phase=repeating."""
+        """3 identical queries with no relevant → phase=continue (QualityGate has no repeating)."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
         for _ in range(3):
-            ctx.search_log.append(
-                {
-                    "type": "search",
-                    "query": "same query",
-                    "filters": {},
-                    "num_results": 3,
-                }
-            )
+            ctx.evidence.log_search(query="same query", num_results=3)
 
         result = ns["check_progress"]()
-        assert result["phase"] == "repeating"
-        assert "Low query diversity" in result["guidance"]
+        assert result["phase"] == "continue"
+        assert "No relevant results yet" in result["guidance"]
 
     def test_finalize_after_draft(self):
-        """draft_answer tool_call present → phase=finalize, includes draft bonus."""
+        """Draft recorded + critique passed + confidence>=60 → phase=finalize."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
-        ctx.tool_calls.append(
-            {
-                "tool": "draft_answer",
-                "args": {},
-                "result_summary": {"passed": True, "revised": False},
-                "duration_ms": 500,
-                "children": [],
-                "error": None,
-            }
-        )
+        # Build enough evidence for confidence >= 60
+        for i in range(3):
+            ctx.evidence.register_hit({"id": str(i), "question": "Q", "answer": "A", "score": 0.8})
+            ctx.evidence.set_rating(str(i), "RELEVANT", confidence=4)
+        ctx.evidence.log_search(query="q1", num_results=3)
+        # Record draft and passing critique via QualityGate
+        ctx.quality.record_draft(length=500)
+        ctx.quality.record_critique(passed=True, verdict="PASS\nGood answer.")
 
         result = ns["check_progress"]()
         assert result["phase"] == "finalize"
-        assert result["confidence"] >= 20  # draft bonus alone is 20
+        assert result["confidence"] >= 60
 
     def test_confidence_scoring(self):
-        """Verify score ranges match thresholds with controlled inputs."""
+        """Verify score ranges match QualityGate 5-factor formula."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
-        # Setup: 2 relevant, 2 partial, top_score=0.4, 1 category, no draft
+        # Setup: 2 relevant, 2 partial, top_score=0.5, 3 searches, no draft
         for i in range(4):
-            ctx.source_registry[str(i)] = {"id": str(i), "score": 0.4}
-        ctx.search_log.append(
-            {
-                "type": "search",
-                "query": "q",
-                "filters": {"parent_code": "FN"},
-                "num_results": 4,
-            }
-        )
-        ctx.tool_calls.append(
-            {
-                "tool": "evaluate_results",
-                "args": {},
-                "result_summary": {"relevant": 2, "partial": 2, "off_topic": 0},
-                "duration_ms": 50,
-                "children": [],
-                "error": None,
-            }
-        )
+            ctx.evidence.register_hit(
+                {"id": str(i), "question": "Q", "answer": "A", "score": 0.5}
+            )
+        ctx.evidence.set_rating("0", "RELEVANT", confidence=4)
+        ctx.evidence.set_rating("1", "RELEVANT", confidence=4)
+        ctx.evidence.set_rating("2", "PARTIAL", confidence=3)
+        ctx.evidence.set_rating("3", "PARTIAL", confidence=3)
+        for j in range(3):
+            ctx.evidence.log_search(
+                query=f"q_{j}", num_results=4, filters={"parent_code": "FN"}
+            )
 
         result = ns["check_progress"]()
-        # With partial_boost: evidence: min((2+2*0.5)/3,1)*35=35, quality: min(0.4/0.5,1)*25=20,
-        # breadth: min(2/2,1)*10=10, diversity: min(1/2,1)*10=5, draft=0 → total=70
-        assert 60 <= result["confidence"] <= 80  # boosted by partial_boost
+        # QualityGate formula:
+        #   relevance: min(35, int(35 * (2 + 0.3*2) / 4)) = 22
+        #   top_score: min(25, int(25 * 0.5)) = 12
+        #   breadth:   min(10, 3 * 3) = 9
+        #   draft: 0, critique: 0
+        #   total = 43
+        assert 35 <= result["confidence"] <= 50
 
     def test_strategy_suggests_unexplored_category(self):
-        """Only FN searched, KB has PT with 2500 docs → suggestion mentions PT."""
+        """Only FN searched, no relevant → QualityGate gives generic continue guidance."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
-        ctx.search_log.append(
-            {
-                "type": "search",
-                "query": "q",
-                "filters": {"parent_code": "FN"},
-                "num_results": 3,
-            }
-        )
+        ctx.evidence.log_search(query="q", num_results=3, filters={"parent_code": "FN"})
 
         result = ns["check_progress"]()
-        # PT has the most docs (2500) and is unexplored
-        assert "Prayer & Tahara" in result["guidance"]
-        assert "parent_code" in result["guidance"]
+        # QualityGate guidance (no taxonomy strategy): generic continue text
+        assert result["phase"] == "continue"
+        assert "No relevant results yet" in result["guidance"]
 
     def test_strategy_suggests_unexplored_cluster(self):
-        """All categories searched, some clusters unused → suggests specific cluster."""
+        """All categories searched, no relevant → QualityGate gives generic continue guidance."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
         # Mark all categories as explored
         for code in ["FN", "PT", "BE"]:
-            ctx.search_log.append(
-                {
-                    "type": "search",
-                    "query": f"q_{code}",
-                    "filters": {"parent_code": code},
-                    "num_results": 3,
-                }
-            )
+            ctx.evidence.log_search(query=f"q_{code}", num_results=3, filters={"parent_code": code})
 
         result = ns["check_progress"]()
-        # Should suggest a specific cluster since all categories are explored
-        assert "cluster" in result["guidance"].lower() or "Draft" in result["guidance"]
+        # QualityGate guidance: no taxonomy-aware strategy, just generic continue
+        assert result["phase"] == "continue"
+        assert "No relevant results yet" in result["guidance"]
 
     def test_audit_trail_printed(self, capsys):
         """3 searches → capsys contains numbered list and diversity ratio."""
@@ -2272,12 +2225,12 @@ class TestCheckProgress:
         assert tc["error"] is None
 
     def test_no_kb_data_graceful(self):
-        """kb_overview_data=None → still works, strategy is generic fallback."""
+        """kb_overview_data=None → still works, QualityGate gives generic guidance."""
         ns = self._exec_ns(kb_data=None)
         result = ns["check_progress"]()
 
         assert result["phase"] == "continue"
-        assert "broader search terms" in result["guidance"]
+        assert "No relevant results yet" in result["guidance"]
 
 
 class TestRlmQuery:

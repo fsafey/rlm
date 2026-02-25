@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import StreamingResponse

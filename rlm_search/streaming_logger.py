@@ -1,270 +1,142 @@
-"""Streaming logger that bridges sync RLM iterations to async SSE via a queue."""
-
+"""rlm_search/streaming_logger.py — RLMLogger that emits through EventBus."""
 from __future__ import annotations
 
 import json
-import threading
 from datetime import datetime
 from typing import Any
 
 from rlm.core.types import RLMIteration, RLMMetadata
 from rlm.logger.rlm_logger import RLMLogger
+from rlm_search.bus import EventBus, SearchCancelled  # noqa: F401 — re-export for compat
 
 
-class SearchCancelled(Exception):
-    """Raised inside the RLM loop when a search is cancelled by the client."""
+class StreamingLoggerV2(RLMLogger):
+    """RLMLogger that emits all events through an EventBus.
 
-
-class StreamingLogger(RLMLogger):
-    """RLMLogger subclass that pushes events to a thread-safe queue for SSE streaming."""
+    Replaces StreamingLogger's internal queue with EventBus delegation.
+    Still writes JSONL to disk for audit trail.
+    No more dual-path data flow — EventBus is the single channel.
+    """
 
     def __init__(
         self,
         log_dir: str,
-        file_name: str = "rlm",
-        search_id: str = "",
-        query: str = "",
-    ):
-        super().__init__(log_dir, file_name)
+        file_name: str,
+        search_id: str,
+        query: str,
+        bus: EventBus,
+    ) -> None:
+        super().__init__(log_dir=log_dir, file_name=file_name)
         self.search_id = search_id
         self.query = query
-        self.queue: list[dict] = []
-        self._lock = threading.Lock()
-        self._done = False
-        self._cancelled = False
-        self.source_registry: dict[str, dict] = {}
-        self._last_tool_call_count = 0
-        self._tool_stats: dict[str, dict] = {}  # {tool_name: {count, total_ms, errors}}
+        self.bus = bus
 
-    _RESERVED_PROGRESS_KEYS = frozenset({"type", "phase", "detail", "timestamp"})
-
-    def emit_progress(self, phase: str, detail: str = "", **kwargs: Any) -> None:
-        """Emit a lightweight progress event for frontend initialization display."""
-        assert not (self._RESERVED_PROGRESS_KEYS & set(kwargs)), (
-            f"kwargs must not override reserved keys: {self._RESERVED_PROGRESS_KEYS & set(kwargs)}"
-        )
-        event = {
-            "type": "progress",
-            "phase": phase,
-            "detail": detail,
-            "timestamp": datetime.now().isoformat(),
-            **kwargs,
-        }
-        with self._lock:
-            self.queue.append(event)
+    # --- RLMLogger overrides ---
 
     def log_metadata(self, metadata: RLMMetadata) -> None:
-        # Build the enriched event with search-level identifying info
-        event = {
-            "type": "metadata",
-            "search_id": self.search_id,
-            "query": self.query,
-            "log_file": self.log_file_path,
-            "timestamp": datetime.now().isoformat(),
-            **metadata.to_dict(),
-        }
-        # Write enriched event to disk (skip parent's stripped version)
-        if not self._metadata_logged:
-            with open(self.log_file_path, "a") as f:
-                json.dump(event, f)
-                f.write("\n")
-            self._metadata_logged = True
-        # Push to SSE queue
-        with self._lock:
-            self.queue.append(event)
-            print(f"[STREAM] metadata event queued | queue_size={len(self.queue)}")
+        """Emit metadata to bus + write to JSONL."""
+        if self._metadata_logged:
+            return
+        data = metadata.to_dict()
+        data["search_id"] = self.search_id
+        data["query"] = self.query
 
-    def cancel(self) -> None:
-        """Signal cancellation. The next log() call will raise SearchCancelled."""
-        with self._lock:
-            self._cancelled = True
+        self.bus.emit("metadata", data)
 
-    @property
-    def is_cancelled(self) -> bool:
-        with self._lock:
-            return self._cancelled
-
-    def raise_if_cancelled(self) -> None:
-        """Check-and-raise hook called by RLM core via duck-typing."""
-        with self._lock:
-            if self._cancelled:
-                raise SearchCancelled("Search cancelled by client")
-
-    # ------------------------------------------------------------------
-    # Sub-iteration lifecycle hooks
-    # ------------------------------------------------------------------
-
-    def on_environment_ready(self) -> None:
-        self.emit_progress("env_ready", "Search tools loaded")
-
-    def on_llm_start(self, iteration: int) -> None:
-        self.emit_tool_event("_llm", "start", {"iteration": iteration})
-
-    def on_code_executing(self, iteration: int, num_blocks: int) -> None:
-        self.emit_tool_event("_code", "start", {"iteration": iteration, "num_blocks": num_blocks})
-
-    # ------------------------------------------------------------------
-    # Tool-level progress (called from within exec'd code via callback)
-    # ------------------------------------------------------------------
-
-    def emit_tool_event(self, tool: str, phase: str, data: dict, *, duration_ms: int = 0) -> None:
-        """Emit a tool_progress SSE event — called mid-execution by tool_call_tracker."""
-        event = {
-            "type": "tool_progress",
-            "tool": tool,
-            "phase": phase,
-            "data": data,
-            "duration_ms": duration_ms,
-            "timestamp": datetime.now().isoformat(),
-        }
-        with self._lock:
-            self.queue.append(event)
-
-    def emit_event(self, event: dict) -> None:
-        """Emit an arbitrary event to the SSE stream.
-
-        Use for custom event types that don't warrant a dedicated method.
-        Automatically adds a timestamp if not present.
-        """
-        if "timestamp" not in event:
-            event = {**event, "timestamp": datetime.now().isoformat()}
-        with self._lock:
-            self.queue.append(event)
+        entry = {"type": "metadata", "timestamp": datetime.now().isoformat(), **data}
+        self._write_jsonl(entry)
+        self._metadata_logged = True
 
     def log(self, iteration: RLMIteration) -> None:
-        with self._lock:
-            if self._cancelled:
-                raise SearchCancelled("Search cancelled by client")
-
-        # Replicate super().log() — increment count (but write enriched event below)
+        """Emit iteration to bus + write to JSONL."""
         self._iteration_count += 1
-
-        # Accumulate source data from REPL's source_registry (populated by _normalize_hit)
-        for block in iteration.code_blocks:
-            sr = block.result.locals.get("source_registry")
-            if isinstance(sr, dict):
-                for sid, data in sr.items():
-                    if isinstance(data, dict):
-                        self.source_registry[sid] = data
-
-        # Extract new tool_calls since last iteration.
-        # All code blocks share the same tool_calls list reference (shallow-copied
-        # locals dict), so later blocks see the same list and would overwrite the
-        # delta captured from earlier blocks with an empty slice.  Guard with a
-        # length check so only the first block with new entries wins.
-        tool_calls_data: list[dict] = []
-        for block in iteration.code_blocks:
-            tc = block.result.locals.get("tool_calls")
-            if isinstance(tc, list) and len(tc) > self._last_tool_call_count:
-                tool_calls_data = tc[self._last_tool_call_count :]
-                self._last_tool_call_count = len(tc)
-
-        # Accumulate tool stats for done event summary
-        for tc in tool_calls_data:
-            name = tc.get("tool", "unknown")
-            if name not in self._tool_stats:
-                self._tool_stats[name] = {"count": 0, "total_ms": 0, "errors": 0}
-            self._tool_stats[name]["count"] += 1
-            self._tool_stats[name]["total_ms"] += tc.get("duration_ms", 0)
-            if tc.get("error"):
-                self._tool_stats[name]["errors"] += 1
-
-        event = {
-            "type": "iteration",
+        data = {
             "iteration": self._iteration_count,
-            "timestamp": datetime.now().isoformat(),
             **iteration.to_dict(),
-            "tool_calls": tool_calls_data,
         }
 
-        # Write enriched event (with tool_calls) to disk
-        with open(self.log_file_path, "a") as f:
-            json.dump(event, f)
-            f.write("\n")
+        self.bus.emit("iteration", data)
 
-        with self._lock:
-            self.queue.append(event)
-            print(
-                f"[STREAM] iteration {self._iteration_count} queued | has_code={bool(iteration.code_blocks)} final_answer={iteration.final_answer is not None}"
-            )
+        entry = {"type": "iteration", "timestamp": datetime.now().isoformat(), **data}
+        self._write_jsonl(entry)
+
+    # --- Terminal events ---
 
     def mark_done(
-        self, answer: str | None, sources: list[dict], execution_time: float, usage: dict
+        self,
+        answer: str | None,
+        sources: list[dict[str, Any]],
+        execution_time: float,
+        usage: dict[str, Any],
     ) -> None:
-        event = {
-            "type": "done",
-            "answer": answer or "",
+        data = {
+            "answer": answer,
             "sources": sources,
             "execution_time": execution_time,
             "usage": usage,
-            "tool_summary": self._tool_stats,
         }
-        with open(self.log_file_path, "a") as f:
-            json.dump(event, f)
-            f.write("\n")
-        with self._lock:
-            self.queue.append(event)
-            self._done = True
-
-    def mark_cancelled(self) -> None:
-        """Emit a terminal 'cancelled' event (distinct from 'done')."""
-        event = {"type": "cancelled"}
-        with open(self.log_file_path, "a") as f:
-            json.dump(event, f)
-            f.write("\n")
-        with self._lock:
-            self.queue.append(event)
-            self._done = True
+        self.bus.emit("done", data)
+        entry = {"type": "done", "timestamp": datetime.now().isoformat(), **data}
+        self._write_jsonl(entry)
 
     def mark_error(self, message: str) -> None:
-        event = {"type": "error", "message": message}
-        with open(self.log_file_path, "a") as f:
-            json.dump(event, f)
-            f.write("\n")
-        with self._lock:
-            self.queue.append(event)
-            self._done = True
+        self.bus.emit("error", {"message": message})
+        entry = {"type": "error", "timestamp": datetime.now().isoformat(), "message": message}
+        self._write_jsonl(entry)
 
-    def drain(self) -> list[dict]:
-        """Pop all pending events from the queue (thread-safe)."""
-        with self._lock:
-            events = self.queue[:]
-            self.queue.clear()
-        if events:
-            print(f"[STREAM] drained {len(events)} events | done={self._done}")
-        return events
+    def mark_cancelled(self) -> None:
+        self.bus.emit("cancelled", {})
+        entry = {"type": "cancelled", "timestamp": datetime.now().isoformat()}
+        self._write_jsonl(entry)
+
+    # --- Cancellation (delegated to bus) ---
+
+    def raise_if_cancelled(self) -> None:
+        self.bus.raise_if_cancelled()
+
+    # --- Properties for backward compat ---
 
     @property
     def is_done(self) -> bool:
-        with self._lock:
-            return self._done
+        return self.bus.is_done
+
+    # --- Internal ---
+
+    def _write_jsonl(self, entry: dict[str, Any]) -> None:
+        with open(self.log_file_path, "a") as f:
+            json.dump(entry, f)
+            f.write("\n")
 
 
 class ChildStreamingLogger:
-    """Thin proxy that emits child RLM events as sub_iteration events on the parent stream.
+    """Sub-agent logger — emits sub_iteration events through parent's bus.
 
-    Duck-types the logger interface expected by RLM core (log, log_metadata,
-    on_environment_ready, raise_if_cancelled).  Cancellation delegates to the
-    parent, giving us propagation for free.
+    Used by delegation_tools.rlm_query() so child RLM iterations stream
+    to the same SSE channel as the parent search.
     """
 
-    def __init__(self, parent: StreamingLogger, sub_question: str):
+    def __init__(self, parent: StreamingLoggerV2, sub_question: str) -> None:
         self._parent = parent
-        self._sub_question = sub_question
+        self.sub_question = sub_question
+
+    # --- RLMLogger duck-type interface (called by RLM core) ---
+
+    def log_metadata(self, metadata: Any) -> None:
+        pass  # Sub-agents don't emit metadata
 
     def log(self, iteration: RLMIteration) -> None:
-        """Wrap child iteration as a sub_iteration event on the parent queue."""
-        event = {
-            "type": "sub_iteration",
-            "sub_question": self._sub_question,
-            "timestamp": datetime.now().isoformat(),
+        data = {
+            "sub_question": self.sub_question,
             **iteration.to_dict(),
         }
-        with self._parent._lock:
-            self._parent.queue.append(event)
+        self._parent.bus.emit("sub_iteration", data)
 
-    def log_metadata(self, metadata: RLMMetadata) -> None:
-        pass  # Child metadata not surfaced
+    def raise_if_cancelled(self) -> None:
+        self._parent.bus.raise_if_cancelled()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._parent.bus.cancelled
 
     def on_environment_ready(self) -> None:
         pass
@@ -275,10 +147,10 @@ class ChildStreamingLogger:
     def on_code_executing(self, iteration: int, num_blocks: int) -> None:
         pass
 
-    def raise_if_cancelled(self) -> None:
-        """Delegate to parent — propagates cancellation to child RLM."""
-        self._parent.raise_if_cancelled()
-
     @property
-    def is_cancelled(self) -> bool:
-        return self._parent.is_cancelled
+    def iteration_count(self) -> int:
+        return 0
+
+
+# Backward-compat alias
+StreamingLogger = StreamingLoggerV2

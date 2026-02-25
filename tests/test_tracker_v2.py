@@ -5,7 +5,7 @@ import contextlib
 from rlm_search.bus import EventBus
 from rlm_search.evidence import EvidenceStore
 from rlm_search.quality import QualityGate
-from rlm_search.tools.context_v2 import SearchContext
+from rlm_search.tools.context import SearchContext
 
 
 def _make_ctx() -> SearchContext:

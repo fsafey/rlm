@@ -461,8 +461,6 @@ def init_classify(
             "tool_progress",
             {"phase": "classifying", "message": f"Pre-classifying with {model}"},
         )
-    elif ctx._parent_logger is not None:
-        ctx._parent_logger.emit_progress("classifying", f"Pre-classifying with {model}")
 
     t0 = time.monotonic()
 
@@ -566,13 +564,6 @@ def init_classify(
                         "classification": parsed,
                     },
                 )
-            elif ctx._parent_logger is not None:
-                ctx._parent_logger.emit_progress(
-                    "classified",
-                    f"Pre-classified in {classify_ms}ms",
-                    duration_ms=classify_ms,
-                    classification=parsed,
-                )
 
         except Exception as e:
             _log.warning("Pre-classification failed, proceeding without: %s", e)
@@ -590,10 +581,4 @@ def init_classify(
                         "message": f"Classification skipped ({classify_ms}ms)",
                         "duration_ms": classify_ms,
                     },
-                )
-            elif ctx._parent_logger is not None:
-                ctx._parent_logger.emit_progress(
-                    "classified",
-                    f"Classification skipped ({classify_ms}ms)",
-                    duration_ms=classify_ms,
                 )

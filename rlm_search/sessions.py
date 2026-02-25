@@ -1,4 +1,5 @@
 """rlm_search/sessions.py"""
+
 from __future__ import annotations
 
 import dataclasses

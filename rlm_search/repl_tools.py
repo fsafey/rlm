@@ -44,7 +44,7 @@ from rlm_search.tools import kb as _kb_mod
 from rlm_search.tools import progress_tools as _prog
 
 # Create departments
-_bus = _EventBus()
+_bus = globals().get("_sse_event_bus") or _EventBus()
 _evidence = _EvidenceStore()
 _quality = _QualityGate(evidence=_evidence)
 
@@ -74,10 +74,7 @@ _ctx.pipeline_mode = {pipeline_mode!r}
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)
     if kb_overview_data is not None:
         kb_json_str = json.dumps(kb_overview_data)
-        code += (
-            f"\nimport json as _json\n"
-            f"_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
-        )
+        code += f"\nimport json as _json\n_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
 
     if existing_answer is not None:
         code += f"\n_ctx.existing_answer = {existing_answer!r}\n"

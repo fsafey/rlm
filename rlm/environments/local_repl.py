@@ -130,6 +130,7 @@ class LocalREPL(NonIsolatedEnv):
         depth: int = 1,
         progress_callback: Any | None = None,
         _parent_logger_ref: Any | None = None,
+        _sse_event_bus: Any | None = None,
         **kwargs,
     ):
         super().__init__(persistent=persistent, depth=depth, **kwargs)
@@ -151,6 +152,10 @@ class LocalREPL(NonIsolatedEnv):
         # Inject parent logger ref for child SSE streaming (used by ChildStreamingLogger)
         if _parent_logger_ref is not None:
             self.globals["_parent_logger_ref"] = _parent_logger_ref
+
+        # Inject SSE EventBus so setup_code can wire it as the tracker's bus
+        if _sse_event_bus is not None:
+            self.globals["_sse_event_bus"] = _sse_event_bus
 
         # Load context if provided
         if context_payload is not None:

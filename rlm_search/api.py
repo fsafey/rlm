@@ -252,10 +252,11 @@ def _run_search_v2(
             rlm.logger = logger
             _emit_metadata(logger, rlm)
 
-            # Update progress callback + parent_logger in persistent env
+            # Update progress callback + parent_logger + SSE bus in persistent env
             if rlm._persistent_env is not None:
                 rlm._persistent_env.globals["_progress_callback"] = logger.bus.emit
                 rlm._persistent_env.globals["_parent_logger_ref"] = logger
+                rlm._persistent_env.globals["_sse_event_bus"] = bus
 
                 _ctx = None
                 search_fn = rlm._persistent_env.locals.get("search")
@@ -264,6 +265,7 @@ def _run_search_v2(
                 if _ctx is not None:
                     _ctx.progress_callback = logger.bus.emit
                     _ctx._parent_logger = logger
+                    _ctx.bus = bus
 
             result = rlm.completion(query, root_prompt=query)
 
@@ -289,6 +291,7 @@ def _run_search_v2(
                     "setup_code": kw["setup_code"],
                     "progress_callback": bus.emit,
                     "_parent_logger_ref": logger,
+                    "_sse_event_bus": bus,
                 },
                 max_iterations=kw["max_iterations"],
                 max_depth=kw["max_depth"],
@@ -297,9 +300,7 @@ def _run_search_v2(
                 persistent=True,
             )
 
-            _session_manager.create_session(
-                rlm=rlm, bus=bus, session_id=session_id
-            )
+            _session_manager.create_session(rlm=rlm, bus=bus, session_id=session_id)
 
             result = rlm.completion(query, root_prompt=query)
 
@@ -464,13 +465,15 @@ async def list_recent_logs(limit: int = 20) -> list[dict]:
             if not first_line:
                 continue
             meta = json.loads(first_line)
-            results.append({
-                "filename": f.name,
-                "search_id": meta.get("search_id", ""),
-                "query": meta.get("query", ""),
-                "timestamp": meta.get("timestamp", ""),
-                "root_model": meta.get("root_model", ""),
-            })
+            results.append(
+                {
+                    "filename": f.name,
+                    "search_id": meta.get("search_id", ""),
+                    "query": meta.get("query", ""),
+                    "timestamp": meta.get("timestamp", ""),
+                    "root_model": meta.get("root_model", ""),
+                }
+            )
         except (json.JSONDecodeError, OSError):
             continue
     return results

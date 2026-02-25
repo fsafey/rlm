@@ -1,4 +1,5 @@
 """rlm_search/sse.py"""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,6 +43,8 @@ def create_sse_router(searches: dict[str, EventBus]) -> APIRouter:
                     if event.get("type") in ("done", "error", "cancelled"):
                         searches.pop(search_id, None)
                         return
+                # Discard queued events already covered by replay
+                bus.drain()
 
             while time.monotonic() < deadline:
                 if await request.is_disconnected():

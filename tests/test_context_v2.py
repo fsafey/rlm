@@ -106,6 +106,14 @@ class TestEvaluatedRatingsFacade:
         ctx.evaluated_ratings["q1"] = "RELEVANT"
         assert len(ctx.evaluated_ratings) == 1
 
+    def test_dict_conversion(self):
+        """dict(facade) must produce {id: rating_string} without crashing."""
+        ctx = self._make_ctx()
+        ctx.evidence.set_rating("12345", "RELEVANT", confidence=4)
+        ctx.evidence.set_rating("67890", "PARTIAL", confidence=3)
+        result = dict(ctx.evaluated_ratings)
+        assert result == {"12345": "RELEVANT", "67890": "PARTIAL"}
+
     def test_equality_with_off_topic_string(self):
         """Critical: research() does ctx.evaluated_ratings[id] == 'OFF-TOPIC'."""
         ctx = self._make_ctx()

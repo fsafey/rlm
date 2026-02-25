@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-RATING_ORDER = {"RELEVANT": 0, "PARTIAL": 1, "OFF-TOPIC": 2, "UNKNOWN": 3}
+from rlm_search.prompt_constants import RATING_ORDER
 
 
 @dataclasses.dataclass

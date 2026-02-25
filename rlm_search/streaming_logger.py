@@ -1,4 +1,5 @@
 """rlm_search/streaming_logger.py — RLMLogger that emits through EventBus."""
+
 from __future__ import annotations
 
 import json

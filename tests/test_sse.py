@@ -1,5 +1,7 @@
 """tests/test_sse.py"""
+
 import json
+from collections import Counter
 
 from fastapi import FastAPI
 from starlette.testclient import TestClient
@@ -51,3 +53,25 @@ class TestSSEEndpoint:
         # Replay sends ALL events (metadata + done)
         assert "metadata" in types
         assert "done" in types
+
+    def test_replay_no_duplicates(self):
+        """Events emitted before SSE connects should not appear twice."""
+        bus = EventBus()
+        bus.emit("metadata", {"root_model": "test"})
+        bus.emit("iteration", {"index": 0})
+        bus.emit("iteration", {"index": 1})
+        bus.emit("done", {"answer": "result"})
+        # Do NOT drain — events sit in both _log and _queue
+        self.searches["s1"] = bus
+
+        client = TestClient(self.app)
+        response = client.get("/api/search/s1/stream?replay=true", timeout=5)
+        lines = [line for line in response.text.strip().split("\n") if line.startswith("data:")]
+        events = [json.loads(line.removeprefix("data: ")) for line in lines]
+
+        # Each event must appear exactly once
+        type_counts = Counter((e["type"], json.dumps(e["data"], sort_keys=True)) for e in events)
+        for (event_type, _data), count in type_counts.items():
+            assert count == 1, f"Event '{event_type}' appeared {count} times, expected 1"
+
+        assert len(events) == 4

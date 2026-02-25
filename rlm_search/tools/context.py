@@ -50,7 +50,7 @@ class SearchContext:
     _record_rlm_call: Any = None  # callback to record child RLMChatCompletion in parent REPL
     _child_rlm_usage: list = dataclasses.field(default_factory=list)  # list[UsageSummary]
 
-    # --- Backward compat (removed after Task 11 tool migration) ---
+    # --- Backward compat (maintained for tool compatibility) ---
     current_parent_idx: int | None = None
     _parent_logger: Any = None
     progress_callback: Any = None
@@ -118,6 +118,13 @@ class _RatingsFacade:
         if info is None:
             return default
         return info["rating"]
+
+    def keys(self):
+        return self._evidence._ratings.keys()
+
+    def values(self):
+        for v in self._evidence._ratings.values():
+            yield v["rating"]
 
     def items(self):  # type: ignore[override]
         for k, v in self._evidence._ratings.items():

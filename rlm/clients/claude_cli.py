@@ -42,6 +42,7 @@ class ClaudeCLI(BaseLM):
         self._model_call_counts: dict[str, int] = defaultdict(int)
         self._model_input_tokens: dict[str, int] = defaultdict(int)
         self._model_output_tokens: dict[str, int] = defaultdict(int)
+        self._model_cache_read_tokens: dict[str, int] = defaultdict(int)
         self._last_input_tokens: int = 0
         self._last_output_tokens: int = 0
 
@@ -131,10 +132,12 @@ class ClaudeCLI(BaseLM):
         # Accumulate per-model usage from modelUsage field
         model_usage = data.get("modelUsage", {})
         for model_key, usage in model_usage.items():
-            input_tokens = usage.get("inputTokens", 0) + usage.get("cacheReadInputTokens", 0)
+            input_tokens = usage.get("inputTokens", 0)
+            cache_read_tokens = usage.get("cacheReadInputTokens", 0)
             output_tokens = usage.get("outputTokens", 0)
             self._model_call_counts[model_key] += 1
             self._model_input_tokens[model_key] += input_tokens
+            self._model_cache_read_tokens[model_key] += cache_read_tokens
             self._model_output_tokens[model_key] += output_tokens
 
         # Track last-call usage from top-level usage field
@@ -226,6 +229,7 @@ class ClaudeCLI(BaseLM):
                 total_calls=self._model_call_counts[model_key],
                 total_input_tokens=self._model_input_tokens[model_key],
                 total_output_tokens=self._model_output_tokens[model_key],
+                total_cache_read_tokens=self._model_cache_read_tokens[model_key],
             )
         if not model_summaries:
             key = self.model or self.model_name

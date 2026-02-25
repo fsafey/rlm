@@ -81,3 +81,5 @@ quote-style = "double"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["eval: classify evaluation suite (hits real LLM + Cascade API)"]
+addopts = "-m 'not eval'"

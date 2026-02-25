@@ -44,14 +44,16 @@ def _serialize_value(value: Any) -> Any:
 @dataclass
 class ModelUsageSummary:
     total_calls: int
-    total_input_tokens: int
+    total_input_tokens: int       # regular input only (excl. cache reads)
     total_output_tokens: int
+    total_cache_read_tokens: int = 0  # cache reads — priced at 10% of input rate
 
     def to_dict(self):
         return {
             "total_calls": self.total_calls,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
+            "total_cache_read_tokens": self.total_cache_read_tokens,
         }
 
     @classmethod
@@ -60,6 +62,7 @@ class ModelUsageSummary:
             total_calls=data.get("total_calls"),
             total_input_tokens=data.get("total_input_tokens"),
             total_output_tokens=data.get("total_output_tokens"),
+            total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
         )
 
 
@@ -83,11 +86,13 @@ class UsageSummary:
                 agg.total_calls += usage.total_calls
                 agg.total_input_tokens += usage.total_input_tokens
                 agg.total_output_tokens += usage.total_output_tokens
+                agg.total_cache_read_tokens += usage.total_cache_read_tokens
             else:
                 self.model_usage_summaries[model] = ModelUsageSummary(
                     total_calls=usage.total_calls,
                     total_input_tokens=usage.total_input_tokens,
                     total_output_tokens=usage.total_output_tokens,
+                    total_cache_read_tokens=usage.total_cache_read_tokens,
                 )
 
     @classmethod

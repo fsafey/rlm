@@ -92,7 +92,7 @@ def _check_api_key(request: Request) -> None:
 
 def _strip_sources_section(text: str) -> str:
     """Remove ## Sources Consulted section — rendered as SourceCards in the frontend."""
-    return re.sub(r"\n*## Sources Consulted\n.*?(?=\n## |\Z)", "", text, flags=re.DOTALL).strip()
+    return re.sub(r"\n*## Sources Consulted\n.*?(?=\n+## |\Z)", "", text, flags=re.DOTALL).strip()
 
 
 def _extract_sources(answer: str, registry: dict[str, dict] | None = None) -> list[dict]:

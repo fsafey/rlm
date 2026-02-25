@@ -105,6 +105,18 @@ export interface ToolProgressEvent {
   timestamp: string;
 }
 
+export interface ToolStartEvent {
+  type: "tool_start";
+  data: { tool: string; args: Record<string, unknown> };
+  timestamp: string;
+}
+
+export interface ToolEndEvent {
+  type: "tool_end";
+  data: { tool: string; result_summary: Record<string, unknown>; duration_ms: number; error?: string };
+  timestamp: string;
+}
+
 export interface ErrorEvent {
   type: "error";
   message: string;
@@ -118,6 +130,8 @@ export type SSEEvent =
   | MetadataEvent
   | ProgressEvent
   | ToolProgressEvent
+  | ToolStartEvent
+  | ToolEndEvent
   | Iteration
   | SubIterationEvent
   | DoneEvent
@@ -148,6 +162,8 @@ export interface SearchState {
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
   toolProgress: ToolProgressEvent[];
+  toolStartEvents: ToolStartEvent[];
+  toolEndEvents: ToolEndEvent[];
   iterations: Iteration[];
   answer: string | null;
   sources: SearchSource[];
@@ -186,6 +202,8 @@ export const initialSearchState: SearchState = {
   metadata: null,
   progressSteps: [],
   toolProgress: [],
+  toolStartEvents: [],
+  toolEndEvents: [],
   iterations: [],
   answer: null,
   sources: [],

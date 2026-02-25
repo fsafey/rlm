@@ -5,9 +5,10 @@ import {
   ChevronDown,
   Sparkles,
 } from "lucide-react";
-import type { Iteration, MetadataEvent, ProgressEvent, SubIterationEvent, ToolProgressEvent } from "@/lib/types";
+import type { Iteration, MetadataEvent, ProgressEvent, SubIterationEvent, ToolEndEvent, ToolProgressEvent, ToolStartEvent } from "@/lib/types";
 import {
   detectActivity,
+  detectActivityFromEvent,
   getActiveText,
   formatToolProgress,
   PHASE_ICON,
@@ -19,6 +20,8 @@ interface SearchProgressProps {
   metadata: MetadataEvent | null;
   progressSteps: ProgressEvent[];
   toolProgress: ToolProgressEvent[];
+  toolStartEvents: ToolStartEvent[];
+  toolEndEvents: ToolEndEvent[];
   subIterations: SubIterationEvent[];
 }
 
@@ -190,6 +193,8 @@ export function SearchProgress({
   metadata,
   progressSteps,
   toolProgress,
+  toolStartEvents,
+  toolEndEvents,
   subIterations,
 }: SearchProgressProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -251,19 +256,47 @@ export function SearchProgress({
       ? allCompleted.slice(-MAX_VISIBLE)
       : allCompleted;
 
-  // Contextual active step — priority: tool progress > init progress > prediction
+  // Derive active text from tool_start / tool_end events (EventBus path)
+  const toolEventText = useMemo(() => {
+    // Prefer the most recent tool event (start or end)
+    const latestStart = toolStartEvents[toolStartEvents.length - 1];
+    const latestEnd = toolEndEvents[toolEndEvents.length - 1];
+
+    // If we have an end event newer than the latest start, show its result
+    if (latestEnd && (!latestStart || latestEnd.timestamp >= latestStart.timestamp)) {
+      const activity = detectActivityFromEvent(latestEnd);
+      if (activity) {
+        const dur = latestEnd.data.duration_ms ? ` (${latestEnd.data.duration_ms}ms)` : "";
+        return { label: activity.label, detail: `${activity.metric}${dur}` };
+      }
+    }
+
+    // Otherwise show the active tool_start
+    if (latestStart) {
+      const activity = detectActivityFromEvent(latestStart);
+      if (activity) {
+        return { label: activity.label, detail: activity.metric };
+      }
+    }
+
+    return null;
+  }, [toolStartEvents, toolEndEvents]);
+
+  // Contextual active step — priority: tool events > tool progress > init progress > prediction
   const toolText = formatToolProgress(toolProgress);
-  const activeText = toolText
-    ? toolText
-    : activeProgress
-      ? {
-          label: activeProgress.detail,
-          detail:
-            activeProgress.phase === "reasoning"
-              ? "This may take a moment..."
-              : "",
-        }
-      : getActiveText(activities, iterations.length, maxIterations);
+  const activeText = toolEventText
+    ? toolEventText
+    : toolText
+      ? toolText
+      : activeProgress
+        ? {
+            label: activeProgress.detail,
+            detail:
+              activeProgress.phase === "reasoning"
+                ? "This may take a moment..."
+                : "",
+          }
+        : getActiveText(activities, iterations.length, maxIterations);
 
   return (
     <div className="w-full max-w-2xl mx-auto">

@@ -131,6 +131,8 @@ function App() {
               metadata={state.metadata}
               progressSteps={state.progressSteps}
               toolProgress={state.toolProgress}
+              toolStartEvents={state.toolStartEvents}
+              toolEndEvents={state.toolEndEvents}
               subIterations={state.subIterations}
             />
           </div>

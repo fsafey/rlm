@@ -7,7 +7,9 @@ import type {
   ProgressEvent,
   SearchState,
   SubIterationEvent,
+  ToolEndEvent,
   ToolProgressEvent,
+  ToolStartEvent,
 } from "./types";
 import { initialSearchState } from "./types";
 
@@ -18,6 +20,8 @@ export type SearchAction =
   | { type: "SSE_ITERATION"; event: Iteration }
   | { type: "SSE_SUB_ITERATION"; event: SubIterationEvent }
   | { type: "SSE_TOOL_PROGRESS"; event: ToolProgressEvent }
+  | { type: "SSE_TOOL_START"; event: ToolStartEvent }
+  | { type: "SSE_TOOL_END"; event: ToolEndEvent }
   | { type: "SSE_PROGRESS"; event: ProgressEvent }
   | { type: "SSE_DONE"; event: DoneEvent }
   | { type: "SSE_ERROR"; event: ErrorEvent }
@@ -49,6 +53,8 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
         ...state,
         iterations: [...state.iterations, action.event],
         toolProgress: [],
+        toolStartEvents: [],
+        toolEndEvents: [],
         subIterations: [],
       };
 
@@ -57,6 +63,12 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
 
     case "SSE_TOOL_PROGRESS":
       return { ...state, toolProgress: [...state.toolProgress, action.event] };
+
+    case "SSE_TOOL_START":
+      return { ...state, toolStartEvents: [...state.toolStartEvents, action.event] };
+
+    case "SSE_TOOL_END":
+      return { ...state, toolEndEvents: [...state.toolEndEvents, action.event] };
 
     case "SSE_PROGRESS":
       return { ...state, progressSteps: [...state.progressSteps, action.event] };

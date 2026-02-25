@@ -8,7 +8,9 @@ import type {
   SearchSettings,
   SSEEvent,
   SubIterationEvent,
+  ToolEndEvent,
   ToolProgressEvent,
+  ToolStartEvent,
 } from "./types";
 import { defaultSettings, initialSearchState } from "./types";
 import { searchReducer } from "./searchReducer";
@@ -65,7 +67,7 @@ export function useSearch() {
 
         dispatch({ type: "SEARCH_CONNECTED", searchId: search_id, sessionId: session_id });
 
-        const stream = await fetch(`/api/search/${search_id}/stream`, {
+        const stream = await fetch(`/api/search/${search_id}/stream?replay=true`, {
           signal: abort.signal,
         });
 
@@ -114,6 +116,20 @@ export function useSearch() {
 
                 case "tool_progress":
                   dispatch({ type: "SSE_TOOL_PROGRESS", event: event as ToolProgressEvent });
+                  break;
+
+                case "tool_start":
+                  console.log("[SSE] tool_start:", (event as ToolStartEvent).data.tool);
+                  dispatch({ type: "SSE_TOOL_START", event: event as ToolStartEvent });
+                  break;
+
+                case "tool_end":
+                  console.log(
+                    "[SSE] tool_end:",
+                    (event as ToolEndEvent).data.tool,
+                    `${(event as ToolEndEvent).data.duration_ms}ms`,
+                  );
+                  dispatch({ type: "SSE_TOOL_END", event: event as ToolEndEvent });
                   break;
 
                 case "done":

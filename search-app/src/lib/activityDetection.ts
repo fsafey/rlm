@@ -10,7 +10,7 @@ import {
   Tag,
   Gauge,
 } from "lucide-react";
-import type { Iteration, ToolProgressEvent } from "@/lib/types";
+import type { Iteration, ToolProgressEvent, ToolStartEvent, ToolEndEvent } from "@/lib/types";
 
 export interface IterationActivity {
   label: string;
@@ -378,6 +378,126 @@ export function detectActivity(iteration: Iteration): IterationActivity {
     return detectActivityFromToolCalls(iteration);
   }
   return detectActivityFromStdout(iteration);
+}
+
+/**
+ * Detect activity from typed tool_start / tool_end events emitted by EventBus.
+ *
+ * Maps tool names directly to IterationActivity values, avoiding stdout parsing.
+ * Returns null for unrecognised tool names so callers can fall back to other methods.
+ */
+export function detectActivityFromEvent(
+  event: ToolStartEvent | ToolEndEvent,
+): IterationActivity | null {
+  const { tool } = event.data;
+  const isEnd = event.type === "tool_end";
+
+  switch (tool) {
+    case "rlm_query": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const sc = d.result_summary?.searches_run as number | undefined;
+        const metric = sc != null ? `Sub-agent: ${sc} searches` : "Delegated sub-question";
+        return { label: "Delegating", metric, icon: Brain };
+      }
+      const sub = (event as ToolStartEvent).data.args?.sub_question as string | undefined;
+      return { label: "Delegating", metric: sub ?? "Delegating sub-question", icon: Brain };
+    }
+    case "draft_answer": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const passed = d.result_summary?.passed as boolean | undefined;
+        const revised = d.result_summary?.revised as boolean | undefined;
+        let metric = passed ? "Drafted and verified" : "Drafted, needs revision";
+        if (revised) metric = "Drafted, revised, and verified";
+        return { label: "Drafting", metric, icon: MessageSquare };
+      }
+      return { label: "Drafting", metric: "Synthesizing answer from evidence", icon: MessageSquare };
+    }
+    case "research": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const sc = d.result_summary?.search_count as number | undefined;
+        const evalSummary = d.result_summary?.eval_summary as string | undefined;
+        const metric = evalSummary
+          ? `${sc ?? "?"} searches — ${evalSummary}`
+          : `${sc ?? "Multiple"} searches run`;
+        return { label: "Researching", metric, icon: Search };
+      }
+      const query = (event as ToolStartEvent).data.args?.query as string | undefined;
+      const truncated = query && query.length > 35 ? `${query.slice(0, 35)}...` : query;
+      return { label: "Researching", metric: truncated ? `'${truncated}'` : "Multi-search", icon: Search };
+    }
+    case "evaluate_results": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const r = d.result_summary?.relevant as number | undefined;
+        const p = d.result_summary?.partial as number | undefined;
+        return { label: "Evaluating", metric: `${r ?? 0} relevant, ${p ?? 0} partial`, icon: ShieldCheck };
+      }
+      return { label: "Evaluating", metric: "Rating result relevance", icon: ShieldCheck };
+    }
+    case "critique_answer":
+    case "batched_critique": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const verdict = d.result_summary?.verdict as string | undefined;
+        return { label: "Critiquing", metric: verdict ? `Verdict: ${verdict}` : "Reviewed draft", icon: ShieldCheck };
+      }
+      return { label: "Critiquing", metric: "Reviewing draft quality", icon: ShieldCheck };
+    }
+    case "reformulate": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const count = d.result_summary?.num_queries as number | undefined;
+        return { label: "Reformulating", metric: count ? `${count} alternative queries` : "Generated alternatives", icon: RefreshCw };
+      }
+      return { label: "Reformulating", metric: "Generating alternative queries", icon: RefreshCw };
+    }
+    case "check_progress": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const confidence = d.result_summary?.confidence as number | undefined;
+        const relevant = d.result_summary?.relevant as number | undefined;
+        const metric = confidence != null
+          ? `${confidence}% confidence — ${relevant ?? 0} relevant sources`
+          : "Assessed progress";
+        return { label: "Checking Progress", metric, icon: Gauge };
+      }
+      return { label: "Checking Progress", metric: "Assessing search confidence", icon: Gauge };
+    }
+    case "search": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const n = d.result_summary?.num_results as number | undefined;
+        return { label: "Searching", metric: n != null ? `${n} results found` : "Queried knowledge base", icon: Search };
+      }
+      const query = (event as ToolStartEvent).data.args?.query as string | undefined;
+      const truncated = query && query.length > 35 ? `${query.slice(0, 35)}...` : query;
+      return { label: "Searching", metric: truncated ? `'${truncated}'` : "Querying KB", icon: Search };
+    }
+    case "browse": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const total = d.result_summary?.total as number | undefined;
+        return { label: "Browsing", metric: total != null ? `${total} documents browsed` : "Browsed knowledge base", icon: Search };
+      }
+      return { label: "Browsing", metric: "Scanning knowledge base", icon: Search };
+    }
+    case "fiqh_lookup": {
+      if (isEnd) {
+        const d = (event as ToolEndEvent).data;
+        const bridges = d.result_summary?.num_bridges as number | undefined;
+        return { label: "Terminology", metric: bridges != null ? `${bridges} term bridges` : "Looked up terminology", icon: BookOpen };
+      }
+      const query = (event as ToolStartEvent).data.args?.query as string | undefined;
+      return { label: "Terminology", metric: query ? `'${query.slice(0, 30)}'` : "Looking up terms", icon: BookOpen };
+    }
+    case "kb_overview":
+      return { label: "Exploring KB", metric: "Reviewing taxonomy and categories", icon: BookOpen };
+    default:
+      return null;
+  }
 }
 
 // --- Contextual active step based on what just happened ---

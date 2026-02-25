@@ -336,6 +336,12 @@ def critique_answer(
         failed_str = "" if passed else " (failed: evidence-grounded review)"
         print(f"[critique_answer] verdict={verdict_str}{failed_str}")
         feedback = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
+
+        # Wire QualityGate — record standalone critique outcome
+        quality = getattr(ctx, "quality", None)
+        if quality is not None:
+            quality.record_critique(passed, verdict)
+
         tc.set_summary(
             {
                 "verdict": verdict_str,

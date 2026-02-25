@@ -293,6 +293,12 @@ def draft_answer(
                 )
                 revised = True
 
+            # Wire QualityGate — record draft + final critique outcome
+            quality = getattr(ctx, "quality", None)
+            if quality is not None:
+                quality.record_draft(len(answer))
+                quality.record_critique(passed, critique_text)
+
             print(
                 f"[draft_answer] {'PASS' if passed else 'FAIL'}"
                 f"{' (revised)' if revised else ''}"

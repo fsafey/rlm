@@ -2,13 +2,13 @@
 from unittest.mock import MagicMock, patch
 from starlette.testclient import TestClient
 
-from rlm_search.api_v2 import app
+from rlm_search.api import app
 
 
 class TestSearchV2Endpoint:
     def test_start_search_returns_ids(self):
         client = TestClient(app)
-        with patch("rlm_search.api_v2._executor") as mock_exec:
+        with patch("rlm_search.api._executor") as mock_exec:
             mock_exec.submit = MagicMock()
             response = client.post("/api/search", json={"query": "test question"})
         assert response.status_code == 200

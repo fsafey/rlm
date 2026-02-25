@@ -10,7 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from rlm.core.types import CodeBlock, REPLResult, RLMIteration
-from rlm_search.api import _extract_sources, _searches, _sessions, app
+from rlm_search.api_legacy import _extract_sources, _searches, _sessions, app
 from rlm_search.streaming_logger import StreamingLogger
 
 
@@ -22,7 +22,7 @@ def client():
     """
     _searches.clear()
     _sessions.clear()
-    with patch("rlm_search.api.httpx.AsyncClient") as mock_client_cls:
+    with patch("rlm_search.api_legacy.httpx.AsyncClient") as mock_client_cls:
         mock_instance = AsyncMock()
         mock_instance.get = AsyncMock(side_effect=httpx.ConnectError("no cascade in test"))
         mock_instance.__aenter__ = AsyncMock(return_value=mock_instance)
@@ -34,7 +34,7 @@ def client():
 class TestHealthEndpoint:
     """GET /api/health returns status and cascade_api connectivity."""
 
-    @patch("rlm_search.api.httpx.AsyncClient")
+    @patch("rlm_search.api_legacy.httpx.AsyncClient")
     def test_health_cascade_unreachable(self, mock_client_cls):
         """Health ping fails -> degraded."""
         _searches.clear()
@@ -54,8 +54,8 @@ class TestHealthEndpoint:
         assert "version" in data
         assert data["cascade_url"] is not None
 
-    @patch("rlm_search.api.build_kb_overview", new_callable=AsyncMock, return_value=None)
-    @patch("rlm_search.api.httpx.AsyncClient")
+    @patch("rlm_search.api_legacy.build_kb_overview", new_callable=AsyncMock, return_value=None)
+    @patch("rlm_search.api_legacy.httpx.AsyncClient")
     def test_health_cascade_connected(self, mock_client_cls, mock_kb_overview):
         """Health ping succeeds -> ok."""
         _searches.clear()
@@ -79,7 +79,7 @@ class TestHealthEndpoint:
 class TestSearchEndpoint:
     """POST /api/search creates a search and returns a search_id."""
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_search_returns_search_id(self, mock_executor: MagicMock, client: TestClient):
         mock_executor.submit = MagicMock()
         resp = client.post("/api/search", json={"query": "prayer rules"})
@@ -92,7 +92,7 @@ class TestSearchEndpoint:
         assert isinstance(data["session_id"], str)
         assert len(data["session_id"]) > 0
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_search_with_settings(self, mock_executor: MagicMock, client: TestClient):
         mock_executor.submit = MagicMock()
         resp = client.post(
@@ -122,8 +122,8 @@ class TestSearchEndpoint:
         resp = client.post("/api/search", json={})
         assert resp.status_code == 422  # Pydantic validation error
 
-    @patch("rlm_search.api._MAX_CONCURRENT_SEARCHES", 2)
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._MAX_CONCURRENT_SEARCHES", 2)
+    @patch("rlm_search.api_legacy._executor")
     def test_search_503_when_concurrency_cap_reached(
         self, mock_executor: MagicMock, client: TestClient
     ):
@@ -142,7 +142,7 @@ class TestSearchEndpoint:
             for i in range(2):
                 _searches.pop(f"cap-{i}", None)
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_search_registers_logger(self, mock_executor: MagicMock, client: TestClient):
         mock_executor.submit = MagicMock()
         resp = client.post("/api/search", json={"query": "test"})
@@ -308,7 +308,7 @@ class TestExtractSources:
 class TestSubModelWiring:
     """Test sub_model → other_backends wiring in _run_search."""
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_sub_model_passed_in_settings(self, mock_executor: MagicMock, client: TestClient):
         """sub_model in settings is forwarded to _run_search."""
         mock_executor.submit = MagicMock()
@@ -324,12 +324,12 @@ class TestSubModelWiring:
         settings = call_args[0][3]
         assert settings["sub_model"] == "claude-sonnet-4-6"
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
-    @patch("rlm_search.api.RLM_BACKEND", "anthropic")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM_BACKEND", "anthropic")
     def test_sub_model_wires_other_backends(self, _mock_setup, mock_rlm):
         """When sub_model differs from model, other_backends is set."""
-        from rlm_search.api import _run_search, _searches
+        from rlm_search.api_legacy import _run_search, _searches
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-1"
@@ -358,11 +358,11 @@ class TestSubModelWiring:
         assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-sonnet-4-6"
         _sessions.clear()
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
     def test_sub_model_same_as_root_skips(self, _mock_setup, mock_rlm):
         """When sub_model == model, other_backends is None."""
-        from rlm_search.api import _run_search, _searches
+        from rlm_search.api_legacy import _run_search, _searches
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-2"
@@ -390,11 +390,11 @@ class TestSubModelWiring:
         assert rlm_kwargs["other_backend_kwargs"] is None
         _sessions.clear()
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
     def test_sub_model_empty_skips(self, _mock_setup, mock_rlm):
         """When sub_model is empty string, other_backends is None."""
-        from rlm_search.api import _run_search, _searches
+        from rlm_search.api_legacy import _run_search, _searches
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-3"
@@ -417,13 +417,13 @@ class TestSubModelWiring:
         assert rlm_kwargs["other_backend_kwargs"] is None
         _sessions.clear()
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
-    @patch("rlm_search.api.RLM_SUB_MODEL", "claude-haiku-4-5-20251001")
-    @patch("rlm_search.api.RLM_BACKEND", "anthropic")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM_SUB_MODEL", "claude-haiku-4-5-20251001")
+    @patch("rlm_search.api_legacy.RLM_BACKEND", "anthropic")
     def test_env_var_fallback(self, _mock_setup, mock_rlm):
         """When settings has no sub_model, falls back to RLM_SUB_MODEL env var."""
-        from rlm_search.api import _run_search, _searches
+        from rlm_search.api_legacy import _run_search, _searches
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-4"
@@ -446,12 +446,12 @@ class TestSubModelWiring:
         assert rlm_kwargs["other_backend_kwargs"][0]["model_name"] == "claude-haiku-4-5-20251001"
         _sessions.clear()
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
-    @patch("rlm_search.api.RLM_BACKEND", "claude_cli")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM_BACKEND", "claude_cli")
     def test_sub_model_claude_cli_backend(self, _mock_setup, mock_rlm):
         """claude_cli backend uses 'model' key instead of 'model_name'."""
-        from rlm_search.api import _run_search, _searches
+        from rlm_search.api_legacy import _run_search, _searches
         from rlm_search.streaming_logger import StreamingLogger
 
         search_id = "test-sub-5"
@@ -523,7 +523,7 @@ class TestEmitEvent:
 class TestSessionLifecycle:
     """Test persistent session creation, follow-up, and cleanup."""
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_first_search_returns_session_id(self, mock_executor: MagicMock, client: TestClient):
         """First search creates a new session_id."""
         mock_executor.submit = MagicMock()
@@ -534,13 +534,13 @@ class TestSessionLifecycle:
         assert isinstance(data["session_id"], str)
         assert len(data["session_id"]) > 0
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_follow_up_preserves_session_id(self, mock_executor: MagicMock, client: TestClient):
         """Follow-up search with session_id reuses the same session."""
         mock_executor.submit = MagicMock()
 
         # Simulate an existing session
-        from rlm_search.api import SessionState, _sessions
+        from rlm_search.api_legacy import SessionState, _sessions
 
         mock_rlm = MagicMock()
         mock_rlm.close = MagicMock()
@@ -562,7 +562,7 @@ class TestSessionLifecycle:
         assert data["session_id"] == "existing-session"
         _sessions.clear()
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_follow_up_invalid_session_404(self, mock_executor: MagicMock, client: TestClient):
         """Follow-up with non-existent session returns 404."""
         mock_executor.submit = MagicMock()
@@ -573,12 +573,12 @@ class TestSessionLifecycle:
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"].lower()
 
-    @patch("rlm_search.api._executor")
+    @patch("rlm_search.api_legacy._executor")
     def test_follow_up_busy_session_409(self, mock_executor: MagicMock, client: TestClient):
         """Follow-up on a session with active search returns 409."""
         import threading
 
-        from rlm_search.api import SessionState, _sessions
+        from rlm_search.api_legacy import SessionState, _sessions
 
         mock_rlm = MagicMock()
         session = SessionState(
@@ -600,7 +600,7 @@ class TestSessionLifecycle:
         """DELETE /api/session/{id} cleans up the session."""
         import threading
 
-        from rlm_search.api import SessionState, _sessions
+        from rlm_search.api_legacy import SessionState, _sessions
 
         mock_rlm = MagicMock()
         mock_rlm.close = MagicMock()
@@ -620,11 +620,11 @@ class TestSessionLifecycle:
         resp = client.request("DELETE", "/api/session/nonexistent")
         assert resp.status_code == 404
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
     def test_run_search_creates_persistent_rlm(self, _mock_setup, mock_rlm):
         """First _run_search in a session creates RLM with persistent=True."""
-        from rlm_search.api import _run_search, _searches, _sessions
+        from rlm_search.api_legacy import _run_search, _searches, _sessions
 
         search_id = "test-persist-1"
         session_id = "test-persist-session"
@@ -650,13 +650,13 @@ class TestSessionLifecycle:
         assert _sessions[session_id].rlm is mock_instance
         _sessions.clear()
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
     def test_follow_up_reuses_rlm_instance(self, _mock_setup, mock_rlm):
         """Follow-up _run_search reuses existing RLM, swaps logger."""
         import threading
 
-        from rlm_search.api import SessionState, _run_search, _searches, _sessions
+        from rlm_search.api_legacy import SessionState, _run_search, _searches, _sessions
 
         # Setup: create an existing session with a mock RLM
         existing_rlm = MagicMock()
@@ -710,11 +710,11 @@ class TestSessionLifecycle:
 class TestClassificationInSetupCode:
     """Test that classification happens via init_classify inside setup_code."""
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
     def test_query_passed_to_setup_code(self, mock_setup, mock_rlm):
         """_build_rlm_kwargs passes query to build_search_setup_code."""
-        from rlm_search.api import _run_search, _searches, _sessions
+        from rlm_search.api_legacy import _run_search, _searches, _sessions
 
         search_id = "test-classify-setup"
         session_id = "test-classify-session"
@@ -737,11 +737,11 @@ class TestClassificationInSetupCode:
         assert "classify_model" in setup_kwargs
         _sessions.clear()
 
-    @patch("rlm_search.api.RLM")
-    @patch("rlm_search.api.build_search_setup_code", return_value="# setup")
+    @patch("rlm_search.api_legacy.RLM")
+    @patch("rlm_search.api_legacy.build_search_setup_code", return_value="# setup")
     def test_plain_query_passed_to_completion(self, _mock_setup, mock_rlm):
         """_run_search passes plain query (not enriched) to rlm.completion."""
-        from rlm_search.api import _run_search, _searches, _sessions
+        from rlm_search.api_legacy import _run_search, _searches, _sessions
 
         search_id = "test-plain-query"
         session_id = "test-plain-session"
@@ -897,26 +897,26 @@ class TestBuildSystemPrompt:
 class TestApiKeyAuth:
     """Test optional API key authentication."""
 
-    @patch("rlm_search.api.SEARCH_API_KEY", "")
+    @patch("rlm_search.api_legacy.SEARCH_API_KEY", "")
     def test_no_auth_when_key_empty(self, client: TestClient):
         """When SEARCH_API_KEY is empty, endpoints work without auth."""
         resp = client.get("/api/health")
         assert resp.status_code == 200
 
-    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
+    @patch("rlm_search.api_legacy.SEARCH_API_KEY", "test-secret-key")
     def test_401_without_key(self, client: TestClient):
         """When SEARCH_API_KEY is set, requests without key get 401."""
         resp = client.get("/api/health")
         assert resp.status_code == 401
         assert "API key" in resp.json()["detail"]
 
-    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
+    @patch("rlm_search.api_legacy.SEARCH_API_KEY", "test-secret-key")
     def test_401_with_wrong_key(self, client: TestClient):
         """When SEARCH_API_KEY is set, wrong key gets 401."""
         resp = client.get("/api/health", headers={"x-api-key": "wrong-key"})
         assert resp.status_code == 401
 
-    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
+    @patch("rlm_search.api_legacy.SEARCH_API_KEY", "test-secret-key")
     def test_success_with_correct_key(self, client: TestClient):
         """When SEARCH_API_KEY is set, correct key allows access."""
         resp = client.get("/api/health", headers={"x-api-key": "test-secret-key"})

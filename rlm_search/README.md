@@ -297,13 +297,21 @@ Example: `search("zakat", filters={"parent_code": "FN", "cluster_label": "Khums 
 ```
 rlm_search/
   __init__.py
+  api.py                 # FastAPI app — department-model orchestrator
+  bus.py                 # EventBus: single append-only event channel
   config.py              # Env var loading
+  evidence.py            # EvidenceStore: owns source_registry, search_log, ratings
   kb_overview.py         # build_kb_overview() — async startup taxonomy fetch
-  repl_tools.py          # build_search_setup_code() — injects all REPL tools + sub-agents
-  prompts.py             # System prompt: tool docs, selection guide, worked examples
-  streaming_logger.py    # StreamingLogger(RLMLogger) — sync→async bridge
   models.py              # Pydantic request/response models
-  api.py                 # FastAPI app with SSE streaming
+  prompt_constants.py    # Shared thresholds and confidence weights
+  prompts.py             # System prompt: tool docs, selection guide, worked examples
+  quality.py             # QualityGate: confidence scoring, phases, critique tracking
+  repl_tools.py          # build_search_setup_code() — injects all REPL tools + sub-agents
+  sessions.py            # SessionManager: session lifecycle protocol
+  sse.py                 # SSE router: reads from EventBus, supports replay
+  streaming_logger.py    # StreamingLoggerV2 — delegates to EventBus
+  tools/
+    context.py           # SearchContext (thin wiring harness), ToolContext alias
 
 search-app/
   src/
@@ -321,25 +329,31 @@ search-app/
       types.ts           # TypeScript interfaces for SSE events
 
 tests/
-  test_repl_tools.py     # 46 tests — setup code, tool signatures, sub-agents, tool call tracking
-  test_search_api.py     # 11 tests — endpoints, SSE streaming, tool_calls enrichment
+  test_repl_tools.py     # Setup code, tool signatures, sub-agents, tool call tracking
+  test_api_v2.py         # Endpoints, SSE streaming, tool_calls enrichment
+  test_event_bus.py      # EventBus append-only semantics and replay
+  test_evidence_store.py # EvidenceStore: source_registry, search_log, ratings
+  test_quality_gate.py   # QualityGate: confidence scoring and phase transitions
+  test_session_manager.py # SessionManager lifecycle protocol
+  test_sse.py            # SSE router and replay support
+  test_streaming_v2.py   # StreamingLoggerV2 → EventBus delegation
+  test_tracker_v2.py     # Tool call tracker v2
 ```
 
 ## Testing
 
 ```bash
-# Search-specific tests (57 tests, <1s)
-uv run pytest tests/test_repl_tools.py tests/test_search_api.py -v
+# Search-specific tests
+uv run pytest tests/test_repl_tools.py tests/test_api_v2.py tests/test_event_bus.py tests/test_evidence_store.py tests/test_quality_gate.py tests/test_session_manager.py tests/test_sse.py tests/test_streaming_v2.py tests/test_tracker_v2.py -v
 
-# Full RLM suite (289 tests, ~14s)
+# Full RLM suite (~14s)
 uv run pytest
 ```
 
 ## How It Works
 
-1. **User submits query** → `POST /api/search` creates a `StreamingLogger` and launches `rlm.completion()` in a thread pool
-2. **Turn 1 — Orient + search**: LM calls `kb_overview()` (pre-cached taxonomy), then `search(query, ...)` against Cascade API
-3. **Turn 2 — Evaluate + refine**: LM calls `evaluate_results()` (sub-agent) to rate relevance. If scores are low, `reformulate()` (sub-agent) generates alternative queries. `fiqh_lookup()` for terminology.
-4. **Turn 3 — Synthesize + verify**: `format_evidence()` → `llm_query()` for synthesis, then `critique_answer()` (sub-agent) as quality gate before `FINAL_VAR("answer")`
-5. **SSE stream** — the frontend polls `StreamingLogger.drain()` every 200ms, pushing events to the React UI as they arrive
-6. **Answer** — `done` event emitted with synthesized answer, sources, and usage stats
+1. **User submits query** → `POST /api/search`: SessionManager creates a session with an EventBus
+2. **Search setup**: `_run_search()` builds a SearchContext with all departments, creates `StreamingLoggerV2(bus=bus)`, and launches `rlm.completion()` in a thread pool
+3. **RLM execution**: LM orchestrates via REPL (orient, search, evaluate, synthesize, critique); the logger emits all events directly to the EventBus
+4. **SSE stream**: `GET /api/search/{id}/stream` reads from EventBus via `sse.py`; supports replay on reconnection so no events are lost
+5. **Frontend events**: typed SSE events consumed by the React UI — `metadata`, `iteration`, `tool_start`, `tool_end`, `done`/`error`

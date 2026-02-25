@@ -90,6 +90,11 @@ def _check_api_key(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
+def _strip_sources_section(text: str) -> str:
+    """Remove ## Sources Consulted section — rendered as SourceCards in the frontend."""
+    return re.sub(r"\n*## Sources Consulted\n.*?(?=\n## |\Z)", "", text, flags=re.DOTALL).strip()
+
+
 def _extract_sources(answer: str, registry: dict[str, dict] | None = None) -> list[dict]:
     """Extract unique source IDs from [Source: XXXX] references."""
     ids = list(dict.fromkeys(_SOURCE_PATTERN.findall(answer)))
@@ -322,7 +327,7 @@ def _run_search_v2(
         usage = usage_summary.to_dict() if usage_summary else {}
 
         logger.mark_done(
-            answer=result.response,
+            answer=_strip_sources_section(result.response or ""),
             sources=sources,
             execution_time=result.execution_time,
             usage=usage,

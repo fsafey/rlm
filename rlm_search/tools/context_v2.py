@@ -75,5 +75,49 @@ class SearchContext:
         return self.evidence.search_log
 
     @property
-    def evaluated_ratings(self) -> dict[str, dict[str, Any]]:
-        return self.evidence._ratings
+    def evaluated_ratings(self) -> _RatingsFacade:
+        """Flat dict[str, str] facade over evidence._ratings for backward compat.
+
+        Old ToolContext stores {id: "RELEVANT"}, but EvidenceStore stores
+        {id: {"rating": "RELEVANT", "confidence": 4}}. This facade translates
+        reads/writes so research() in composite_tools.py works with both.
+        """
+        return _RatingsFacade(self.evidence)
+
+
+class _RatingsFacade:
+    """dict-like facade: reads return rating strings, writes call set_rating()."""
+
+    def __init__(self, evidence: EvidenceStore) -> None:
+        self._evidence = evidence
+
+    def __getitem__(self, key: str) -> str:
+        info = self._evidence._ratings.get(str(key))
+        if info is None:
+            raise KeyError(key)
+        return info["rating"]
+
+    def __setitem__(self, key: str, value: str) -> None:
+        self._evidence.set_rating(str(key), value, confidence=3)
+
+    def __contains__(self, key: object) -> bool:
+        return str(key) in self._evidence._ratings
+
+    def __iter__(self):  # type: ignore[override]
+        return iter(self._evidence._ratings)
+
+    def __len__(self) -> int:
+        return len(self._evidence._ratings)
+
+    def get(self, key: str, default: str | None = None) -> str | None:
+        info = self._evidence._ratings.get(str(key))
+        if info is None:
+            return default
+        return info["rating"]
+
+    def items(self):  # type: ignore[override]
+        for k, v in self._evidence._ratings.items():
+            yield k, v["rating"]
+
+    def __repr__(self) -> str:
+        return repr(dict(self.items()))

@@ -249,15 +249,11 @@ def draft_answer(
     ) as tc:
         with _child_scope(ctx, tc.idx):
             prompt_parts = [
-                "You are the search concierge for I.M.A.M. (imam-us.org), a Shia Ithna Ashari"
-                " organization. "
-                "Synthesize from the scholar-answered sources below following Ja'fari fiqh. "
-                "Present rulings as the scholars stated them — do not hedge with Sunni"
-                " counterpositions.\n\n"
+                "Synthesize a comprehensive answer from the evidence below. "
+                "Present rulings as stated in the sources — do not add external positions.\n\n"
                 "Provide a thorough answer: address every dimension of the question, include"
                 " conditions "
-                "and caveats the scholars mentioned, and cite each claim. When multiple sources"
-                " agree, "
+                "and caveats mentioned, and cite each claim. When multiple sources agree, "
                 "synthesize into a unified answer rather than listing separately.\n\n",
                 f"QUESTION:\n{question}\n\n",
                 "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
@@ -268,7 +264,7 @@ def draft_answer(
                 "FORMAT: ## Answer (with [Source: <id>] citations), "
                 "## Evidence (source summaries), ## Confidence (High/Medium/Low).\n"
                 "Only cite IDs from the evidence. Flag gaps explicitly — say "
-                "'the I.M.A.M. corpus does not address this aspect' rather than guessing.\n"
+                "'the available sources do not address this aspect' rather than guessing.\n"
             )
 
             answer = ctx.llm_query("".join(prompt_parts), model=model)

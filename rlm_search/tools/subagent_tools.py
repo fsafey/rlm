@@ -291,10 +291,8 @@ def critique_answer(
             draft = draft[:MAX_DRAFT_LEN]
 
         school_context = (
-            "This is the I.M.A.M. platform (imam-us.org), a Shia Ithna Ashari organization. "
-            "Sources are scholar-answered Q&A following Ja'fari fiqh. Do not flag Ja'fari "
-            "positions as incorrect based on Sunni-majority views. Judge only against "
-            "the provided evidence.\n\n"
+            "Sources are scholar-answered Q&A. Do not flag positions as incorrect "
+            "based on other schools of thought. Judge only against the provided evidence.\n\n"
         )
 
         if evidence:

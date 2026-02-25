@@ -86,14 +86,14 @@ After every `research()` call, `check_progress()` prints signals and returns a p
 
 | Phase | Meaning | Action |
 |-------|---------|--------|
-| `ready` | confidence ≥ 60% — sufficient evidence | **Draft now.** Call `draft_answer()`. |
-| `continue` | confidence < 60%, room to improve | **Follow the `guidance` string.** It suggests specific queries, filters, or clusters to try next. |
-| `stalled` | 6+ searches, <2 relevant results | **Change strategy.** Try a different category, drop filters, or use `reformulate()`. Follow `guidance`. |
+| `ready` | Sufficient evidence gathered | **Draft now.** Call `draft_answer()`. |
+| `continue` | Room to improve evidence | **Follow the `guidance` string.** It suggests specific queries, filters, or clusters to try next. |
+| `stalled` | Many searches, few relevant results | **Change strategy.** Try a different category, drop filters, or use `reformulate()`. Follow `guidance`. |
 | `repeating` | Low query diversity (same searches) | **New angles needed.** Use `reformulate()` or try synonyms/related terms. |
-| `finalize` | Draft already exists | **Emit answer.** Call `FINAL_VAR(answer)`. |
+| `finalize` | Draft passed critique | **Emit answer.** Call `FINAL_VAR(answer)`. |
 
 **Key signals** printed by check_progress:
-- `confidence=N%` — composite of evidence relevance (35%), search quality (25%), breadth (10%), diversity (10%), draft (20%)
+- `confidence=N%` — composite of evidence relevance, search quality, breadth, draft, and critique outcome
 - `relevant=N` — results rated RELEVANT (directly answers the question)
 - `partial=N` — results rated PARTIAL (related but indirect)
 - `top_score=0.XX` — best semantic match score (>0.5 is strong)
@@ -123,11 +123,11 @@ answer = result["answer"]
 
 FINAL_VAR(answer)
 
-### Pattern B: Multi-angle, same topic (2 iterations)
-Question spans conditions, exceptions, or practical applications.
+### Pattern B: Complex question (2-3 iterations)
+Question spans conditions, exceptions, or practical applications — or first search yields low relevance.
 
 ```repl
-# Iteration 1: Main search
+# Iteration 1: Main search with multiple angles
 filters = classification["filters"] if classification else None
 results = research(context, filters=filters, extra_queries=[
     {"query": "conditions and requirements"},
@@ -137,8 +137,9 @@ progress = check_progress()
 ```
 
 ```repl
-# Iteration 2: check_progress said "continue" — follow its guidance
-# (guidance might suggest a specific cluster or reformulated query)
+# Iteration 2: Follow check_progress guidance — refine or reformulate
+# If stalled: reformulate and retry
+# If continuing: search a different angle or cluster
 results2 = research("practical application of ruling", filters=filters)
 progress = check_progress()
 ```
@@ -151,54 +152,6 @@ answer = result["answer"]
 ```
 
 FINAL_VAR(answer)
-
-### Pattern C: Stalled — reformulate (2-3 iterations)
-First search yields low relevance. Try different phrasing.
-
-```repl
-# Iteration 1: Initial search — poor results
-results = research(context, filters=classification["filters"] if classification else None)
-progress = check_progress()  # → stalled or low confidence
-```
-
-```repl
-# Iteration 2: Reformulate, retry, and draft in one turn
-alts = reformulate(context, context, top_score=progress["top_score"])
-results2 = research(alts[0], extra_queries=[
-    {"query": alts[1]}, {"query": alts[2]},
-])
-progress = check_progress()
-```
-
-```repl
-# Draft in same iteration
-all_results = results["results"] + results2["results"]
-result = draft_answer(context, all_results)
-answer = result["answer"]
-```
-
-FINAL_VAR(answer)
-
-### Pattern D: Multi-dimensional question (5-7 iterations)
-Truly independent sub-questions. Use `rlm_query()` sparingly — each child costs ~3 iterations.
-
-```repl
-# Iteration 1+: Delegate independent dimensions
-result_a = rlm_query("What is the ruling on mut'ah marriage?")
-result_b = rlm_query("What are the conditions and obligations of mahr?")
-progress = check_progress()
-```
-
-```repl
-# Final: Synthesize from delegated findings
-synthesis_instructions = (
-    "Combine these sub-agent findings into a complete answer:\\n"
-    f"Mut'ah ruling: {result_a['answer'][:500]}\\n"
-    f"Mahr conditions: {result_b['answer'][:500]}"
-)
-result = draft_answer(context, list(source_registry.values()), instructions=synthesis_instructions)
-FINAL_VAR(result["answer"])
-```
 
 ## Efficient Tool Usage
 
@@ -247,9 +200,9 @@ You have **{max_iterations} iterations** total. Each response you send costs one
 
 **Read check_progress() after every research() call.** It tells you whether to draft or keep searching.
 
-- **confidence ≥ 60%** → draft immediately (don't waste iterations)
-- **confidence 30-59%** → follow the guidance suggestion (1-2 more research calls)
-- **confidence < 30% after 3+ searches** → reformulate or try different category
+- **check_progress() returns phase 'ready'** → draft immediately (don't waste iterations)
+- **check_progress() returns phase 'continue'** → follow the guidance suggestion (1-2 more research calls)
+- **phase is still 'continue' after 3+ searches** → reformulate or try different category
 - **After iteration {max_iterations - 3}** → draft and finalize regardless of evidence quality
 
 Most questions resolve in 1-2 iterations. Use more only when check_progress says to."""

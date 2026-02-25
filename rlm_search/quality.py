@@ -6,6 +6,19 @@ import dataclasses
 from typing import Any
 
 from rlm_search.evidence import EvidenceStore
+from rlm_search.prompt_constants import (
+    READY_THRESHOLD as _READY_THRESHOLD,
+)
+from rlm_search.prompt_constants import (
+    STALL_SEARCH_COUNT as _STALL_SEARCH_COUNT,
+)
+from rlm_search.prompt_constants import (
+    WEIGHT_BREADTH,
+    WEIGHT_CRITIQUE,
+    WEIGHT_DRAFT,
+    WEIGHT_QUALITY,
+    WEIGHT_RELEVANCE,
+)
 
 
 @dataclasses.dataclass
@@ -21,9 +34,9 @@ class QualityGate:
 
     evidence: EvidenceStore
 
-    # --- Thresholds (single source of truth) ---
-    READY_THRESHOLD: int = 60
-    STALL_SEARCH_COUNT: int = 6
+    # --- Thresholds (defaulted from prompt_constants) ---
+    READY_THRESHOLD: int = _READY_THRESHOLD
+    STALL_SEARCH_COUNT: int = _STALL_SEARCH_COUNT
 
     # --- Mutable state ---
     _has_draft: bool = dataclasses.field(default=False, init=False)
@@ -63,30 +76,33 @@ class QualityGate:
         partial = counts.get("PARTIAL", 0)
         total_rated = sum(counts.values())
 
-        # Factor 1: Relevance (35%)
+        # Factor 1: Relevance
         if total_rated == 0:
             relevance_score = 0
         else:
-            relevance_score = min(35, int(35 * (relevant + 0.3 * partial) / max(total_rated, 1)))
+            relevance_score = min(
+                WEIGHT_RELEVANCE,
+                int(WEIGHT_RELEVANCE * (relevant + 0.3 * partial) / max(total_rated, 1)),
+            )
 
-        # Factor 2: Top score quality (25%)
+        # Factor 2: Top score quality
         top_score = 0.0
         for entry in self.evidence._registry.values():
             if entry.get("score", 0) > top_score:
                 top_score = entry["score"]
-        quality_score = min(25, int(25 * top_score))
+        quality_score = min(WEIGHT_QUALITY, int(WEIGHT_QUALITY * top_score))
 
-        # Factor 3: Breadth (10%)
+        # Factor 3: Breadth
         n_searches = len(self.evidence.search_log)
-        breadth_score = min(10, n_searches * 3)
+        breadth_score = min(WEIGHT_BREADTH, n_searches * 3)
 
-        # Factor 4: Draft exists (15%)
-        draft_score = 15 if self._has_draft else 0
+        # Factor 4: Draft exists
+        draft_score = WEIGHT_DRAFT if self._has_draft else 0
 
-        # Factor 5: Critique outcome (15%)
+        # Factor 5: Critique outcome
         critique_score = 0
         if self._last_critique is not None:
-            critique_score = 15 if self._last_critique["passed"] else 5
+            critique_score = WEIGHT_CRITIQUE if self._last_critique["passed"] else 5
 
         return min(
             100, relevance_score + quality_score + breadth_score + draft_score + critique_score

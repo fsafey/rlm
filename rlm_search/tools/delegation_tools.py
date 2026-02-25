@@ -10,9 +10,10 @@ if TYPE_CHECKING:
     from rlm.core.types import RLMChatCompletion
     from rlm_search.tools.context import ToolContext
 
+
 def build_sub_agent_prompt(max_iterations: int = 3) -> str:
     """Build system prompt for a generic search sub-agent."""
-    return f"""You are a focused research sub-agent for the I.M.A.M. Islamic Q&A corpus (18,835 scholar-answered questions).
+    return f"""You are a focused research sub-agent for a scholar-answered Q&A corpus.
 
 Your input question is in the `context` variable. You have **{max_iterations} iterations**.
 
@@ -145,13 +146,15 @@ def rlm_query(
 
         print(f"[rlm_query] Complete: {searches_run} searches, {n_merged} sources merged")
 
-        tc.set_summary({
-            "sub_question": sub_question,
-            "searches_run": searches_run,
-            "answer_length": len(answer),
-            "sources_merged": n_merged,
-            "answer_preview": answer[:200],
-        })
+        tc.set_summary(
+            {
+                "sub_question": sub_question,
+                "searches_run": searches_run,
+                "answer_length": len(answer),
+                "sources_merged": n_merged,
+                "answer_preview": answer[:200],
+            }
+        )
 
         return {
             "answer": answer,

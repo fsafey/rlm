@@ -12,11 +12,11 @@ if TYPE_CHECKING:
 
 
 def _compact_args(args: dict[str, Any]) -> dict[str, Any]:
-    """Compact tool args for SSE — strip large payloads."""
+    """Compact tool args for SSE — preserve full query text, summarize large payloads."""
     compact: dict[str, Any] = {}
     for k, v in args.items():
         if isinstance(v, str):
-            compact[k] = v[:100] if len(v) > 100 else v
+            compact[k] = v
         elif isinstance(v, list):
             compact[k] = len(v)
         elif isinstance(v, dict):
@@ -73,7 +73,11 @@ def tool_call_tracker(
 
     tc = type("_TC", (), {"entry": entry, "idx": idx, "set_summary": staticmethod(set_summary)})()
 
-    _emit(ctx, tool_name, "start", _compact_args(args))
+    start_data = _compact_args(args)
+    start_data["idx"] = idx
+    if parent_idx is not None:
+        start_data["parent_idx"] = parent_idx
+    _emit(ctx, tool_name, "start", start_data)
 
     start = time.time()
     try:
@@ -81,8 +85,16 @@ def tool_call_tracker(
     except BaseException as exc:
         entry["duration_ms"] = int((time.time() - start) * 1000)
         entry["error"] = str(exc)
-        _emit(ctx, tool_name, "error", {"error": str(exc)}, duration_ms=entry["duration_ms"])
+        error_data: dict[str, Any] = {"error": str(exc), "idx": idx}
+        if parent_idx is not None:
+            error_data["parent_idx"] = parent_idx
+        _emit(ctx, tool_name, "error", error_data, duration_ms=entry["duration_ms"])
         raise
     else:
         entry["duration_ms"] = int((time.time() - start) * 1000)
-        _emit(ctx, tool_name, "end", entry["result_summary"], duration_ms=entry["duration_ms"])
+        end_data = {**entry["result_summary"], "idx": idx}
+        if parent_idx is not None:
+            end_data["parent_idx"] = parent_idx
+        if entry["children"]:
+            end_data["children"] = entry["children"]
+        _emit(ctx, tool_name, "end", end_data, duration_ms=entry["duration_ms"])

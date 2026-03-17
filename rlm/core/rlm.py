@@ -255,7 +255,7 @@ class RLM:
                 else:
                     consecutive_empty = 0
 
-                if consecutive_empty >= 1:
+                if consecutive_empty >= 1 and final_answer is None:
                     message_history.append({
                         "role": "user",
                         "content": (

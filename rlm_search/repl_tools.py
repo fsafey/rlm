@@ -6,6 +6,44 @@ import json
 from typing import Any
 
 
+def _trim_kb_overview(data: dict[str, Any]) -> dict[str, Any]:
+    """Trim kb_overview_data for setup_code embedding to reduce token count.
+
+    Keeps category structure, top 20 clusters, top 8 subtopic facets per category.
+    Drops global_facets (unused by tools). Full data available via kb_overview() tool.
+    """
+    out: dict[str, Any] = {}
+    for key, val in data.items():
+        if key == "global_facets":
+            continue  # unused by any tool
+        if key == "categories":
+            trimmed_cats: dict[str, Any] = {}
+            for code, cat in val.items():
+                tc: dict[str, Any] = {
+                    "name": cat.get("name", code),
+                    "document_count": cat.get("document_count", 0),
+                }
+                # Keep clusters (labels + sample Qs) — cap at 20
+                clusters = cat.get("clusters", {})
+                if clusters:
+                    tc["clusters"] = dict(list(clusters.items())[:20])
+                # Keep subtopic facets — cap at 8
+                facets = cat.get("facets", {})
+                if facets:
+                    trimmed_facets: dict[str, Any] = {}
+                    for fk, fv in facets.items():
+                        if isinstance(fv, list):
+                            trimmed_facets[fk] = fv[:8]
+                        else:
+                            trimmed_facets[fk] = fv
+                    tc["facets"] = trimmed_facets
+                trimmed_cats[code] = tc
+            out["categories"] = trimmed_cats
+        else:
+            out[key] = val
+    return out
+
+
 def build_search_setup_code(
     api_url: str,
     timeout: int = 30,
@@ -72,8 +110,10 @@ _ctx.pipeline_mode = {pipeline_mode!r}
 """
 
     # Embed kb_overview data as JSON (avoids nested brace escaping issues)
+    # Trim to reduce setup_code token count — full data still available via kb_overview() tool
     if kb_overview_data is not None:
-        kb_json_str = json.dumps(kb_overview_data)
+        trimmed = _trim_kb_overview(kb_overview_data)
+        kb_json_str = json.dumps(trimmed)
         code += f"\nimport json as _json\n_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
 
     if existing_answer is not None:
@@ -82,6 +122,7 @@ _ctx.pipeline_mode = {pipeline_mode!r}
     # Run init_classify at setup_code time (zero iteration cost)
     if query:
         code += f"\n_sub.init_classify(_ctx, {query!r}, model={classify_model!r})\n"
+        code += f"\nquestion = {query!r}\n"
     code += "\nclassification = _ctx.classification\n"
     code += "\nquery_variants = (classification or {}).get('query_variants', [])\n"
 

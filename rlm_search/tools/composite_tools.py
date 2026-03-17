@@ -237,6 +237,8 @@ def draft_answer(
     Returns:
         Dict with ``answer``, ``critique``, ``passed``, ``revised``.
     """
+    if len(ctx.evidence.search_log) == 0:
+        print("[draft_answer] WARNING: No research() calls made. Results may be ungrounded.")
     evidence = format_evidence(results[:20])
     if not evidence:
         print("[draft_answer] ERROR: no evidence to synthesize from")

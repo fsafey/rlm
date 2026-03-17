@@ -488,7 +488,12 @@ def init_classify(
     if bus is not None:
         bus.emit(
             "tool_progress",
-            {"phase": "classifying", "message": f"Pre-classifying with {model}"},
+            {
+                "tool": "init_classify",
+                "phase": "classifying",
+                "data": {"message": f"Pre-classifying with {model}"},
+                "duration_ms": 0,
+            },
         )
 
     t0 = time.monotonic()
@@ -623,10 +628,13 @@ def init_classify(
                 bus.emit(
                     "tool_progress",
                     {
+                        "tool": "init_classify",
                         "phase": "classified",
-                        "message": f"Pre-classified in {classify_ms}ms",
+                        "data": {
+                            "message": f"Pre-classified in {classify_ms}ms",
+                            "classification": parsed,
+                        },
                         "duration_ms": classify_ms,
-                        "classification": parsed,
                     },
                 )
 
@@ -642,8 +650,9 @@ def init_classify(
                 bus.emit(
                     "tool_progress",
                     {
+                        "tool": "init_classify",
                         "phase": "classified",
-                        "message": f"Classification skipped ({classify_ms}ms)",
+                        "data": {"message": f"Classification skipped ({classify_ms}ms)"},
                         "duration_ms": classify_ms,
                     },
                 )

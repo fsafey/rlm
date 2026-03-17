@@ -131,9 +131,12 @@ def build_user_prompt(
     iteration: int = 0,
     context_count: int = 1,
     history_count: int = 0,
+    setup_summary: str | None = None,
 ) -> dict[str, str]:
     if iteration == 0:
         safeguard = "You have not interacted with the REPL environment or seen your prompt / context yet. Your next action should be to look through and figure out how to answer the prompt, so don't just provide a final answer yet.\n\n"
+        if setup_summary:
+            safeguard += f"Setup completed with the following results:\n{setup_summary}\n\n"
         prompt = safeguard + (
             USER_PROMPT_WITH_ROOT.format(root_prompt=root_prompt) if root_prompt else USER_PROMPT
         )

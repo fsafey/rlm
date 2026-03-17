@@ -126,6 +126,23 @@ _ctx.pipeline_mode = {pipeline_mode!r}
     code += "\nclassification = _ctx.classification\n"
     code += "\nquery_variants = (classification or {}).get('query_variants', [])\n"
 
+    # Print setup summary — captured as setup_summary for inclusion in iteration 0 user message
+    code += """
+if classification:
+    _parts = [f"Category: {classification['category']} ({classification['confidence']})"]
+    if classification.get('clusters'):
+        _parts.append(f"Clusters: {classification['clusters']}")
+    if query_variants:
+        _parts.append(f"Query variants: {query_variants}")
+    _parts.append(f"Strategy: {classification['strategy']}")
+    print("Pre-classification: " + " | ".join(_parts))
+    print(f"\\nREPL variables ready: question, classification, query_variants, filters=classification['filters']")
+    print("Write a ```repl``` block to call research() — do NOT answer in plain text.")
+else:
+    print("Pre-classification: skipped (no kb_overview_data)")
+    print("Write a ```repl``` block to call research(question) — do NOT answer in plain text.")
+"""
+
     code += """
 # ── Wrapper functions (bind _ctx, preserve REPL-facing signatures) ──────
 

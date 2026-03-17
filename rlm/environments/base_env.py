@@ -59,6 +59,9 @@ class BaseEnv(ABC):
         Library warnings (e.g. DeprecationWarning) written to stderr are not
         treated as errors. Only stderr containing known exception patterns
         (SyntaxError, NameError, Traceback, etc.) triggers SetupCodeError.
+
+        The stdout is stored as ``setup_summary`` for optional inclusion
+        in the first user prompt (so the model can see setup results).
         """
         result = self.execute_code(setup_code)
         if result.stderr and _ERROR_PATTERN.search(result.stderr):
@@ -66,6 +69,7 @@ class BaseEnv(ABC):
             raise SetupCodeError(stderr=result.stderr, stdout=result.stdout)
         if result.stderr:
             logger.warning("setup_code produced warnings: %s", result.stderr)
+        self.setup_summary = result.stdout.strip() if result.stdout else ""
         return result
 
 

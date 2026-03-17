@@ -234,8 +234,9 @@ class RLM:
                     if isinstance(environment, SupportsPersistence)
                     else 0
                 )
+                setup_summary = getattr(environment, "setup_summary", None) if i == 0 else None
                 current_prompt = message_history + [
-                    build_user_prompt(root_prompt, i, context_count, history_count)
+                    build_user_prompt(root_prompt, i, context_count, history_count, setup_summary=setup_summary)
                 ]
 
                 iteration: RLMIteration = self._completion_turn(

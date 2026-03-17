@@ -90,6 +90,15 @@ The `classification` variable is pre-computed before your first iteration (or No
 - **MEDIUM**: Use category filter only (skip cluster filter). Broaden if results are poor.
 - **LOW**: Start broad — no filters. Add category filter only if initial results confirm the category.
 
+## Query Variants
+
+`query_variants` contains 2-3 alternative search formulations generated during
+pre-classification (or `[]` if classification failed or produced no variants).
+
+**Always use these as extra_queries in your first research() call** to broaden
+first-pass recall across multiple angles — all merged, deduped, and evaluated
+in a single pass.
+
 ## Reading check_progress()
 
 After every `research()` call, `check_progress()` prints signals and returns a phase:
@@ -116,18 +125,17 @@ The I.M.A.M. corpus has a direct match. Most questions follow this pattern.
 Multiple ```repl``` blocks in one response execute in the same iteration.
 
 ```repl
-# Search with classification filters + extra angles
+# Search with classification filters + pre-generated variants
 filters = classification["filters"] if classification else None
-results = research(context, filters=filters, extra_queries=[
-    {"query": "rephrase the question as a search", "filters": filters},
-    {"query": "related angle or condition"},
+results = research(query, filters=filters, extra_queries=[
+    {"query": q, "filters": filters} for q in query_variants
 ])
 progress = check_progress()
 ```
 
 ```repl
 # Draft and finalize (same iteration — no extra cost)
-result = draft_answer(context, results["results"])
+result = draft_answer(query, results["results"])
 answer = result["answer"]
 ```
 
@@ -137,11 +145,10 @@ FINAL_VAR(answer)
 Question spans conditions, exceptions, or practical applications — or first search yields low relevance.
 
 ```repl
-# Iteration 1: Main search with multiple angles
+# Iteration 1: Main search with pre-generated variants
 filters = classification["filters"] if classification else None
-results = research(context, filters=filters, extra_queries=[
-    {"query": "conditions and requirements"},
-    {"query": "exceptions and special cases"},
+results = research(query, filters=filters, extra_queries=[
+    {"query": q, "filters": filters} for q in query_variants
 ])
 progress = check_progress()
 ```
@@ -157,7 +164,7 @@ progress = check_progress()
 ```repl
 # Draft in same iteration as final search (no extra cost)
 all_results = results["results"] + results2["results"]
-result = draft_answer(context, all_results)
+result = draft_answer(query, all_results)
 answer = result["answer"]
 ```
 
@@ -166,6 +173,7 @@ FINAL_VAR(answer)
 ## Efficient Tool Usage
 
 - **Multiple ```repl``` blocks per response** — all blocks in one response execute in the same iteration. Chain search → check → draft to finish in fewer iterations.
+- **`query_variants` in first search** — pre-generated reformulations from classification. Always pass them as extra_queries to maximize first-pass recall.
 - **`extra_queries` in one `research()` call** — all results merged, deduped, and evaluated together in one pass. Much cheaper than separate `research()` calls.
 - **Second `research()` call** — doesn't re-evaluate results from the first call (cross-call rating cache). Add new angles without wasted LLM calls.
 - **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth.

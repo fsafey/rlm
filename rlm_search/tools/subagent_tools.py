@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from rlm.clients import get_client
@@ -430,10 +431,14 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         "the most relevant clusters within that category.\n\n"
         f'Question: "{question}"\n\n'
         f"Categories and their clusters:\n{cat_info}\n\n"
-        "Respond with exactly three lines:\n"
+        "Respond with these sections:\n"
         "CATEGORY: <code>\n"
         "CONFIDENCE: HIGH|MEDIUM|LOW\n"
-        "CLUSTERS: <comma-separated cluster labels from the chosen category, up to 5>\n\n"
+        "CLUSTERS: <comma-separated cluster labels from the chosen category, up to 5>\n"
+        "QUERIES:\n"
+        "<query variant 1>\n"
+        "<query variant 2>\n"
+        "<query variant 3>\n\n"
         "CATEGORY guidance:\n"
         "- HIGH: question clearly belongs to one category\n"
         "- MEDIUM: one category fits but another is plausible\n"
@@ -441,7 +446,13 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         "CLUSTERS guidance:\n"
         "- Select clusters whose topic covers the question, even if wording differs\n"
         "- Use NONE if no clusters are relevant\n"
-        "- Prefer fewer, more precise clusters over many vague ones\n"
+        "- Prefer fewer, more precise clusters over many vague ones\n\n"
+        "QUERIES guidance:\n"
+        "- Generate 2-3 search query reformulations of the original question\n"
+        "- At least one using Arabic/fiqhi terminology (e.g., ghusl, riba, nikah, sawm)\n"
+        "- At least one rephrasing the scenario differently but targeting the same ruling\n"
+        "- Each query under 15 words, plain text, no numbering or quotes\n"
+        "- Do NOT repeat the original question verbatim\n"
     )
 
 
@@ -520,6 +531,30 @@ def init_classify(
                     if raw_clusters.upper() != "NONE":
                         llm_clusters = [c.strip() for c in raw_clusters.split(",") if c.strip()]
 
+            # ── Parse query variants (lines after QUERIES: marker) ────
+            query_variants: list[str] = []
+            in_queries_section = False
+            for line in raw.strip().split("\n"):
+                line_s = line.strip()
+                if line_s.upper().startswith("QUERIES:"):
+                    in_queries_section = True
+                    rest = line_s.split(":", 1)[1].strip()
+                    if rest and not rest.upper().startswith("NONE"):
+                        query_variants.append(rest)
+                    continue
+                if in_queries_section:
+                    # Stop at next known section marker
+                    if ":" in line_s and line_s.split(":")[0].strip().upper() in (
+                        "CATEGORY", "CONFIDENCE", "CLUSTERS", "QUERIES",
+                    ):
+                        break
+                    if line_s:
+                        # Strip numbering prefixes LLMs often add despite instructions
+                        cleaned = re.sub(r"^\d+[\.\)]\s*", "", line_s)
+                        if cleaned:
+                            query_variants.append(cleaned)
+            query_variants = query_variants[:3]
+
             if not category:
                 _log.warning("LLM returned no category, raw=%r", raw[:200])
                 ctx.classification = None
@@ -564,19 +599,21 @@ def init_classify(
                 "clusters": clusters_str,
                 "filters": {"parent_code": category},
                 "strategy": strategy,
+                "query_variants": query_variants,
             }
 
             ctx.classification = parsed
             classify_ms = int((time.monotonic() - t0) * 1000)
             print(
                 f"[classify] category={category} confidence={confidence} "
-                f"clusters={clusters_str!r} time={classify_ms}ms"
+                f"clusters={clusters_str!r} variants={len(query_variants)} time={classify_ms}ms"
             )
             tc.set_summary(
                 {
                     "category": category,
                     "confidence": confidence,
                     "clusters": clusters_str,
+                    "query_variants": query_variants,
                     "duration_ms": classify_ms,
                 }
             )

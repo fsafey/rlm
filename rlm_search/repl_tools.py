@@ -83,6 +83,7 @@ _ctx.pipeline_mode = {pipeline_mode!r}
     if query:
         code += f"\n_sub.init_classify(_ctx, {query!r}, model={classify_model!r})\n"
     code += "\nclassification = _ctx.classification\n"
+    code += "\nquery_variants = (classification or {}).get('query_variants', [])\n"
 
     code += """
 # ── Wrapper functions (bind _ctx, preserve REPL-facing signatures) ──────

@@ -158,7 +158,7 @@ def rlm_query(
                 "searches_run": searches_run,
                 "answer_length": len(answer),
                 "sources_merged": n_merged,
-                "answer_preview": answer[:200],
+                "answer_preview": answer[:1000],
             }
         )
 

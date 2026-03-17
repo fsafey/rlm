@@ -365,9 +365,9 @@ def draft_answer(
                     "passed": passed,
                     "revised": revised,
                     "answer_length": len(answer),
-                    "answer_preview": answer[:300],
+                    "answer_preview": answer,
                     "critique_verdict": "PASS" if passed else "FAIL",
-                    "critique_reason": critique_text[:150] if critique_text else "",
+                    "critique_reason": critique_text or "",
                 }
             )
             return {

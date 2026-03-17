@@ -15,14 +15,14 @@ if TYPE_CHECKING:
 
 
 def _truncate_hits(results: list[dict], max_hits: int = 10) -> list[dict]:
-    """Truncate hits for SSE payload — question[100], answer[200], keep score/id/collection/topic."""
+    """Truncate hits for SSE payload — keep score/id/collection/topic."""
     out = []
     for h in results[:max_hits]:
         entry: dict = {
             "id": h.get("id", ""),
             "score": round(h.get("score", 0.0), 3),
-            "question": h.get("question", "")[:100],
-            "answer": h.get("answer", "")[:200],
+            "question": h.get("question", "")[:300],
+            "answer": h.get("answer", "")[:1000],
         }
         meta = h.get("metadata", {})
         if meta.get("primary_topic"):

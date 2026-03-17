@@ -395,9 +395,9 @@ def critique_answer(
             {
                 "verdict": verdict_str,
                 "has_evidence": bool(evidence),
-                "feedback": feedback[:200],
+                "feedback": feedback,
                 # Backward compat for frontend CritiqueDetail renderer
-                "reason": feedback[:200],
+                "reason": feedback,
                 "failed": [] if passed else ["evidence_review"],
             }
         )

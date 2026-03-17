@@ -127,15 +127,17 @@ Multiple ```repl``` blocks in one response execute in the same iteration.
 ```repl
 # Search with classification filters + pre-generated variants
 filters = classification["filters"] if classification else None
-results = research(query, filters=filters, extra_queries=[
-    {"query": q, "filters": filters} for q in query_variants
-])
+extra = [{"query": q, "filters": filters} for q in query_variants] if query_variants else [
+    {"query": "rephrase using Arabic/fiqhi terminology", "filters": filters},
+    {"query": "related ruling or condition"},
+]
+results = research(question, filters=filters, extra_queries=extra)
 progress = check_progress()
 ```
 
 ```repl
 # Draft and finalize (same iteration — no extra cost)
-result = draft_answer(query, results["results"])
+result = draft_answer(question, results["results"])
 answer = result["answer"]
 ```
 
@@ -147,9 +149,11 @@ Question spans conditions, exceptions, or practical applications — or first se
 ```repl
 # Iteration 1: Main search with pre-generated variants
 filters = classification["filters"] if classification else None
-results = research(query, filters=filters, extra_queries=[
-    {"query": q, "filters": filters} for q in query_variants
-])
+extra = [{"query": q, "filters": filters} for q in query_variants] if query_variants else [
+    {"query": "conditions and requirements", "filters": filters},
+    {"query": "exceptions and special cases"},
+]
+results = research(question, filters=filters, extra_queries=extra)
 progress = check_progress()
 ```
 
@@ -164,7 +168,7 @@ progress = check_progress()
 ```repl
 # Draft in same iteration as final search (no extra cost)
 all_results = results["results"] + results2["results"]
-result = draft_answer(query, all_results)
+result = draft_answer(question, all_results)
 answer = result["answer"]
 ```
 

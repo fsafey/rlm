@@ -55,6 +55,61 @@ def _child_scope(ctx: Any, parent_idx: int | None) -> Generator:
         ctx.current_parent_idx = saved
 
 
+def _incremental_evaluate(
+    ctx: ToolContext,
+    all_results: list,
+    eval_question: str,
+    eval_model: str | None,
+) -> dict:
+    """Dedup, register hits, evaluate new results, persist ratings. Called at checkpoints.
+
+    Registers results in EvidenceStore so QualityGate.confidence sees them
+    (top_score for quality factor, registry for top_rated()). This is needed
+    because mocked search() bypasses normalize_hit() which normally does this.
+
+    Returns:
+        Dict with ``deduped`` (list), ``new_count`` (int), ``eval_summary`` (str).
+        Updates ``ctx.evaluated_ratings`` and ``ctx.evidence`` as side effects.
+    """
+    # Dedup by ID, keep highest score
+    seen: dict = {}
+    for r in all_results:
+        rid = str(r["id"])
+        if rid not in seen or r["score"] > seen[rid]["score"]:
+            seen[rid] = r
+    deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
+
+    # Register hits in EvidenceStore (idempotent — higher score wins)
+    for r in deduped:
+        ctx.evidence.register_hit(r)
+
+    # Separate new vs already-rated
+    new_results = [
+        r
+        for r in deduped
+        if str(r["id"]) not in ctx.evaluated_ratings
+        or ctx.evaluated_ratings[str(r["id"])] == "OFF-TOPIC"
+    ]
+
+    eval_summary = ""
+    if new_results:
+        try:
+            eval_out = evaluate_results(
+                ctx, eval_question, new_results[:15], top_n=15, model=eval_model
+            )
+            for rt in eval_out["ratings"]:
+                ctx.evaluated_ratings[rt["id"]] = rt["rating"]
+            eval_summary = eval_out.get("suggestion", "")
+        except Exception as e:
+            print(f"[research] WARNING: checkpoint evaluation failed: {e}")
+
+    return {
+        "deduped": deduped,
+        "new_count": len(new_results),
+        "eval_summary": eval_summary,
+    }
+
+
 def research(
     ctx: ToolContext,
     query: str | list,

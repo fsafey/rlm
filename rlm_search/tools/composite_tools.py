@@ -22,7 +22,7 @@ from rlm_search.tools.subagent_tools import (
     critique_answer,
     evaluate_results,
 )
-from rlm_search.tools.tracker import tool_call_tracker
+from rlm_search.tools.tracker import _emit, tool_call_tracker
 
 if TYPE_CHECKING:
     from rlm_search.tools.context import ToolContext
@@ -66,18 +66,24 @@ def _incremental_evaluate(
     all_results: list,
     eval_question: str,
     eval_model: str | None,
+    _offset: int = 0,
 ) -> dict:
-    """Dedup, register hits, evaluate new results, persist ratings. Called at checkpoints.
+    """Register new hits, evaluate unrated results, persist ratings. Called at checkpoints.
 
-    Registers results in EvidenceStore so QualityGate.confidence sees them
-    (top_score for quality factor, registry for top_rated()). This is needed
-    because mocked search() bypasses normalize_hit() which normally does this.
+    Only processes ``all_results[_offset:]`` for registration — previous items
+    were handled by an earlier checkpoint. Dedup for the return value still
+    covers the full list (needed for final OFF-TOPIC filtering).
 
     Returns:
-        Dict with ``deduped`` (list), ``new_count`` (int), ``eval_summary`` (str).
+        Dict with ``deduped`` (list), ``new_count`` (int), ``eval_summary`` (str),
+        ``processed_to`` (int — pass as ``_offset`` to next call).
         Updates ``ctx.evaluated_ratings`` and ``ctx.evidence`` as side effects.
     """
-    # Dedup by ID, keep highest score
+    # Register only NEW hits since last checkpoint (idempotent — higher score wins)
+    for r in all_results[_offset:]:
+        ctx.evidence.register_hit(r)
+
+    # Full dedup for return value (needed by post-loop filtering)
     seen: dict = {}
     for r in all_results:
         rid = str(r["id"])
@@ -85,11 +91,7 @@ def _incremental_evaluate(
             seen[rid] = r
     deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
 
-    # Register hits in EvidenceStore (idempotent — higher score wins)
-    for r in deduped:
-        ctx.evidence.register_hit(r)
-
-    # Separate new vs already-rated
+    # Evaluate only unrated (or previously OFF-TOPIC) results
     new_results = [
         r
         for r in deduped
@@ -113,6 +115,7 @@ def _incremental_evaluate(
         "deduped": deduped,
         "new_count": len(new_results),
         "eval_summary": eval_summary,
+        "processed_to": len(all_results),
     }
 
 
@@ -167,6 +170,7 @@ def research(
             seen_ids: set[str] = set()
             consecutive_low = 0
             medium_budget = MEDIUM_EXTRA_BUDGET
+            _eval_offset = 0  # tracks how far _incremental_evaluate has processed
 
             if isinstance(query, list):
                 specs = query
@@ -208,8 +212,9 @@ def research(
 
                 # ── Checkpoint 1: evaluate after main query ──
                 eval_result = _incremental_evaluate(
-                    ctx, all_results, eval_question, eval_model
+                    ctx, all_results, eval_question, eval_model, _eval_offset
                 )
+                _eval_offset = eval_result["processed_to"]
 
                 # Check tier after first evaluation
                 tier = ctx.quality.critique_tier if ctx.quality else "weak"
@@ -219,17 +224,9 @@ def research(
                         f"stopping extra queries"
                     )
                     _gate_stopped = True
-                    bus = getattr(ctx, "bus", None)
-                    if bus is not None:
-                        bus.emit("tool_progress", {
-                            "tool": "research",
-                            "phase": "gate_stopped",
-                            "data": {
-                                "reason": "strong",
-                                "search_count": search_count,
-                                "tier": tier,
-                            },
-                        })
+                    _emit(ctx, "research", "gate_stopped", {
+                        "reason": "strong", "search_count": search_count, "tier": tier,
+                    })
                     break
 
                 for eq in spec.get("extra_queries") or []:
@@ -242,17 +239,9 @@ def research(
                             f"skipping remaining extras"
                         )
                         _gate_stopped = True
-                        bus = getattr(ctx, "bus", None)
-                        if bus is not None:
-                            bus.emit("tool_progress", {
-                                "tool": "research",
-                                "phase": "gate_stopped",
-                                "data": {
-                                    "reason": "strong",
-                                    "search_count": search_count,
-                                    "tier": tier,
-                                },
-                            })
+                        _emit(ctx, "research", "gate_stopped", {
+                            "reason": "strong", "search_count": search_count, "tier": tier,
+                        })
                         break
 
                     if tier == "medium":
@@ -262,17 +251,9 @@ def research(
                                 f"after {search_count} searches"
                             )
                             _gate_stopped = True
-                            bus = getattr(ctx, "bus", None)
-                            if bus is not None:
-                                bus.emit("tool_progress", {
-                                    "tool": "research",
-                                    "phase": "gate_stopped",
-                                    "data": {
-                                        "reason": "medium_budget",
-                                        "search_count": search_count,
-                                        "tier": tier,
-                                    },
-                                })
+                            _emit(ctx, "research", "gate_stopped", {
+                                "reason": "medium_budget", "search_count": search_count, "tier": tier,
+                            })
                             break
                         medium_budget -= 1
 
@@ -282,17 +263,9 @@ def research(
                             f"searches, stopping"
                         )
                         _gate_stopped = True
-                        bus = getattr(ctx, "bus", None)
-                        if bus is not None:
-                            bus.emit("tool_progress", {
-                                "tool": "research",
-                                "phase": "gate_stopped",
-                                "data": {
-                                    "reason": "saturation",
-                                    "search_count": search_count,
-                                    "tier": tier,
-                                },
-                            })
+                        _emit(ctx, "research", "gate_stopped", {
+                            "reason": "saturation", "search_count": search_count, "tier": tier,
+                        })
                         break
 
                     # Execute search
@@ -330,9 +303,10 @@ def research(
                         search_count == EVAL_CHECKPOINT_SEARCH
                         or consecutive_low >= SATURATION_CONSECUTIVE_MAX
                     ):
-                        _incremental_evaluate(
-                            ctx, all_results, eval_question, eval_model
+                        cp2 = _incremental_evaluate(
+                            ctx, all_results, eval_question, eval_model, _eval_offset
                         )
+                        _eval_offset = cp2["processed_to"]
 
             if not all_results:
                 print("[research] ERROR: all searches failed")
@@ -355,7 +329,7 @@ def research(
 
             # ── Final evaluation: catch any unevaluated stragglers ──
             final_eval = _incremental_evaluate(
-                ctx, all_results, eval_question, eval_model
+                ctx, all_results, eval_question, eval_model, _eval_offset
             )
             deduped = final_eval["deduped"]
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import contextlib
+import re
+import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +20,28 @@ from rlm_search.tools.tracker import tool_call_tracker
 
 if TYPE_CHECKING:
     from rlm_search.tools.context import ToolContext
+
+
+def _verify_citations(draft: str, evidence_ids: set[str]) -> dict:
+    """Programmatic citation audit — instant, deterministic.
+
+    Checks [Source: N] markers against known evidence IDs.
+
+    Returns:
+        Dict with cited (set), fabricated (set), uncited (set),
+        valid (bool — no fabricated IDs), coverage (float 0-1).
+    """
+    cited = set(re.findall(r'\[Source:\s*(\d+)\]', draft))
+    fabricated = cited - evidence_ids
+    uncited = evidence_ids - cited
+    coverage = len(cited & evidence_ids) / len(evidence_ids) if evidence_ids else 1.0
+    return {
+        "cited": cited,
+        "fabricated": fabricated,
+        "uncited": uncited,
+        "valid": len(fabricated) == 0,
+        "coverage": round(coverage, 3),
+    }
 
 
 @contextlib.contextmanager
@@ -226,27 +250,33 @@ def draft_answer(
     instructions: str | None = None,
     model: str | None = None,
 ) -> dict:
-    """Synthesize an answer from results, critique it, and revise if needed.
+    """Synthesize an answer from results, with tiered critique based on evidence quality.
 
-    Handles: format_evidence -> must-cite brief -> llm_query synthesis ->
-    structured critique -> targeted revision (one retry on FAIL).
+    QualityGate determines critique depth:
+      strong (6+ RELEVANT, conf >= 75%): programmatic citation check only
+      medium (3+ RELEVANT): focused LLM critique (voice + attribution), no revision
+      weak  (<3 RELEVANT): full critique + revision loop (original behavior)
 
-    Args:
-        ctx: Per-session tool context.
-        question: The user's question.
-        results: List of result dicts (use ``research()["results"]``).
-        instructions: Optional guidance for the synthesis LLM call.
-        model: Optional model override for synthesis / revision.
-
-    Returns:
-        Dict with ``answer``, ``critique``, ``passed``, ``revised``.
+    Uses top_rated() evidence when QualityGate is available — RELEVANT sources first,
+    OFF-TOPIC excluded. Falls back to results[:20] when QualityGate is absent.
     """
     if len(ctx.evidence.search_log) == 0:
         print("[draft_answer] WARNING: No research() calls made. Results may be ungrounded.")
 
+    # ── Evidence selection: prefer top_rated (RELEVANT first, no OFF-TOPIC) ──
+    quality = getattr(ctx, "quality", None)
+    if quality is not None and ctx.evidence.count > 0:
+        best = ctx.evidence.top_rated(20)
+        if best:
+            results_for_evidence = best
+        else:
+            results_for_evidence = results[:20]
+    else:
+        results_for_evidence = results[:20]
+
     # Use rating-aware evidence ordering when ratings are available
     ratings = ctx.evidence.ratings or None
-    evidence = format_evidence(results[:20], ratings=ratings)
+    evidence = format_evidence(results_for_evidence, ratings=ratings)
     if not evidence:
         print("[draft_answer] ERROR: no evidence to synthesize from")
         return {"answer": "", "critique": "", "passed": False, "revised": False}
@@ -254,7 +284,7 @@ def draft_answer(
     # Build must-cite brief from ratings (zero LLM cost)
     must_cite = ""
     if ratings:
-        must_cite = build_must_cite_brief(results[:20], ratings)
+        must_cite = build_must_cite_brief(results_for_evidence, ratings)
 
     with tool_call_tracker(
         ctx,
@@ -263,6 +293,17 @@ def draft_answer(
         parent_idx=ctx.current_parent_idx,
     ) as tc:
         with _child_scope(ctx, tc.idx):
+            bus = getattr(ctx, "bus", None)
+
+            # ── Determine critique tier ──
+            tier = "weak"  # default
+            if quality is not None:
+                tier = quality.critique_tier
+            print(f"[draft_answer] critique_tier={tier}")
+
+            # ── Phase 1: Synthesis (all tiers) ──
+            t0 = time.time()
+
             prompt_parts = [
                 DOMAIN_PREAMBLE,
                 "Synthesize a comprehensive, well-structured answer from the "
@@ -332,82 +373,150 @@ def draft_answer(
             )
 
             answer = ctx.llm_query("".join(prompt_parts), model=model)
+            synth_ms = int((time.time() - t0) * 1000)
 
-            critique_text, passed, dimensions = critique_answer(
-                ctx, question, answer, evidence=evidence, model=model
-            )
+            # Emit: synthesis complete
+            if bus is not None:
+                bus.emit("tool_progress", {
+                    "tool": "draft_answer",
+                    "phase": "synthesized",
+                    "data": {"answer_length": len(answer), "tier": tier},
+                    "duration_ms": synth_ms,
+                })
+
+            # ── Phase 2: Critique (tier-dependent) ──
+            t1 = time.time()
+            evidence_ids = {str(r.get("id", "")) for r in results_for_evidence}
+            citation_result = _verify_citations(answer, evidence_ids)
+            critique_text = ""
+            passed = True
             revised = False
+            dimensions: dict[str, dict[str, str]] = {}
 
-            if not passed:
-                # Determine failed dimensions for targeted revision
-                failed_dims = {
-                    k: v for k, v in dimensions.items() if v["verdict"] == "FAIL"
-                }
-                cosmetic_only = (
-                    bool(failed_dims)
-                    and all(k in COSMETIC_DIMENSIONS for k in failed_dims)
-                )
-
-                if cosmetic_only:
-                    # Voice/structure issues only — targeted fix, no full re-synthesis
-                    fix_details = "; ".join(
-                        f"{k}: {v['detail']}" for k, v in failed_dims.items() if v["detail"]
+            if tier == "strong":
+                # Programmatic citation check only
+                passed = citation_result["valid"]
+                if not passed:
+                    critique_text = (
+                        f"Fabricated citations: {citation_result['fabricated']}. "
+                        f"Fall through to focused critique."
                     )
-                    rev_parts = [
-                        DOMAIN_PREAMBLE,
-                        "Fix ONLY the following voice/structure issues in this answer. "
-                        "Do not change the substance, citations, or content.\n\n",
-                        f"ISSUES:\n{fix_details}\n\n" if fix_details else "",
-                        f"CRITIQUE:\n{critique_text}\n\n",
-                        f"ORIGINAL:\n{answer}\n\n",
-                        "Return ONLY the fixed answer. Start directly with ## Answer.\n",
-                    ]
+                    # Fall through to medium-tier critique
+                    tier = "medium"
                 else:
-                    # Substantive issues — build targeted revision prompt
-                    completeness_detail = ""
-                    if "COMPLETENESS" in failed_dims:
-                        detail = failed_dims["COMPLETENESS"].get("detail", "")
-                        if detail:
-                            completeness_detail = (
-                                f"\nCRITICAL OMISSION:\n{detail}\n"
-                                "You MUST incorporate the above missing source(s) into "
-                                "the revised answer.\n\n"
-                            )
+                    critique_text = (
+                        f"Citations valid ({len(citation_result['cited'])} cited, "
+                        f"coverage={citation_result['coverage']}). "
+                        f"Programmatic check passed — LLM critique skipped."
+                    )
+                    print(f"[draft_answer] STRONG: citation check PASS "
+                          f"({len(citation_result['cited'])} cited, "
+                          f"coverage={citation_result['coverage']})")
 
-                    rev_parts = [
-                        DOMAIN_PREAMBLE,
-                        "Revise this answer based on the critique.\n\n",
-                        f"CRITIQUE:\n{critique_text}\n\n",
-                        completeness_detail,
-                        f"ORIGINAL:\n{answer}\n\n",
-                        "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
-                        "Fix flagged issues. Keep valid citations. Same format.\n"
-                        "Maintain synthesis structure: lead with the ruling, keep consensus "
-                        "sources merged (do not expand a unified statement into per-source "
-                        "paragraphs).\n"
-                        "VOICE (preserve throughout): state rulings declaratively "
-                        "('The ruling is...' not 'It may be...'); frame as I.M.A.M. "
-                        "scholarly corpus ('According to the I.M.A.M. corpus...'); "
-                        "no first-person hedging ('I think', 'it seems'); "
-                        "define Arabic/fiqhi terms parenthetically on first use "
-                        "(e.g., 'riba (usury/interest)') if not already defined; "
-                        "no introductory padding before the ruling.\n"
-                        "Return ONLY the revised answer — no preamble, no explanation of"
-                        " changes.\n"
-                        "Do NOT say 'Here is the revised answer' or describe what you "
-                        "changed.\n"
-                        "Do NOT include revision notes, commentary, or meta-text.\n"
-                        "Start directly with ## Answer.\n",
-                    ]
-
-                answer = ctx.llm_query("".join(rev_parts), model=model)
+            if tier == "medium":
+                # Focused LLM critique — voice + attribution only, no revision loop
                 critique_text, passed, dimensions = critique_answer(
-                    ctx, question, answer, evidence=evidence, model=model
+                    ctx, question, answer, evidence=evidence, model=model,
+                    focus="voice_attribution",
                 )
-                revised = True
+                print(f"[draft_answer] MEDIUM: focused critique "
+                      f"{'PASS' if passed else 'FAIL'}")
+
+            elif tier == "weak":
+                # Full critique + revision loop (original behavior)
+                critique_text, passed, dimensions = critique_answer(
+                    ctx, question, answer, evidence=evidence, model=model,
+                )
+
+                if not passed:
+                    # Determine failed dimensions for targeted revision
+                    failed_dims = {
+                        k: v for k, v in dimensions.items() if v["verdict"] == "FAIL"
+                    }
+                    cosmetic_only = (
+                        bool(failed_dims)
+                        and all(k in COSMETIC_DIMENSIONS for k in failed_dims)
+                    )
+
+                    if cosmetic_only:
+                        # Voice/structure issues only — targeted fix, no full re-synthesis
+                        fix_details = "; ".join(
+                            f"{k}: {v['detail']}" for k, v in failed_dims.items() if v["detail"]
+                        )
+                        rev_parts = [
+                            DOMAIN_PREAMBLE,
+                            "Fix ONLY the following voice/structure issues in this answer. "
+                            "Do not change the substance, citations, or content.\n\n",
+                            f"ISSUES:\n{fix_details}\n\n" if fix_details else "",
+                            f"CRITIQUE:\n{critique_text}\n\n",
+                            f"ORIGINAL:\n{answer}\n\n",
+                            "Return ONLY the fixed answer. Start directly with ## Answer.\n",
+                        ]
+                    else:
+                        # Substantive issues — build targeted revision prompt
+                        completeness_detail = ""
+                        if "COMPLETENESS" in failed_dims:
+                            detail = failed_dims["COMPLETENESS"].get("detail", "")
+                            if detail:
+                                completeness_detail = (
+                                    f"\nCRITICAL OMISSION:\n{detail}\n"
+                                    "You MUST incorporate the above missing source(s) into "
+                                    "the revised answer.\n\n"
+                                )
+
+                        rev_parts = [
+                            DOMAIN_PREAMBLE,
+                            "Revise this answer based on the critique.\n\n",
+                            f"CRITIQUE:\n{critique_text}\n\n",
+                            completeness_detail,
+                            f"ORIGINAL:\n{answer}\n\n",
+                            "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
+                            "Fix flagged issues. Keep valid citations. Same format.\n"
+                            "Maintain synthesis structure: lead with the ruling, keep consensus "
+                            "sources merged (do not expand a unified statement into per-source "
+                            "paragraphs).\n"
+                            "VOICE (preserve throughout): state rulings declaratively "
+                            "('The ruling is...' not 'It may be...'); frame as I.M.A.M. "
+                            "scholarly corpus ('According to the I.M.A.M. corpus...'); "
+                            "no first-person hedging ('I think', 'it seems'); "
+                            "define Arabic/fiqhi terms parenthetically on first use "
+                            "(e.g., 'riba (usury/interest)') if not already defined; "
+                            "no introductory padding before the ruling.\n"
+                            "Return ONLY the revised answer — no preamble, no explanation of"
+                            " changes.\n"
+                            "Do NOT say 'Here is the revised answer' or describe what you "
+                            "changed.\n"
+                            "Do NOT include revision notes, commentary, or meta-text.\n"
+                            "Start directly with ## Answer.\n",
+                        ]
+
+                    answer = ctx.llm_query("".join(rev_parts), model=model)
+                    critique_text, passed, dimensions = critique_answer(
+                        ctx, question, answer, evidence=evidence, model=model
+                    )
+                    revised = True
+
+            crit_ms = int((time.time() - t1) * 1000)
+
+            # Emit: critique complete
+            if bus is not None:
+                bus.emit("tool_progress", {
+                    "tool": "draft_answer",
+                    "phase": "critiqued",
+                    "data": {
+                        "tier": tier,
+                        "passed": passed,
+                        "revised": revised,
+                        "citation_check": {
+                            "valid": citation_result["valid"],
+                            "cited_count": len(citation_result["cited"]),
+                            "coverage": citation_result["coverage"],
+                        },
+                    },
+                    "duration_ms": crit_ms,
+                })
 
             # Wire QualityGate — record draft + final critique outcome
-            quality = getattr(ctx, "quality", None)
             if quality is not None:
                 quality.record_draft(len(answer))
                 quality.record_critique(passed, critique_text)
@@ -415,10 +524,13 @@ def draft_answer(
             failed_dims_list = [
                 k for k, v in dimensions.items() if v["verdict"] == "FAIL"
             ]
+            total_ms = synth_ms + crit_ms
             print(
                 f"[draft_answer] {'PASS' if passed else 'FAIL'}"
+                f" tier={tier}"
                 f"{' (revised)' if revised else ''}"
                 f" | {len(answer)} chars | {len(evidence)} evidence entries"
+                f" | {total_ms}ms"
             )
             if failed_dims_list:
                 print(f"[draft_answer] failed dimensions: {', '.join(failed_dims_list)}")
@@ -426,10 +538,17 @@ def draft_answer(
                 {
                     "passed": passed,
                     "revised": revised,
+                    "tier": tier,
                     "answer_length": len(answer),
                     "answer_preview": answer,
                     "critique_verdict": "PASS" if passed else "FAIL",
                     "critique_reason": critique_text or "",
+                    "citation_check": {
+                        "valid": citation_result["valid"],
+                        "cited_count": len(citation_result["cited"]),
+                        "fabricated_count": len(citation_result["fabricated"]),
+                        "coverage": citation_result["coverage"],
+                    },
                     "dimensions": {k: v["verdict"] for k, v in dimensions.items()},
                 }
             )
@@ -438,5 +557,6 @@ def draft_answer(
                 "critique": critique_text,
                 "passed": passed,
                 "revised": revised,
+                "tier": tier,
                 "dimensions": {k: v["verdict"] for k, v in dimensions.items()},
             }

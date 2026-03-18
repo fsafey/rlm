@@ -14,6 +14,18 @@ if TYPE_CHECKING:
     from rlm_search.tools.context import ToolContext
 
 
+def _query_similarity(q1: str, q2: str) -> float:
+    """Jaccard similarity of word sets (case-insensitive). 0.0-1.0."""
+    w1 = set(q1.lower().split())
+    w2 = set(q2.lower().split())
+    if not w1 or not w2:
+        return 0.0
+    return len(w1 & w2) / len(w1 | w2)
+
+
+_DIVERSITY_THRESHOLD = 0.7  # queries above this similarity are flagged
+
+
 def _truncate_hits(results: list[dict], max_hits: int = 10) -> list[dict]:
     """Truncate hits for SSE payload — keep score/id/collection/topic."""
     out = []
@@ -59,6 +71,19 @@ def search(
             f"[search] WARNING: query too long ({len(query)} chars), truncating to {MAX_QUERY_LEN}"
         )
         query = query[:MAX_QUERY_LEN]
+    # Query diversity guard — warn on near-duplicate queries
+    prior_queries = [
+        e["query"] for e in ctx.search_log
+        if e.get("type") in ("search", "search_multi") and "query" in e
+    ]
+    for pq in prior_queries:
+        sim = _query_similarity(query, pq)
+        if sim >= _DIVERSITY_THRESHOLD:
+            print(
+                f"[search] WARNING: query is {sim:.0%} similar to prior query "
+                f"{pq!r} — consider a different angle"
+            )
+            break  # warn once, don't block
     with tool_call_tracker(
         ctx, "search", {"query": query, "top_k": top_k}, parent_idx=ctx.current_parent_idx
     ) as tc:

@@ -199,6 +199,7 @@ FINAL_VAR(answer)
 - **Extra blocks to inspect results** — don't write blocks just to print or read data. `research()` and `check_progress()` already print summaries.
 - **Drafting with low confidence when iterations remain** — if confidence < 40% and you have iterations left, invest in more research.
 - **Using rlm_query for single-topic questions** — direct `research()` with `extra_queries` is 3x cheaper.
+- **Calling `critique_answer()` after `draft_answer()`** — `draft_answer()` already critiques and revises internally (tier-dependent). Additional standalone critique is redundant and adds 40-70s of wasted LLM time.
 
 ## Grounding Rules
 

@@ -96,3 +96,56 @@ class TestQualityGateThresholds:
     def test_stall_threshold_is_accessible(self):
         gate = QualityGate(evidence=EvidenceStore())
         assert gate.STALL_SEARCH_COUNT == 6
+
+
+class TestCritiqueTier:
+    def test_strong_tier_many_relevant_high_confidence(self):
+        evidence = EvidenceStore()
+        for i in range(8):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.85, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=4)
+        gate = QualityGate(evidence=evidence)
+        assert gate.critique_tier == "strong"
+
+    def test_medium_tier_moderate_relevant(self):
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+        gate = QualityGate(evidence=evidence)
+        assert gate.critique_tier == "medium"
+
+    def test_weak_tier_few_relevant(self):
+        evidence = EvidenceStore()
+        evidence.register_hit(
+            {"id": "h0", "question": "Q", "answer": "A", "score": 0.5, "metadata": {}}
+        )
+        evidence.set_rating("h0", "RELEVANT", confidence=2)
+        gate = QualityGate(evidence=evidence)
+        assert gate.critique_tier == "weak"
+
+    def test_weak_tier_no_relevant(self):
+        evidence = EvidenceStore()
+        for i in range(5):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.6, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "PARTIAL", confidence=3)
+        gate = QualityGate(evidence=evidence)
+        assert gate.critique_tier == "weak"
+
+    def test_strong_requires_both_relevant_and_confidence(self):
+        """6+ RELEVANT but low search scores => confidence below 75 => medium tier."""
+        evidence = EvidenceStore()
+        for i in range(7):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.3, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=2)
+        gate = QualityGate(evidence=evidence)
+        # relevance=35, quality=7, breadth=0 => confidence=42 < 75
+        assert gate.critique_tier == "medium"

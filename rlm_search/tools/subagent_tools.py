@@ -340,6 +340,7 @@ def critique_answer(
     draft: str,
     evidence: list[str] | None = None,
     model: str | None = None,
+    focus: str | None = None,
 ) -> tuple[str, bool, dict[str, dict[str, str]]]:
     """Evidence-grounded critique: cross-check draft citations against sources.
 
@@ -374,37 +375,64 @@ def critique_answer(
 
         if evidence:
             evidence_block = "\n".join(evidence)
-            prompt = (
-                f"{school_context}"
-                f"Review this draft answer against the provided evidence.\n\n"
-                f"QUESTION:\n{question}\n\n"
-                f"EVIDENCE:\n{evidence_block}\n\n"
-                f"DRAFT:\n{draft}\n\n"
-                f"Evaluate each dimension. For each, output exactly one line:\n"
-                f"DIMENSION_NAME: PASS or FAIL — brief reason (under 25 words)\n\n"
-                f"Dimensions:\n\n"
-                f"CITATION_ACCURACY: Every [Source: N] in the draft maps to a real "
-                f"source in the evidence. Flag fabricated IDs.\n\n"
-                f"ATTRIBUTION_FIDELITY: Claims attributed to scholars, texts, or "
-                f"rulings actually appear in the cited source.\n\n"
-                f"UNSUPPORTED_CLAIMS: No substantive rulings or factual claims "
-                f"lack a [Source: N] citation.\n\n"
-                f"COMPLETENESS: All materially distinct rulings, conditions, and "
-                f"caveats from RELEVANT evidence are represented. Consensus "
-                f"synthesis (single merged paragraph with all citations) is correct "
-                f"— not incomplete. Flag only when a distinct condition, exception, "
-                f"or directly-answering point from RELEVANT evidence is absent. "
-                f"Name the specific source ID(s) omitted.\n\n"
-                f"SCHOLARLY_VOICE: Rulings framed as I.M.A.M. scholars (not AI "
-                f"opinion). Declarative tone ('The ruling is...' not 'It may "
-                f"be...'). No first-person hedging. Arabic terms defined on first "
-                f"use.\n\n"
-                f"STRUCTURE: Answer leads with the direct ruling. No generic "
-                f"preamble delaying the ruling.\n\n"
-                f"After all dimensions, output:\n"
-                f"VERDICT: PASS (if all dimensions pass) or FAIL\n"
-                f"Then one line summarizing the key issue (under 30 words).\n"
-            )
+
+            if focus == "voice_attribution":
+                # MEDIUM tier: only check criteria that require LLM judgment.
+                # Citation accuracy and completeness are handled programmatically.
+                prompt = (
+                    f"{school_context}"
+                    f"Review this draft answer for voice and attribution quality only.\n\n"
+                    f"QUESTION:\n{question}\n\n"
+                    f"EVIDENCE:\n{evidence_block}\n\n"
+                    f"DRAFT:\n{draft}\n\n"
+                    f"Check these criteria ONLY:\n\n"
+                    f"1. ATTRIBUTION FIDELITY — Claims attributed to specific scholars, "
+                    f"texts, or rulings must actually appear in the cited source.\n\n"
+                    f"2. SCHOLARLY VOICE — The answer should frame rulings as coming from "
+                    f"I.M.A.M. scholars (not as the AI's own opinion). Rulings stated "
+                    f"declaratively ('The ruling is...') not tentatively ('It may be...', "
+                    f"'It would seem...'). No first-person hedging ('I think', 'I believe', "
+                    f"'it seems'). Arabic terms defined on first use.\n\n"
+                    f"3. STRUCTURE — The answer leads with the direct ruling or main "
+                    f"conclusion. Flag if the ruling is buried or opens with preamble.\n\n"
+                    f"Do NOT check citation accuracy or completeness — those are verified "
+                    f"programmatically. Focus ONLY on the 3 criteria above.\n\n"
+                    f"Respond: PASS or FAIL, then brief feedback (under 100 words).\n"
+                    f"If ANY check fails, the overall verdict is FAIL."
+                )
+            else:
+                # Original full prompt (WEAK tier and default)
+                prompt = (
+                    f"{school_context}"
+                    f"Review this draft answer against the provided evidence.\n\n"
+                    f"QUESTION:\n{question}\n\n"
+                    f"EVIDENCE:\n{evidence_block}\n\n"
+                    f"DRAFT:\n{draft}\n\n"
+                    f"Evaluate each dimension. For each, output exactly one line:\n"
+                    f"DIMENSION_NAME: PASS or FAIL — brief reason (under 25 words)\n\n"
+                    f"Dimensions:\n\n"
+                    f"CITATION_ACCURACY: Every [Source: N] in the draft maps to a real "
+                    f"source in the evidence. Flag fabricated IDs.\n\n"
+                    f"ATTRIBUTION_FIDELITY: Claims attributed to scholars, texts, or "
+                    f"rulings actually appear in the cited source.\n\n"
+                    f"UNSUPPORTED_CLAIMS: No substantive rulings or factual claims "
+                    f"lack a [Source: N] citation.\n\n"
+                    f"COMPLETENESS: All materially distinct rulings, conditions, and "
+                    f"caveats from RELEVANT evidence are represented. Consensus "
+                    f"synthesis (single merged paragraph with all citations) is correct "
+                    f"— not incomplete. Flag only when a distinct condition, exception, "
+                    f"or directly-answering point from RELEVANT evidence is absent. "
+                    f"Name the specific source ID(s) omitted.\n\n"
+                    f"SCHOLARLY_VOICE: Rulings framed as I.M.A.M. scholars (not AI "
+                    f"opinion). Declarative tone ('The ruling is...' not 'It may "
+                    f"be...'). No first-person hedging. Arabic terms defined on first "
+                    f"use.\n\n"
+                    f"STRUCTURE: Answer leads with the direct ruling. No generic "
+                    f"preamble delaying the ruling.\n\n"
+                    f"After all dimensions, output:\n"
+                    f"VERDICT: PASS (if all dimensions pass) or FAIL\n"
+                    f"Then one line summarizing the key issue (under 30 words).\n"
+                )
         else:
             prompt = (
                 f"{school_context}"

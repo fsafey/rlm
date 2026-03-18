@@ -13,6 +13,11 @@ from rlm_search.prompt_constants import (
     STALL_SEARCH_COUNT as _STALL_SEARCH_COUNT,
 )
 from rlm_search.prompt_constants import (
+    MEDIUM_RELEVANT_MIN as _MEDIUM_RELEVANT_MIN,
+    STRONG_CONFIDENCE_MIN as _STRONG_CONFIDENCE_MIN,
+    STRONG_RELEVANT_MIN as _STRONG_RELEVANT_MIN,
+)
+from rlm_search.prompt_constants import (
     WEIGHT_BREADTH,
     WEIGHT_CRITIQUE,
     WEIGHT_DRAFT,
@@ -107,6 +112,24 @@ class QualityGate:
         return min(
             100, relevance_score + quality_score + breadth_score + draft_score + critique_score
         )
+
+    @property
+    def critique_tier(self) -> str:
+        """Advise draft_answer on critique depth based on evidence quality.
+
+        Returns:
+            'strong' — programmatic citation check only (skip LLM critique)
+            'medium' — focused LLM critique (voice + attribution), no revision loop
+            'weak'   — full critique + revision (status quo)
+        """
+        counts = self.evidence.rating_counts()
+        relevant = counts.get("RELEVANT", 0)
+
+        if relevant >= _STRONG_RELEVANT_MIN and self.confidence >= _STRONG_CONFIDENCE_MIN:
+            return "strong"
+        if relevant >= _MEDIUM_RELEVANT_MIN:
+            return "medium"
+        return "weak"
 
     # --- Phase ---
 

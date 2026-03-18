@@ -69,6 +69,30 @@ class TestBuildCategoryPrompt:
         prompt = _build_category_prompt("test", self.SAMPLE_KB)
         assert "Clusters:" not in prompt
 
+    def test_includes_domain_preamble(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        assert "I.M.A.M." in prompt
+        assert "Ja'fari fiqh" in prompt
+
+    def test_includes_few_shot_examples(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        assert "Examples" in prompt
+        assert "ghusl after janabah" in prompt
+        assert "cremation" in prompt
+        assert "sell alcohol" in prompt
+
+    def test_few_shot_examples_show_output_format(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        # 3 examples + 1 format spec = at least 4 QUERIES: markers
+        assert prompt.count("QUERIES:") >= 4
+
+    def test_queries_guidance_includes_domain_terminology(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        assert "salah" in prompt  # PT terms
+        assert "riba" in prompt  # FN terms
+        assert "nikah" in prompt  # MF terms
+        assert "tawbah" in prompt  # BE terms
+
 
 from unittest.mock import MagicMock, patch
 

@@ -427,10 +427,38 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
     cat_info = "\n".join(cat_lines)
 
     return (
-        "Classify this Islamic Q&A question into one category and select "
+        DOMAIN_PREAMBLE + "Classify this Islamic Q&A question into one category and select "
         "the most relevant clusters within that category.\n\n"
         f'Question: "{question}"\n\n'
         f"Categories and their clusters:\n{cat_info}\n\n"
+        "\n\nExamples:\n\n"
+        'Question: "How do I perform ghusl after janabah?"\n'
+        "CATEGORY: PT\n"
+        "CONFIDENCE: HIGH\n"
+        "CLUSTERS: Ghusl Procedure and Validity\n"
+        "QUERIES:\n"
+        "ghusl janabah step by step\n"
+        "ritual bath after sexual discharge\n"
+        "obligatory ghusl procedure Ja'fari\n\n"
+        'Question: "Is it permissible to cremate the dead in Islam?"\n'
+        "CATEGORY: MF\n"
+        "CONFIDENCE: HIGH\n"
+        "CLUSTERS: Organ Donation & End-of-Life\n"
+        "QUERIES:\n"
+        "cremation burial ruling Islam\n"
+        "Islamic funeral rites permissibility\n"
+        "hukm of burning dead body Shia\n\n"
+        'Question: "Is it halal to sell alcohol to non-Muslims?"\n'
+        "CATEGORY: FN\n"
+        "CONFIDENCE: LOW\n"
+        "CLUSTERS: Halal Business Compliance\n"
+        "ALSO: BE\n"
+        "QUERIES:\n"
+        "selling alcohol non-Muslim permissibility\n"
+        "haram trade income ruling Ja'fari\n"
+        "business dealings with prohibited substances\n\n"
+        "---\n\n"
+        "Now classify this question:\n\n"
         "Respond with these sections:\n"
         "CATEGORY: <code>\n"
         "CONFIDENCE: HIGH|MEDIUM|LOW\n"
@@ -449,7 +477,12 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         "- Prefer fewer, more precise clusters over many vague ones\n\n"
         "QUERIES guidance:\n"
         "- Generate 2-3 search query reformulations of the original question\n"
-        "- At least one using Arabic/fiqhi terminology (e.g., ghusl, riba, nikah, sawm)\n"
+        "- Use domain-specific terminology from the classified category:\n"
+        "  PT: salah, wudhu, ghusl, najis, tahir, tayammum, qibla\n"
+        "  WP: sawm, zakat, khums, hajj, kaffara, nadhr, itikaf\n"
+        "  MF: nikah, mutah, talaq, mahr, nafaqa, iddah, mehrieh\n"
+        "  FN: riba, bay', halal earnings, haram income, gharar, khums\n"
+        "  BE: shirk, tawbah, wajib, haram, makruh, mustahab, mubah\n"
         "- At least one rephrasing the scenario differently but targeting the same ruling\n"
         "- Each query under 15 words, plain text, no numbering or quotes\n"
         "- Do NOT repeat the original question verbatim\n"
@@ -550,7 +583,10 @@ def init_classify(
                 if in_queries_section:
                     # Stop at next known section marker
                     if ":" in line_s and line_s.split(":")[0].strip().upper() in (
-                        "CATEGORY", "CONFIDENCE", "CLUSTERS", "QUERIES",
+                        "CATEGORY",
+                        "CONFIDENCE",
+                        "CLUSTERS",
+                        "QUERIES",
                     ):
                         break
                     if line_s:

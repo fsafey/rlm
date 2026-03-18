@@ -419,10 +419,10 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         if clusters:
             labels = list(clusters.keys())
             line += f"\n  Clusters: {', '.join(labels)}"
-            # Include up to 3 sample questions for grounding
-            samples = [(lbl, q) for lbl, q in clusters.items() if q][:3]
-            for label, sample_q in samples:
-                line += f'\n    "{sample_q}" → {label}'
+            # Include sample questions for all clusters (grounding for semantic matching)
+            for label, sample_q in clusters.items():
+                if sample_q:
+                    line += f'\n    "{sample_q}" → {label}'
         cat_lines.append(line)
     cat_info = "\n".join(cat_lines)
 

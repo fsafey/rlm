@@ -29,6 +29,22 @@ class TestBuildCategoryPrompt:
         }
     }
 
+    KB_WITH_MANY_CLUSTERS = {
+        "categories": {
+            "PT": {
+                "name": "Prayer",
+                "document_count": 500,
+                "clusters": {
+                    "Ghusl": "How to perform ghusl?",
+                    "Wudu": "What invalidates wudu?",
+                    "Tayammum": "When can I do tayammum?",
+                    "Qibla": "How to find qibla direction?",
+                    "Salah Times": "What are prayer times?",
+                },
+            },
+        }
+    }
+
     def test_includes_all_category_codes(self):
         prompt = _build_category_prompt("test question", self.SAMPLE_KB)
         assert "PT" in prompt
@@ -96,6 +112,15 @@ class TestBuildCategoryPrompt:
     def test_includes_also_field_in_format(self):
         prompt = _build_category_prompt("test question", self.SAMPLE_KB)
         assert "ALSO:" in prompt
+
+    def test_all_cluster_sample_questions_included(self):
+        """All sample questions appear, not just first 3."""
+        prompt = _build_category_prompt("test", self.KB_WITH_MANY_CLUSTERS)
+        assert "How to perform ghusl?" in prompt
+        assert "What invalidates wudu?" in prompt
+        assert "When can I do tayammum?" in prompt
+        assert "How to find qibla direction?" in prompt
+        assert "What are prayer times?" in prompt
 
 
 from unittest.mock import MagicMock, patch

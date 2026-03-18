@@ -23,10 +23,10 @@ def _trim_kb_overview(data: dict[str, Any]) -> dict[str, Any]:
                     "name": cat.get("name", code),
                     "document_count": cat.get("document_count", 0),
                 }
-                # Keep clusters (labels + sample Qs) — cap at 20
+                # Keep clusters (labels + sample Qs) — cap at 10
                 clusters = cat.get("clusters", {})
                 if clusters:
-                    tc["clusters"] = dict(list(clusters.items())[:20])
+                    tc["clusters"] = dict(list(clusters.items())[:10])
                 # Keep subtopic facets — cap at 8
                 facets = cat.get("facets", {})
                 if facets:

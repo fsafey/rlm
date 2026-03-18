@@ -8,6 +8,12 @@ import time
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
+from rlm_search.prompt_constants import (
+    EVAL_CHECKPOINT_SEARCH,
+    MEDIUM_EXTRA_BUDGET,
+    SATURATION_CONSECUTIVE_MAX,
+    SATURATION_LOW_YIELD,
+)
 from rlm_search.prompts import DOMAIN_PREAMBLE
 from rlm_search.tools.api_tools import search, search_multi
 from rlm_search.tools.format_tools import build_must_cite_brief, format_evidence
@@ -155,6 +161,12 @@ def research(
             all_results: list = []
             search_count = 0
             errors: list[str] = []
+            _gate_stopped = False  # track if we exited early
+
+            # Global gate state (shared across all specs)
+            seen_ids: set[str] = set()
+            consecutive_low = 0
+            medium_budget = MEDIUM_EXTRA_BUDGET
 
             if isinstance(query, list):
                 specs = query
@@ -173,23 +185,78 @@ def research(
             is_w3 = ctx.pipeline_mode == "w3"
 
             for spec in specs:
+                if _gate_stopped:
+                    break
+
                 q = spec["query"]
                 f = spec.get("filters")
                 k = spec.get("top_k", top_k)
+
+                # ── Main query (always runs) ──
                 try:
                     if is_w3:
                         r = search_multi(ctx, q, final_top_k=k)
                     else:
                         r = search(ctx, q, filters=f, top_k=k)
+                    batch_ids = {str(h["id"]) for h in r["results"]}
+                    seen_ids.update(batch_ids)
                     all_results.extend(r["results"])
                     search_count += 1
                 except Exception as e:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")
+
+                # ── Checkpoint 1: evaluate after main query ──
+                eval_result = _incremental_evaluate(
+                    ctx, all_results, eval_question, eval_model
+                )
+
+                # Check tier after first evaluation
+                tier = ctx.quality.critique_tier if ctx.quality else "weak"
+                if tier == "strong":
+                    print(
+                        f"[research] GATE: strong tier after {search_count} searches, "
+                        f"stopping extra queries"
+                    )
+                    _gate_stopped = True
+                    break
+
                 for eq in spec.get("extra_queries") or []:
+                    # Gate check BEFORE issuing search
+                    tier = ctx.quality.critique_tier if ctx.quality else "weak"
+
+                    if tier == "strong":
+                        print(
+                            f"[research] GATE: strong tier reached, "
+                            f"skipping remaining extras"
+                        )
+                        _gate_stopped = True
+                        break
+
+                    if tier == "medium":
+                        if medium_budget <= 0:
+                            print(
+                                f"[research] GATE: medium tier, budget exhausted "
+                                f"after {search_count} searches"
+                            )
+                            _gate_stopped = True
+                            break
+                        medium_budget -= 1
+
+                    if consecutive_low >= SATURATION_CONSECUTIVE_MAX:
+                        print(
+                            f"[research] GATE: {consecutive_low} consecutive low-yield "
+                            f"searches, stopping"
+                        )
+                        _gate_stopped = True
+                        break
+
+                    # Execute search
                     try:
                         if is_w3:
-                            r = search_multi(ctx, eq["query"], final_top_k=eq.get("top_k", k))
+                            r = search_multi(
+                                ctx, eq["query"], final_top_k=eq.get("top_k", k)
+                            )
                         else:
                             r = search(
                                 ctx,
@@ -197,11 +264,31 @@ def research(
                                 filters=eq.get("filters"),
                                 top_k=eq.get("top_k", k),
                             )
+                        batch_ids = {str(h["id"]) for h in r["results"]}
+                        new_unique = len(batch_ids - seen_ids)
+                        seen_ids.update(batch_ids)
+
                         all_results.extend(r["results"])
                         search_count += 1
+
+                        # Novelty tracking
+                        if new_unique <= SATURATION_LOW_YIELD:
+                            consecutive_low += 1
+                        else:
+                            consecutive_low = 0
+
                     except Exception as e:
                         errors.append(str(e))
                         print(f"[research] WARNING: search failed: {e}")
+
+                    # ── Checkpoint 2: evaluate at EVAL_CHECKPOINT_SEARCH ──
+                    if (
+                        search_count == EVAL_CHECKPOINT_SEARCH
+                        or consecutive_low >= SATURATION_CONSECUTIVE_MAX
+                    ):
+                        _incremental_evaluate(
+                            ctx, all_results, eval_question, eval_model
+                        )
 
             if not all_results:
                 print("[research] ERROR: all searches failed")
@@ -212,6 +299,7 @@ def research(
                         "unique": 0,
                         "filtered": 0,
                         "eval_summary": "no results",
+                        "gate_stopped": _gate_stopped,
                     }
                 )
                 return {
@@ -221,57 +309,50 @@ def research(
                     "eval_summary": "no results",
                 }
 
-            # Deduplicate by ID, keep highest score
-            seen: dict = {}
-            for r in all_results:
-                rid = r["id"]
-                if rid not in seen or r["score"] > seen[rid]["score"]:
-                    seen[rid] = r
-            deduped = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
+            # ── Final evaluation: catch any unevaluated stragglers ──
+            final_eval = _incremental_evaluate(
+                ctx, all_results, eval_question, eval_model
+            )
+            deduped = final_eval["deduped"]
 
-            # Separate new vs already-rated results (cross-call dedup)
-            # Re-evaluate prior OFF-TOPIC results — may be relevant under a different query
-            new_results = [
-                r
-                for r in deduped
-                if r["id"] not in ctx.evaluated_ratings
-                or ctx.evaluated_ratings[r["id"]] == "OFF-TOPIC"
-            ]
-            prior_rated = {rid for rid in ctx.evaluated_ratings if rid in seen}
-
-            # Evaluate ONLY new results — carry forward prior ratings
-            ratings_map: dict = dict(ctx.evaluated_ratings)  # start with prior ratings
-            if new_results:
-                try:
-                    eval_out = evaluate_results(
-                        ctx, eval_question, new_results[:15], top_n=15, model=eval_model
-                    )
-                    for rt in eval_out["ratings"]:
-                        ratings_map[rt["id"]] = rt["rating"]
-                        ctx.evaluated_ratings[rt["id"]] = rt["rating"]  # persist
-                except Exception as e:
-                    print(f"[research] WARNING: evaluation failed, returning unrated: {e}")
-            elif prior_rated:
-                print(f"[research] all {len(deduped)} results already rated — skipping evaluation")
+            # Build ratings map from ctx.evaluated_ratings (authoritative)
+            # Include ALL prior ratings (matching current behavior — downstream
+            # code may expect cross-call ratings for dedup)
+            ratings_map: dict = dict(ctx.evaluated_ratings)
 
             # Filter OFF-TOPIC
-            filtered = [r for r in deduped if ratings_map.get(r["id"], "UNRATED") != "OFF-TOPIC"]
+            filtered = [
+                r for r in deduped
+                if ratings_map.get(str(r["id"]), "UNRATED") != "OFF-TOPIC"
+            ]
 
-            relevant = sum(1 for rid, v in ratings_map.items() if rid in seen and v == "RELEVANT")
-            partial = sum(1 for rid, v in ratings_map.items() if rid in seen and v == "PARTIAL")
-            off_topic = sum(1 for rid, v in ratings_map.items() if rid in seen and v == "OFF-TOPIC")
+            seen_map = {str(r["id"]) for r in deduped}
+            relevant = sum(
+                1 for rid, v in ratings_map.items() if rid in seen_map and v == "RELEVANT"
+            )
+            partial = sum(
+                1 for rid, v in ratings_map.items() if rid in seen_map and v == "PARTIAL"
+            )
+            off_topic = sum(
+                1 for rid, v in ratings_map.items() if rid in seen_map and v == "OFF-TOPIC"
+            )
             summary = f"{relevant} relevant, {partial} partial, {off_topic} off-topic"
-            if new_results and prior_rated:
-                summary += f" ({len(new_results)} new, {len(prior_rated)} prior)"
+            if _gate_stopped:
+                tier = ctx.quality.critique_tier if ctx.quality else "weak"
+                summary += f" (gate: {tier})"
 
             print(
                 f"[research] {search_count} searches | {len(all_results)} raw"
                 f" > {len(deduped)} unique > {len(filtered)} filtered"
+                f"{' [GATE]' if _gate_stopped else ''}"
             )
             print(f"[research] {summary}")
             for r in filtered[:5]:
-                tag = ratings_map.get(r["id"], "-")
-                print(f"  [{r['id']}] {r['score']:.2f} {tag:10s} Q: {r['question'][:100]}")
+                tag = ratings_map.get(str(r["id"]), "-")
+                print(
+                    f"  [{r['id']}] {r['score']:.2f} {tag:10s} "
+                    f"Q: {str(r.get('question', ''))[:100]}"
+                )
             if len(filtered) > 5:
                 print(f"  ... and {len(filtered) - 5} more")
 
@@ -280,10 +361,9 @@ def research(
                     "search_count": search_count,
                     "raw": len(all_results),
                     "unique": len(deduped),
-                    "new_evaluated": len(new_results),
-                    "prior_rated": len(prior_rated),
                     "filtered": len(filtered),
                     "eval_summary": summary,
+                    "gate_stopped": _gate_stopped,
                 }
             )
 

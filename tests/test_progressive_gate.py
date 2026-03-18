@@ -292,16 +292,18 @@ class TestIntegration:
     ):
         """If checkpoint eval reaches strong tier, remaining extras are skipped."""
         ctx = _make_ctx()
-        # Pre-seed evidence for confidence to reach strong threshold
-        _seed_evidence(ctx, list(range(1, 12)), score=0.9)
+        # NO pre-seeding — let evidence accumulate naturally across searches.
+        # Use side_effect so mock only rates what's actually passed (prevents
+        # leaking ratings for IDs not yet searched).
         mock_search.side_effect = [
             _make_results(list(range(1, 5)), score=0.9),     # search 1: 4 results
             _make_results(list(range(5, 9)), score=0.9),     # search 2: 4 new
             _make_results(list(range(9, 12)), score=0.9),    # search 3: 3 new → checkpoint
             _make_results([20, 21]),                          # should not reach
         ]
-        # Use return_value to avoid exhaustion on final _incremental_evaluate
-        mock_eval.return_value = _make_eval_ratings(list(range(1, 12)), "RELEVANT")
+        mock_eval.side_effect = lambda ctx, q, results, **kw: _make_eval_ratings(
+            [int(r["id"]) for r in results], "RELEVANT"
+        )
 
         result = research(
             ctx,
@@ -309,7 +311,10 @@ class TestIntegration:
             extra_queries=[{"query": f"v{i}"} for i in range(5)],
         )
 
-        # search 1 (main) + search 2 (extra 1) + search 3 (extra 2, checkpoint) → stop
+        # search 1 (main) → medium (4 RELEVANT, conf ~57)
+        # search 2 (extra 1) → still medium (budget 2→1, no checkpoint yet)
+        # search 3 (extra 2) → checkpoint fires, 11 RELEVANT → strong
+        # search 4 (extra 3) → gate check: strong → stop
         assert mock_search.call_count == 3
         assert result["search_count"] == 3
 

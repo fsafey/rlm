@@ -1395,13 +1395,21 @@ class TestResearch:
 
     def test_filters_off_topic(self, capsys):
         ns = _make_sub_agent_ns()
-        # Per-result responses: first RELEVANT, second OFF-TOPIC, third PARTIAL
-        batched_responses = [
-            "RELEVANT CONFIDENCE:4",
-            "OFF-TOPIC CONFIDENCE:1",
-            "PARTIAL CONFIDENCE:3",
-        ]
-        ns["_ctx"].llm_query_batched = lambda prompts, model=None: batched_responses[: len(prompts)]
+        # Content-aware mock: return consistent rating based on result ID.
+        # Incremental evaluation may re-evaluate OFF-TOPIC results at each
+        # checkpoint, so position-based mocks don't work reliably.
+        def _stable_batched(prompts, model=None):
+            ratings = []
+            for p in prompts:
+                if "Result [2]" in p:
+                    ratings.append("OFF-TOPIC CONFIDENCE:1")
+                elif "Result [3]" in p:
+                    ratings.append("PARTIAL CONFIDENCE:3")
+                else:
+                    ratings.append("RELEVANT CONFIDENCE:4")
+            return ratings
+
+        ns["_ctx"].llm_query_batched = _stable_batched
         mock_resp = _make_search_mock()
 
         with patch(_API_POST, return_value=mock_resp):
@@ -1628,13 +1636,18 @@ class TestResearchListQuery:
 class TestResearchEvalCoverage:
     """Test that research() evaluates up to 15 results with batched eval."""
 
-    def test_evaluates_up_to_15_results(self):
-        """research() sends up to 15 results to evaluate_results."""
+    def test_evaluates_up_to_15_per_batch(self):
+        """research() caps each evaluate_results batch at 15 results.
+
+        With incremental evaluation, multiple batches may fire (checkpoint
+        after main query + final eval), so total prompts can exceed 15.
+        The invariant is: no single batch exceeds 15.
+        """
         ns = _make_sub_agent_ns()
-        captured_prompts = []
+        batch_sizes: list[int] = []
 
         def tracking_batched(prompts, model=None):
-            captured_prompts.extend(prompts)
+            batch_sizes.append(len(prompts))
             return ["RELEVANT CONFIDENCE:4"] * len(prompts)
 
         ns["_ctx"].llm_query_batched = tracking_batched
@@ -1649,7 +1662,9 @@ class TestResearchEvalCoverage:
         with patch(_API_POST, return_value=mock_resp):
             ns["research"]("test question")
 
-        assert len(captured_prompts) == 15
+        # Each batch capped at 15; multiple batches may fire
+        assert all(s <= 15 for s in batch_sizes), f"Batch sizes: {batch_sizes}"
+        assert sum(batch_sizes) == 20  # all 20 eventually evaluated
 
 
 class TestDraftAnswer:

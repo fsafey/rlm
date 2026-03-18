@@ -19,3 +19,9 @@ RATING_ORDER = {"RELEVANT": 0, "PARTIAL": 1, "OFF-TOPIC": 2, "UNKNOWN": 3}
 STRONG_RELEVANT_MIN = 6
 STRONG_CONFIDENCE_MIN = 50
 MEDIUM_RELEVANT_MIN = 3
+
+# Progressive gate: search saturation thresholds
+SATURATION_LOW_YIELD = 1        # new unique results at or below this = "low yield" search
+SATURATION_CONSECUTIVE_MAX = 2  # consecutive low-yield searches before stopping
+MEDIUM_EXTRA_BUDGET = 2         # max extra queries allowed after reaching medium tier
+EVAL_CHECKPOINT_SEARCH = 3      # search count at which to run mid-loop evaluation

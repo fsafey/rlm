@@ -219,6 +219,17 @@ def research(
                         f"stopping extra queries"
                     )
                     _gate_stopped = True
+                    bus = getattr(ctx, "bus", None)
+                    if bus is not None:
+                        bus.emit("tool_progress", {
+                            "tool": "research",
+                            "phase": "gate_stopped",
+                            "data": {
+                                "reason": "strong",
+                                "search_count": search_count,
+                                "tier": tier,
+                            },
+                        })
                     break
 
                 for eq in spec.get("extra_queries") or []:
@@ -231,6 +242,17 @@ def research(
                             f"skipping remaining extras"
                         )
                         _gate_stopped = True
+                        bus = getattr(ctx, "bus", None)
+                        if bus is not None:
+                            bus.emit("tool_progress", {
+                                "tool": "research",
+                                "phase": "gate_stopped",
+                                "data": {
+                                    "reason": "strong",
+                                    "search_count": search_count,
+                                    "tier": tier,
+                                },
+                            })
                         break
 
                     if tier == "medium":
@@ -240,6 +262,17 @@ def research(
                                 f"after {search_count} searches"
                             )
                             _gate_stopped = True
+                            bus = getattr(ctx, "bus", None)
+                            if bus is not None:
+                                bus.emit("tool_progress", {
+                                    "tool": "research",
+                                    "phase": "gate_stopped",
+                                    "data": {
+                                        "reason": "medium_budget",
+                                        "search_count": search_count,
+                                        "tier": tier,
+                                    },
+                                })
                             break
                         medium_budget -= 1
 
@@ -249,6 +282,17 @@ def research(
                             f"searches, stopping"
                         )
                         _gate_stopped = True
+                        bus = getattr(ctx, "bus", None)
+                        if bus is not None:
+                            bus.emit("tool_progress", {
+                                "tool": "research",
+                                "phase": "gate_stopped",
+                                "data": {
+                                    "reason": "saturation",
+                                    "search_count": search_count,
+                                    "tier": tier,
+                                },
+                            })
                         break
 
                     # Execute search

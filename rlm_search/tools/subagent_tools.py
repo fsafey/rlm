@@ -462,6 +462,7 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         "Respond with these sections:\n"
         "CATEGORY: <code>\n"
         "CONFIDENCE: HIGH|MEDIUM|LOW\n"
+        "ALSO: <secondary category code if CONFIDENCE is LOW, omit otherwise>\n"
         "CLUSTERS: <comma-separated cluster labels from the chosen category, up to 5>\n"
         "QUERIES:\n"
         "<query variant 1>\n"
@@ -471,6 +472,10 @@ def _build_category_prompt(question: str, kb_overview_data: dict) -> str:
         "- HIGH: question clearly belongs to one category\n"
         "- MEDIUM: one category fits but another is plausible\n"
         "- LOW: question spans two categories equally or is genuinely ambiguous\n\n"
+        "ALSO guidance:\n"
+        "- Only include when CONFIDENCE is LOW\n"
+        "- Name the other plausible category code\n"
+        "- Omit this line entirely for HIGH or MEDIUM confidence\n\n"
         "CLUSTERS guidance:\n"
         "- Select clusters whose topic covers the question, even if wording differs\n"
         "- Use NONE if no clusters are relevant\n"
@@ -554,6 +559,7 @@ def init_classify(
 
             # Parse category, confidence, and clusters from response
             category = ""
+            also_category = ""
             confidence = "HIGH"  # default if model omits
             llm_clusters: list[str] = []
             for line in raw.strip().split("\n"):
@@ -564,6 +570,10 @@ def init_classify(
                     raw_conf = line_s.split(":", 1)[1].strip().upper()
                     if raw_conf in ("HIGH", "MEDIUM", "LOW"):
                         confidence = raw_conf
+                elif line_s.upper().startswith("ALSO:"):
+                    also_raw = line_s.split(":", 1)[1].strip().upper()
+                    if also_raw and also_raw in ctx.kb_overview_data.get("categories", {}):
+                        also_category = also_raw
                 elif line_s.upper().startswith("CLUSTERS:"):
                     raw_clusters = line_s.split(":", 1)[1].strip()
                     if raw_clusters.upper() != "NONE":
@@ -587,6 +597,7 @@ def init_classify(
                         "CONFIDENCE",
                         "CLUSTERS",
                         "QUERIES",
+                        "ALSO",
                     ):
                         break
                     if line_s:
@@ -641,6 +652,7 @@ def init_classify(
                 "filters": {"parent_code": category},
                 "strategy": strategy,
                 "query_variants": query_variants,
+                "also_category": also_category,
             }
 
             ctx.classification = parsed

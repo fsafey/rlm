@@ -93,6 +93,10 @@ class TestBuildCategoryPrompt:
         assert "nikah" in prompt  # MF terms
         assert "tawbah" in prompt  # BE terms
 
+    def test_includes_also_field_in_format(self):
+        prompt = _build_category_prompt("test question", self.SAMPLE_KB)
+        assert "ALSO:" in prompt
+
 
 from unittest.mock import MagicMock, patch
 
@@ -124,6 +128,12 @@ class TestInitClassify:
                         "Wudu Ablution": "Steps of wudu?",
                     },
                     "facets": {"subtopics": [{"value": "purification", "count": 120}]},
+                },
+                "BE": {
+                    "name": "Beliefs & Ethics",
+                    "document_count": 2500,
+                    "clusters": {},
+                    "facets": {"subtopics": []},
                 },
             }
         }
@@ -253,6 +263,76 @@ class TestInitClassify:
 
         assert ctx.classification is None
 
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_also_category_parsed_for_low_confidence(self, mock_get_client):
+        """ALSO: line parsed when CONFIDENCE is LOW."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: LOW\nALSO: BE\nCLUSTERS: NONE"
+        )
+        mock_get_client.return_value = mock_client
+        ctx = self._make_ctx()
+        init_classify(ctx, "Is selling alcohol halal?", model="test-model")
+        assert ctx.classification is not None
+        assert ctx.classification["also_category"] == "BE"
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_also_category_empty_when_high_confidence(self, mock_get_client):
+        """ALSO: line absent → also_category is empty string."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: HIGH\nCLUSTERS: Banking Riba Operations"
+        )
+        mock_get_client.return_value = mock_client
+        ctx = self._make_ctx()
+        init_classify(ctx, "can I take a mortgage?", model="test-model")
+        assert ctx.classification is not None
+        assert ctx.classification["also_category"] == ""
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_also_category_validates_against_kb(self, mock_get_client):
+        """ALSO: line with unknown category code is rejected."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: LOW\nALSO: XX\nCLUSTERS: NONE"
+        )
+        mock_get_client.return_value = mock_client
+        ctx = self._make_ctx()
+        init_classify(ctx, "test", model="test-model")
+        assert ctx.classification is not None
+        assert ctx.classification["also_category"] == ""
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_query_variants_parsed(self, mock_get_client):
+        """QUERIES section parsed into query_variants list."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: HIGH\n"
+            "CLUSTERS: Banking Riba Operations\n"
+            "QUERIES:\nmortgage halal permissibility\n"
+            "riba bank loan ruling\nhome financing Islamic law"
+        )
+        mock_get_client.return_value = mock_client
+        ctx = self._make_ctx()
+        init_classify(ctx, "can I take a mortgage?", model="test-model")
+        assert len(ctx.classification["query_variants"]) == 3
+        assert "mortgage halal permissibility" in ctx.classification["query_variants"]
+
+    @patch("rlm_search.tools.subagent_tools.get_client")
+    def test_query_variants_not_polluted_by_also_line(self, mock_get_client):
+        """ALSO: line after QUERIES does not leak into query_variants."""
+        mock_client = MagicMock()
+        mock_client.completion.return_value = (
+            "CATEGORY: FN\nCONFIDENCE: LOW\n"
+            "CLUSTERS: NONE\nQUERIES:\nquery one\nquery two\n"
+            "ALSO: BE"
+        )
+        mock_get_client.return_value = mock_client
+        ctx = self._make_ctx()
+        init_classify(ctx, "test", model="test-model")
+        assert len(ctx.classification["query_variants"]) == 2
+        assert "BE" not in str(ctx.classification["query_variants"])
+
 
 from rlm_search.tools.progress_tools import _suggest_strategy
 
@@ -334,6 +414,30 @@ class TestSuggestStrategyWithBrowseClusters:
         )
         result = _suggest_strategy(ctx, set())
         assert "Browse-matched clusters" in result
+
+    def test_low_confidence_includes_also_category_in_strategy(self):
+        """LOW confidence with also_category mentions it in strategy."""
+        kb = {
+            "categories": {
+                "FN": {
+                    "name": "Finance & Transactions",
+                    "document_count": 1891,
+                    "facets": {"clusters": []},
+                },
+                "BE": {
+                    "name": "Beliefs & Ethics",
+                    "document_count": 2500,
+                    "facets": {"clusters": []},
+                },
+            }
+        }
+        ctx = self._make_ctx_with_classification("FN", "", kb, confidence="LOW")
+        ctx.classification["also_category"] = "BE"
+        ctx.classification["strategy"] = (
+            "Low category confidence — start with broad search (no filters)."
+        )
+        result = _suggest_strategy(ctx, set())
+        assert "BE" in result
 
 
 from rlm_search.tools.context import ToolContext as _ToolContext

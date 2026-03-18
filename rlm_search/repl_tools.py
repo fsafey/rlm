@@ -132,6 +132,8 @@ if classification:
     _parts = [f"Category: {classification['category']} ({classification['confidence']})"]
     if classification.get('clusters'):
         _parts.append(f"Clusters: {classification['clusters']}")
+    if classification.get('also_category'):
+        _parts.append(f"Also: {classification['also_category']}")
     if query_variants:
         _parts.append(f"Query variants: {query_variants}")
     _parts.append(f"Strategy: {classification['strategy']}")

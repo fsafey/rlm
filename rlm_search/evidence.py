@@ -74,6 +74,11 @@ class EvidenceStore:
     def get_rating(self, hit_id: str) -> dict[str, Any] | None:
         return self._ratings.get(str(hit_id))
 
+    @property
+    def ratings(self) -> dict[str, dict[str, Any]]:
+        """Read-only view of all ratings (id -> {"rating": str, "confidence": int})."""
+        return self._ratings
+
     def rating_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for r in self._ratings.values():

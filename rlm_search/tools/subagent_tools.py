@@ -288,13 +288,59 @@ def reformulate(
         return queries
 
 
+# Critique dimension keys — used for structured parsing
+_CRITIQUE_DIMENSIONS = [
+    "CITATION_ACCURACY",
+    "ATTRIBUTION_FIDELITY",
+    "UNSUPPORTED_CLAIMS",
+    "COMPLETENESS",
+    "SCHOLARLY_VOICE",
+    "STRUCTURE",
+]
+
+# Dimensions that can be fixed without a full LLM revision
+COSMETIC_DIMENSIONS = {"SCHOLARLY_VOICE", "STRUCTURE"}
+
+
+def _parse_critique_dimensions(verdict: str) -> dict[str, dict[str, str]]:
+    """Parse structured critique output into per-dimension results.
+
+    Expected format from LLM:
+        CITATION_ACCURACY: PASS
+        ATTRIBUTION_FIDELITY: PASS
+        COMPLETENESS: FAIL — [Source: 9253] states condition X
+        ...
+        VERDICT: FAIL
+
+    Returns:
+        Dict mapping dimension name to {"verdict": "PASS"|"FAIL", "detail": "..."}.
+        Returns empty dict if parsing fails (LLM didn't follow format).
+    """
+    dims: dict[str, dict[str, str]] = {}
+    for line in verdict.split("\n"):
+        line = line.strip().strip("*").strip()
+        if not line or line.startswith("VERDICT"):
+            continue
+        for dim in _CRITIQUE_DIMENSIONS:
+            if line.upper().startswith(dim):
+                rest = line[len(dim) :].strip().lstrip(":").strip()
+                if rest.upper().startswith("PASS"):
+                    detail = rest[4:].strip().lstrip("—-").strip()
+                    dims[dim] = {"verdict": "PASS", "detail": detail}
+                elif rest.upper().startswith("FAIL"):
+                    detail = rest[4:].strip().lstrip("—-").strip()
+                    dims[dim] = {"verdict": "FAIL", "detail": detail}
+                break
+    return dims
+
+
 def critique_answer(
     ctx: ToolContext,
     question: str,
     draft: str,
     evidence: list[str] | None = None,
     model: str | None = None,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, dict[str, dict[str, str]]]:
     """Evidence-grounded critique: cross-check draft citations against sources.
 
     When evidence is provided, checks citation accuracy, attribution fidelity,
@@ -303,7 +349,9 @@ def critique_answer(
     evidence from the session state so the critique is still grounded.
 
     Returns:
-        Tuple of (verdict_text, passed).
+        Tuple of (verdict_text, passed, dimensions).
+        ``dimensions`` maps dimension name to {"verdict": "PASS"|"FAIL", "detail": "..."}.
+        Empty dict if structured parsing failed.
     """
     # Option B: auto-pull evidence from session state when caller omits it
     if evidence is None and ctx.source_registry:
@@ -332,30 +380,30 @@ def critique_answer(
                 f"QUESTION:\n{question}\n\n"
                 f"EVIDENCE:\n{evidence_block}\n\n"
                 f"DRAFT:\n{draft}\n\n"
-                f"Check these criteria:\n\n"
-                f"1. CITATION ACCURACY — Every [Source: N] in the draft must map to "
-                f"a real source in the evidence above. Flag any fabricated IDs.\n\n"
-                f"2. ATTRIBUTION FIDELITY — Claims attributed to specific scholars, "
-                f"texts, or rulings must actually appear in the cited source.\n\n"
-                f"3. UNSUPPORTED CLAIMS — Flag substantive rulings or factual "
-                f"claims that have no [Source: N] citation.\n\n"
-                f"4. COMPLETENESS — All materially distinct rulings, conditions, and "
-                f"caveats from high-relevance evidence should be represented. When "
-                f"multiple sources agree on the same ruling, a single merged paragraph "
-                f"with all citations is the correct synthesis — do not flag this as "
-                f"incomplete. Flag only when a distinct condition, exception, or "
-                f"directly-answering point from the evidence is absent.\n\n"
-                f"5. SCHOLARLY VOICE — The answer should frame rulings as coming from "
-                f"I.M.A.M. scholars (not as the AI's own opinion). Rulings stated "
-                f"declaratively ('The ruling is...') not tentatively ('It may be...', "
-                f"'It would seem...'). No first-person hedging ('I think', 'I believe', "
-                f"'it seems'). Arabic terms defined on first use.\n\n"
-                f"6. STRUCTURE — The answer leads with the direct ruling or main "
-                f"conclusion. Flag if: (a) the ruling is buried after extensive background, "
-                f"or (b) the answer opens with generic preamble ('This is an important "
-                f"topic', 'Islam addresses...') that delays the ruling.\n\n"
-                f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
-                f"If ANY check fails, the overall verdict is FAIL."
+                f"Evaluate each dimension. For each, output exactly one line:\n"
+                f"DIMENSION_NAME: PASS or FAIL — brief reason (under 25 words)\n\n"
+                f"Dimensions:\n\n"
+                f"CITATION_ACCURACY: Every [Source: N] in the draft maps to a real "
+                f"source in the evidence. Flag fabricated IDs.\n\n"
+                f"ATTRIBUTION_FIDELITY: Claims attributed to scholars, texts, or "
+                f"rulings actually appear in the cited source.\n\n"
+                f"UNSUPPORTED_CLAIMS: No substantive rulings or factual claims "
+                f"lack a [Source: N] citation.\n\n"
+                f"COMPLETENESS: All materially distinct rulings, conditions, and "
+                f"caveats from RELEVANT evidence are represented. Consensus "
+                f"synthesis (single merged paragraph with all citations) is correct "
+                f"— not incomplete. Flag only when a distinct condition, exception, "
+                f"or directly-answering point from RELEVANT evidence is absent. "
+                f"Name the specific source ID(s) omitted.\n\n"
+                f"SCHOLARLY_VOICE: Rulings framed as I.M.A.M. scholars (not AI "
+                f"opinion). Declarative tone ('The ruling is...' not 'It may "
+                f"be...'). No first-person hedging. Arabic terms defined on first "
+                f"use.\n\n"
+                f"STRUCTURE: Answer leads with the direct ruling. No generic "
+                f"preamble delaying the ruling.\n\n"
+                f"After all dimensions, output:\n"
+                f"VERDICT: PASS (if all dimensions pass) or FAIL\n"
+                f"Then one line summarizing the key issue (under 30 words).\n"
             )
         else:
             prompt = (
@@ -363,26 +411,38 @@ def critique_answer(
                 f"Review this draft answer to the question:\n"
                 f'"{question}"\n\n'
                 f"Draft:\n{draft}\n\n"
-                f"Check:\n"
-                f"1. Does it answer the actual question asked?\n"
-                f"2. Are there unsupported claims or fabricated rulings?\n"
-                f"3. Is any materially distinct ruling, condition, or caveats missing? "
-                f"(When multiple sources agree, a single merged paragraph is correct — "
-                f"do not flag consensus synthesis as incomplete.)\n"
-                f"4. Are [Source: N] citations present for factual claims?\n"
-                f"5. SCHOLARLY VOICE — Does the answer frame rulings as coming from "
-                f"I.M.A.M. scholars (not as the AI's own opinion)? Are rulings stated "
-                f"declaratively ('The ruling is...') not tentatively ('It may be...', "
-                f"'it seems')? No first-person hedging. Arabic terms defined on first use. "
-                f"No introductory padding before the ruling.\n\n"
-                f"Respond: PASS or FAIL, then brief feedback (under 150 words).\n"
-                f"If ANY check fails, the overall verdict is FAIL."
+                f"Evaluate each dimension. For each, output exactly one line:\n"
+                f"DIMENSION_NAME: PASS or FAIL — brief reason (under 25 words)\n\n"
+                f"CITATION_ACCURACY: [Source: N] citations present and plausible.\n"
+                f"ATTRIBUTION_FIDELITY: Claims match cited sources.\n"
+                f"UNSUPPORTED_CLAIMS: No uncited substantive claims.\n"
+                f"COMPLETENESS: Question fully addressed, no major gaps.\n"
+                f"SCHOLARLY_VOICE: I.M.A.M. framing, declarative tone, no hedging.\n"
+                f"STRUCTURE: Leads with ruling, no preamble padding.\n\n"
+                f"After all dimensions, output:\n"
+                f"VERDICT: PASS (if all dimensions pass) or FAIL\n"
+                f"Then one line summarizing the key issue (under 30 words).\n"
             )
 
         verdict = ctx.llm_query(prompt, model=model)
-        passed = verdict.strip().strip("*").upper().startswith("PASS")
+        dimensions = _parse_critique_dimensions(verdict)
+
+        # Determine pass/fail from structured output if sufficient dimensions parsed,
+        # otherwise fall back to scanning for PASS/FAIL at start of verdict text.
+        # Require at least 4 of 6 dimensions to trust structured output.
+        if len(dimensions) >= 4:
+            passed = all(d["verdict"] == "PASS" for d in dimensions.values())
+        else:
+            passed = verdict.strip().strip("*").upper().startswith("PASS")
+
         verdict_str = "PASS" if passed else "FAIL"
-        failed_str = "" if passed else " (failed: evidence-grounded review)"
+        failed_dims = [k for k, v in dimensions.items() if v["verdict"] == "FAIL"]
+        failed_str = ""
+        if not passed:
+            if failed_dims:
+                failed_str = f" (failed: {', '.join(failed_dims)})"
+            else:
+                failed_str = " (failed: evidence-grounded review)"
         print(f"[critique_answer] verdict={verdict_str}{failed_str}")
         feedback = verdict.split("\n", 1)[1].strip() if "\n" in verdict else ""
 
@@ -398,10 +458,11 @@ def critique_answer(
                 "feedback": feedback,
                 # Backward compat for frontend CritiqueDetail renderer
                 "reason": feedback,
-                "failed": [] if passed else ["evidence_review"],
+                "failed": failed_dims if failed_dims else ([] if passed else ["evidence_review"]),
+                "dimensions": {k: v["verdict"] for k, v in dimensions.items()},
             }
         )
-        return verdict, passed
+        return verdict, passed, dimensions
 
 
 def _build_category_prompt(question: str, kb_overview_data: dict) -> str:

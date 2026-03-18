@@ -491,7 +491,9 @@ class TestCritiqueAnswerEvidence:
             "Mortgage is not permissible according to the majority [Source: 101]. "
             "Riba is prohibited [Source: 102]."
         )
-        verdict, passed = critique_answer(ctx, "Is mortgage halal?", draft, evidence=evidence)
+        verdict, passed, dims = critique_answer(
+            ctx, "Is mortgage halal?", draft, evidence=evidence
+        )
         assert passed is True
         assert "PASS" in verdict
 
@@ -505,7 +507,9 @@ class TestCritiqueAnswerEvidence:
             "[Source: 101] Q: Is mortgage halal? A: Majority view is not permissible.",
         ]
         draft = "Mortgage is haram [Source: 101] and also per [Source: 999]."
-        verdict, passed = critique_answer(ctx, "Is mortgage halal?", draft, evidence=evidence)
+        verdict, passed, dims = critique_answer(
+            ctx, "Is mortgage halal?", draft, evidence=evidence
+        )
         assert passed is False
         assert "FAIL" in verdict
 
@@ -519,10 +523,12 @@ class TestCritiqueAnswerEvidence:
 
         ctx = self._make_ctx()
         ctx.llm_query = capture_prompt
-        verdict, passed = critique_answer(ctx, "test question", "test draft", evidence=None)
+        verdict, passed, dims = critique_answer(
+            ctx, "test question", "test draft", evidence=None
+        )
         assert passed is True
         assert "EVIDENCE:" not in prompts_seen[0]
-        assert "Does it answer the actual question" in prompts_seen[0]
+        assert "CITATION_ACCURACY" in prompts_seen[0]
 
     def test_critique_with_evidence_includes_evidence_in_prompt(self):
         """When evidence provided, the prompt must include the evidence block."""
@@ -537,12 +543,12 @@ class TestCritiqueAnswerEvidence:
         evidence = ["[Source: 1] Q: Test A: Answer"]
         critique_answer(ctx, "question", "draft [Source: 1]", evidence=evidence)
         assert "EVIDENCE:" in prompts_seen[0]
-        assert "CITATION ACCURACY" in prompts_seen[0]
-        assert "ATTRIBUTION FIDELITY" in prompts_seen[0]
+        assert "CITATION_ACCURACY" in prompts_seen[0]
+        assert "ATTRIBUTION_FIDELITY" in prompts_seen[0]
         assert "[Source: 1] Q: Test A: Answer" in prompts_seen[0]
 
     def test_evidence_path_criterion5_includes_declarative_register(self):
-        """Critic criterion 5 (evidence path) must check for tentative framing."""
+        """Critic criterion 5 (evidence path) must check for declarative voice."""
         prompts_seen: list[str] = []
 
         def capture_prompt(prompt, model=None):
@@ -553,8 +559,8 @@ class TestCritiqueAnswerEvidence:
         ctx.llm_query = capture_prompt
         evidence = ["[Source: 1] Q: Test A: Answer"]
         critique_answer(ctx, "question", "draft [Source: 1]", evidence=evidence)
-        assert "declaratively" in prompts_seen[0]
-        assert "tentatively" in prompts_seen[0]
+        assert "SCHOLARLY_VOICE" in prompts_seen[0]
+        assert "Declarative" in prompts_seen[0]
 
     def test_fallback_path_criterion5_includes_declarative_register(self):
         """Critic criterion 5 (no-evidence fallback) must also check declarative register."""
@@ -567,5 +573,5 @@ class TestCritiqueAnswerEvidence:
         ctx = self._make_ctx()
         ctx.llm_query = capture_prompt
         critique_answer(ctx, "test question", "test draft", evidence=None)
-        assert "declaratively" in prompts_seen[0]
-        assert "tentatively" in prompts_seen[0]
+        assert "SCHOLARLY_VOICE" in prompts_seen[0]
+        assert "declarative" in prompts_seen[0]

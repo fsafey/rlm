@@ -8,8 +8,12 @@ from typing import TYPE_CHECKING, Any
 
 from rlm_search.prompts import DOMAIN_PREAMBLE
 from rlm_search.tools.api_tools import search, search_multi
-from rlm_search.tools.format_tools import format_evidence
-from rlm_search.tools.subagent_tools import critique_answer, evaluate_results
+from rlm_search.tools.format_tools import build_must_cite_brief, format_evidence
+from rlm_search.tools.subagent_tools import (
+    COSMETIC_DIMENSIONS,
+    critique_answer,
+    evaluate_results,
+)
 from rlm_search.tools.tracker import tool_call_tracker
 
 if TYPE_CHECKING:
@@ -224,8 +228,8 @@ def draft_answer(
 ) -> dict:
     """Synthesize an answer from results, critique it, and revise if needed.
 
-    Handles: format_evidence -> llm_query synthesis -> critique ->
-    conditional revision (one retry on FAIL).
+    Handles: format_evidence -> must-cite brief -> llm_query synthesis ->
+    structured critique -> targeted revision (one retry on FAIL).
 
     Args:
         ctx: Per-session tool context.
@@ -239,10 +243,18 @@ def draft_answer(
     """
     if len(ctx.evidence.search_log) == 0:
         print("[draft_answer] WARNING: No research() calls made. Results may be ungrounded.")
-    evidence = format_evidence(results[:20])
+
+    # Use rating-aware evidence ordering when ratings are available
+    ratings = ctx.evidence.ratings or None
+    evidence = format_evidence(results[:20], ratings=ratings)
     if not evidence:
         print("[draft_answer] ERROR: no evidence to synthesize from")
         return {"answer": "", "critique": "", "passed": False, "revised": False}
+
+    # Build must-cite brief from ratings (zero LLM cost)
+    must_cite = ""
+    if ratings:
+        must_cite = build_must_cite_brief(results[:20], ratings)
 
     with tool_call_tracker(
         ctx,
@@ -254,7 +266,14 @@ def draft_answer(
             prompt_parts = [
                 DOMAIN_PREAMBLE,
                 "Synthesize a comprehensive, well-structured answer from the "
-                "evidence below.\n\n"
+                "evidence below.\n\n",
+            ]
+
+            # Inject must-cite brief before evidence
+            if must_cite:
+                prompt_parts.append(must_cite)
+
+            prompt_parts.extend([
                 "VOICE & TONE:\n"
                 "- Write as the voice of the I.M.A.M. scholarly corpus — presenting "
                 "the assembled guidance of qualified Ja'fari scholars. Frame answers "
@@ -289,7 +308,7 @@ def draft_answer(
                 "by condition.\n\n",
                 f"QUESTION:\n{question}\n\n",
                 "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
-            ]
+            ])
             if instructions:
                 prompt_parts.append(f"INSTRUCTIONS:\n{instructions}\n\n")
             prompt_parts.append(
@@ -314,37 +333,75 @@ def draft_answer(
 
             answer = ctx.llm_query("".join(prompt_parts), model=model)
 
-            critique_text, passed = critique_answer(
+            critique_text, passed, dimensions = critique_answer(
                 ctx, question, answer, evidence=evidence, model=model
             )
             revised = False
 
             if not passed:
-                rev_parts = [
-                    DOMAIN_PREAMBLE,
-                    "Revise this answer based on the critique.\n\n",
-                    f"CRITIQUE:\n{critique_text}\n\n",
-                    f"ORIGINAL:\n{answer}\n\n",
-                    "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
-                    "Fix flagged issues. Keep valid citations. Same format.\n"
-                    "Maintain synthesis structure: lead with the ruling, keep consensus "
-                    "sources merged (do not expand a unified statement into per-source "
-                    "paragraphs).\n"
-                    "VOICE (preserve throughout): state rulings declaratively "
-                    "('The ruling is...' not 'It may be...'); frame as I.M.A.M. "
-                    "scholarly corpus ('According to the I.M.A.M. corpus...'); "
-                    "no first-person hedging ('I think', 'it seems'); "
-                    "define Arabic/fiqhi terms parenthetically on first use "
-                    "(e.g., 'riba (usury/interest)') if not already defined; "
-                    "no introductory padding before the ruling.\n"
-                    "Return ONLY the revised answer — no preamble, no explanation of"
-                    " changes.\n"
-                    "Do NOT say 'Here is the revised answer' or describe what you changed.\n"
-                    "Do NOT include revision notes, commentary, or meta-text.\n"
-                    "Start directly with ## Answer.\n",
-                ]
+                # Determine failed dimensions for targeted revision
+                failed_dims = {
+                    k: v for k, v in dimensions.items() if v["verdict"] == "FAIL"
+                }
+                cosmetic_only = (
+                    bool(failed_dims)
+                    and all(k in COSMETIC_DIMENSIONS for k in failed_dims)
+                )
+
+                if cosmetic_only:
+                    # Voice/structure issues only — targeted fix, no full re-synthesis
+                    fix_details = "; ".join(
+                        f"{k}: {v['detail']}" for k, v in failed_dims.items() if v["detail"]
+                    )
+                    rev_parts = [
+                        DOMAIN_PREAMBLE,
+                        "Fix ONLY the following voice/structure issues in this answer. "
+                        "Do not change the substance, citations, or content.\n\n",
+                        f"ISSUES:\n{fix_details}\n\n" if fix_details else "",
+                        f"CRITIQUE:\n{critique_text}\n\n",
+                        f"ORIGINAL:\n{answer}\n\n",
+                        "Return ONLY the fixed answer. Start directly with ## Answer.\n",
+                    ]
+                else:
+                    # Substantive issues — build targeted revision prompt
+                    completeness_detail = ""
+                    if "COMPLETENESS" in failed_dims:
+                        detail = failed_dims["COMPLETENESS"].get("detail", "")
+                        if detail:
+                            completeness_detail = (
+                                f"\nCRITICAL OMISSION:\n{detail}\n"
+                                "You MUST incorporate the above missing source(s) into "
+                                "the revised answer.\n\n"
+                            )
+
+                    rev_parts = [
+                        DOMAIN_PREAMBLE,
+                        "Revise this answer based on the critique.\n\n",
+                        f"CRITIQUE:\n{critique_text}\n\n",
+                        completeness_detail,
+                        f"ORIGINAL:\n{answer}\n\n",
+                        "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
+                        "Fix flagged issues. Keep valid citations. Same format.\n"
+                        "Maintain synthesis structure: lead with the ruling, keep consensus "
+                        "sources merged (do not expand a unified statement into per-source "
+                        "paragraphs).\n"
+                        "VOICE (preserve throughout): state rulings declaratively "
+                        "('The ruling is...' not 'It may be...'); frame as I.M.A.M. "
+                        "scholarly corpus ('According to the I.M.A.M. corpus...'); "
+                        "no first-person hedging ('I think', 'it seems'); "
+                        "define Arabic/fiqhi terms parenthetically on first use "
+                        "(e.g., 'riba (usury/interest)') if not already defined; "
+                        "no introductory padding before the ruling.\n"
+                        "Return ONLY the revised answer — no preamble, no explanation of"
+                        " changes.\n"
+                        "Do NOT say 'Here is the revised answer' or describe what you "
+                        "changed.\n"
+                        "Do NOT include revision notes, commentary, or meta-text.\n"
+                        "Start directly with ## Answer.\n",
+                    ]
+
                 answer = ctx.llm_query("".join(rev_parts), model=model)
-                critique_text, passed = critique_answer(
+                critique_text, passed, dimensions = critique_answer(
                     ctx, question, answer, evidence=evidence, model=model
                 )
                 revised = True
@@ -355,11 +412,16 @@ def draft_answer(
                 quality.record_draft(len(answer))
                 quality.record_critique(passed, critique_text)
 
+            failed_dims_list = [
+                k for k, v in dimensions.items() if v["verdict"] == "FAIL"
+            ]
             print(
                 f"[draft_answer] {'PASS' if passed else 'FAIL'}"
                 f"{' (revised)' if revised else ''}"
                 f" | {len(answer)} chars | {len(evidence)} evidence entries"
             )
+            if failed_dims_list:
+                print(f"[draft_answer] failed dimensions: {', '.join(failed_dims_list)}")
             tc.set_summary(
                 {
                     "passed": passed,
@@ -368,6 +430,7 @@ def draft_answer(
                     "answer_preview": answer,
                     "critique_verdict": "PASS" if passed else "FAIL",
                     "critique_reason": critique_text or "",
+                    "dimensions": {k: v["verdict"] for k, v in dimensions.items()},
                 }
             )
             return {
@@ -375,4 +438,5 @@ def draft_answer(
                 "critique": critique_text,
                 "passed": passed,
                 "revised": revised,
+                "dimensions": {k: v["verdict"] for k, v in dimensions.items()},
             }

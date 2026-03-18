@@ -170,8 +170,8 @@ def reformulate(question, failed_query, top_score=0.0, model=None):
     return _sub.reformulate(_ctx, question, failed_query, top_score=top_score, model=model)
 
 def critique_answer(question, draft, evidence=None, model=None):
-    verdict, passed = _sub.critique_answer(_ctx, question, draft, evidence=evidence, model=model)
-    return {"verdict": verdict, "passed": passed}
+    verdict, passed, dimensions = _sub.critique_answer(_ctx, question, draft, evidence=evidence, model=model)
+    return {"verdict": verdict, "passed": passed, "dimensions": {k: v["verdict"] for k, v in dimensions.items()}}
 
 def check_progress():
     return _prog.check_progress(_ctx)

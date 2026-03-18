@@ -1223,8 +1223,8 @@ class TestCritiqueAnswer:
         )
         result = ns["critique_answer"]("question", "draft [Source: 42]")
         assert result["passed"] is True
-        # Should have used evidence-grounded path (CITATION ACCURACY check)
-        assert "CITATION ACCURACY" in prompts_seen[0]
+        # Should have used evidence-grounded path (CITATION_ACCURACY check)
+        assert "CITATION_ACCURACY" in prompts_seen[0]
         assert "[Source: 42]" in prompts_seen[0]
 
     def test_explicit_evidence_takes_precedence(self):

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from rlm_search.prompt_constants import (
     EVAL_CHECKPOINT_SEARCH,
+    EXPLORE_EXTRA_BUDGET,
     MEDIUM_EXTRA_BUDGET,
     SATURATION_CONSECUTIVE_MAX,
     SATURATION_LOW_YIELD,
@@ -37,7 +38,7 @@ def _verify_citations(draft: str, evidence_ids: set[str]) -> dict:
         Dict with cited (set), fabricated (set), uncited (set),
         valid (bool — no fabricated IDs), coverage (float 0-1).
     """
-    cited = set(re.findall(r'\[Source:\s*(\d+)\]', draft))
+    cited = set(re.findall(r"\[Source:\s*(\d+)\]", draft))
     fabricated = cited - evidence_ids
     uncited = evidence_ids - cited
     coverage = len(cited & evidence_ids) / len(evidence_ids) if evidence_ids else 1.0
@@ -187,6 +188,9 @@ def research(
                 eval_question = query
 
             is_w3 = ctx.pipeline_mode == "w3"
+            is_exploring = bool(ctx.quality and ctx.quality.phase == "explore")
+            if is_exploring:
+                medium_budget = MEDIUM_EXTRA_BUDGET + EXPLORE_EXTRA_BUDGET
 
             for spec in specs:
                 if _gate_stopped:
@@ -206,6 +210,9 @@ def research(
                     seen_ids.update(batch_ids)
                     all_results.extend(r["results"])
                     search_count += 1
+                    # Record yield for explore phase velocity tracking
+                    if ctx.quality:
+                        ctx.quality.record_search_yield(len(batch_ids))
                 except Exception as e:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")
@@ -217,45 +224,65 @@ def research(
                 _eval_offset = eval_result["processed_to"]
 
                 # Check tier after first evaluation
-                tier = ctx.quality.critique_tier if ctx.quality else "weak"
-                if tier == "strong":
-                    print(
-                        f"[research] GATE: strong tier after {search_count} searches, "
-                        f"stopping extra queries"
-                    )
-                    _gate_stopped = True
-                    _emit(ctx, "research", "gate_stopped", {
-                        "reason": "strong", "search_count": search_count, "tier": tier,
-                    })
-                    break
+                if not is_exploring:
+                    tier = ctx.quality.critique_tier if ctx.quality else "weak"
+                    if tier == "strong":
+                        print(
+                            f"[research] GATE: strong tier after {search_count} searches, "
+                            f"stopping extra queries"
+                        )
+                        _gate_stopped = True
+                        _emit(
+                            ctx,
+                            "research",
+                            "gate_stopped",
+                            {
+                                "reason": "strong",
+                                "search_count": search_count,
+                                "tier": tier,
+                            },
+                        )
+                        break
 
                 for eq in spec.get("extra_queries") or []:
                     # Gate check BEFORE issuing search
-                    tier = ctx.quality.critique_tier if ctx.quality else "weak"
+                    if not is_exploring:
+                        tier = ctx.quality.critique_tier if ctx.quality else "weak"
 
-                    if tier == "strong":
-                        print(
-                            "[research] GATE: strong tier reached, "
-                            "skipping remaining extras"
-                        )
-                        _gate_stopped = True
-                        _emit(ctx, "research", "gate_stopped", {
-                            "reason": "strong", "search_count": search_count, "tier": tier,
-                        })
-                        break
-
-                    if tier == "medium":
-                        if medium_budget <= 0:
-                            print(
-                                f"[research] GATE: medium tier, budget exhausted "
-                                f"after {search_count} searches"
-                            )
+                        if tier == "strong":
+                            print("[research] GATE: strong tier reached, skipping remaining extras")
                             _gate_stopped = True
-                            _emit(ctx, "research", "gate_stopped", {
-                                "reason": "medium_budget", "search_count": search_count, "tier": tier,
-                            })
+                            _emit(
+                                ctx,
+                                "research",
+                                "gate_stopped",
+                                {
+                                    "reason": "strong",
+                                    "search_count": search_count,
+                                    "tier": tier,
+                                },
+                            )
                             break
-                        medium_budget -= 1
+
+                        if tier == "medium":
+                            if medium_budget <= 0:
+                                print(
+                                    f"[research] GATE: medium tier, budget exhausted "
+                                    f"after {search_count} searches"
+                                )
+                                _gate_stopped = True
+                                _emit(
+                                    ctx,
+                                    "research",
+                                    "gate_stopped",
+                                    {
+                                        "reason": "medium_budget",
+                                        "search_count": search_count,
+                                        "tier": tier,
+                                    },
+                                )
+                                break
+                            medium_budget -= 1
 
                     if consecutive_low >= SATURATION_CONSECUTIVE_MAX:
                         print(
@@ -263,17 +290,22 @@ def research(
                             f"searches, stopping"
                         )
                         _gate_stopped = True
-                        _emit(ctx, "research", "gate_stopped", {
-                            "reason": "saturation", "search_count": search_count, "tier": tier,
-                        })
+                        _emit(
+                            ctx,
+                            "research",
+                            "gate_stopped",
+                            {
+                                "reason": "saturation",
+                                "search_count": search_count,
+                                "tier": tier,
+                            },
+                        )
                         break
 
                     # Execute search
                     try:
                         if is_w3:
-                            r = search_multi(
-                                ctx, eq["query"], final_top_k=eq.get("top_k", k)
-                            )
+                            r = search_multi(ctx, eq["query"], final_top_k=eq.get("top_k", k))
                         else:
                             r = search(
                                 ctx,
@@ -293,6 +325,10 @@ def research(
                             consecutive_low += 1
                         else:
                             consecutive_low = 0
+
+                        # Record yield for explore phase velocity tracking
+                        if ctx.quality:
+                            ctx.quality.record_search_yield(new_unique)
 
                     except Exception as e:
                         errors.append(str(e))
@@ -340,17 +376,14 @@ def research(
 
             # Filter OFF-TOPIC
             filtered = [
-                r for r in deduped
-                if ratings_map.get(str(r["id"]), "UNRATED") != "OFF-TOPIC"
+                r for r in deduped if ratings_map.get(str(r["id"]), "UNRATED") != "OFF-TOPIC"
             ]
 
             seen_map = {str(r["id"]) for r in deduped}
             relevant = sum(
                 1 for rid, v in ratings_map.items() if rid in seen_map and v == "RELEVANT"
             )
-            partial = sum(
-                1 for rid, v in ratings_map.items() if rid in seen_map and v == "PARTIAL"
-            )
+            partial = sum(1 for rid, v in ratings_map.items() if rid in seen_map and v == "PARTIAL")
             off_topic = sum(
                 1 for rid, v in ratings_map.items() if rid in seen_map and v == "OFF-TOPIC"
             )
@@ -459,50 +492,51 @@ def draft_answer(
 
             prompt_parts = [
                 DOMAIN_PREAMBLE,
-                "Synthesize a comprehensive, well-structured answer from the "
-                "evidence below.\n\n",
+                "Synthesize a comprehensive, well-structured answer from the evidence below.\n\n",
             ]
 
             # Inject must-cite brief before evidence
             if must_cite:
                 prompt_parts.append(must_cite)
 
-            prompt_parts.extend([
-                "VOICE & TONE:\n"
-                "- Write as the voice of the I.M.A.M. scholarly corpus — presenting "
-                "the assembled guidance of qualified Ja'fari scholars. Frame answers "
-                "as 'I.M.A.M. scholars have addressed this:' or 'According to the "
-                "I.M.A.M. corpus...' — not as your own analysis.\n"
-                "- State rulings declaratively: 'The ruling is...' not 'It would seem "
-                "that...' or 'It may be that...'. Confidence uncertainty belongs in "
-                "## Confidence Assessment — keep the answer body authoritative.\n"
-                "- Use clear language accessible to English-speaking Muslims. "
-                "Define Arabic/fiqhi terms parenthetically on first use "
-                "(e.g., 'riba (usury/interest)'). Do not define terms the user "
-                "already used correctly in their question.\n"
-                "- Present rulings as stated in the sources — do not add external "
-                "positions or comparative fiqh unless the sources themselves "
-                "raise them.\n"
-                "- Do not open with preamble ('This is an important question', "
-                "'Islam addresses...'). Start directly with the ruling.\n\n"
-                "LENGTH:\n"
-                "- Single ruling question: 150-250 words.\n"
-                "- Ruling with conditions or exceptions: 300-450 words.\n"
-                "- Multi-part or complex fiqhi question: up to 600 words. Extend "
-                "beyond 600 only when distinct conditions from different sources "
-                "would otherwise be omitted — never to add summaries.\n"
-                "- Never pad with summary paragraphs that restate the opening ruling.\n\n"
-                "STRUCTURE:\n"
-                "- Lead with the direct ruling or answer.\n"
-                "- Follow with conditions, exceptions, and practical guidance "
-                "from the sources.\n"
-                "- When multiple sources agree, state the consensus once with "
-                "all citations.\n"
-                "- When sources present different conditions or caveats, organize "
-                "by condition.\n\n",
-                f"QUESTION:\n{question}\n\n",
-                "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
-            ])
+            prompt_parts.extend(
+                [
+                    "VOICE & TONE:\n"
+                    "- Write as the voice of the I.M.A.M. scholarly corpus — presenting "
+                    "the assembled guidance of qualified Ja'fari scholars. Frame answers "
+                    "as 'I.M.A.M. scholars have addressed this:' or 'According to the "
+                    "I.M.A.M. corpus...' — not as your own analysis.\n"
+                    "- State rulings declaratively: 'The ruling is...' not 'It would seem "
+                    "that...' or 'It may be that...'. Confidence uncertainty belongs in "
+                    "## Confidence Assessment — keep the answer body authoritative.\n"
+                    "- Use clear language accessible to English-speaking Muslims. "
+                    "Define Arabic/fiqhi terms parenthetically on first use "
+                    "(e.g., 'riba (usury/interest)'). Do not define terms the user "
+                    "already used correctly in their question.\n"
+                    "- Present rulings as stated in the sources — do not add external "
+                    "positions or comparative fiqh unless the sources themselves "
+                    "raise them.\n"
+                    "- Do not open with preamble ('This is an important question', "
+                    "'Islam addresses...'). Start directly with the ruling.\n\n"
+                    "LENGTH:\n"
+                    "- Single ruling question: 150-250 words.\n"
+                    "- Ruling with conditions or exceptions: 300-450 words.\n"
+                    "- Multi-part or complex fiqhi question: up to 600 words. Extend "
+                    "beyond 600 only when distinct conditions from different sources "
+                    "would otherwise be omitted — never to add summaries.\n"
+                    "- Never pad with summary paragraphs that restate the opening ruling.\n\n"
+                    "STRUCTURE:\n"
+                    "- Lead with the direct ruling or answer.\n"
+                    "- Follow with conditions, exceptions, and practical guidance "
+                    "from the sources.\n"
+                    "- When multiple sources agree, state the consensus once with "
+                    "all citations.\n"
+                    "- When sources present different conditions or caveats, organize "
+                    "by condition.\n\n",
+                    f"QUESTION:\n{question}\n\n",
+                    "EVIDENCE:\n" + "\n".join(evidence) + "\n\n",
+                ]
+            )
             if instructions:
                 prompt_parts.append(f"INSTRUCTIONS:\n{instructions}\n\n")
             prompt_parts.append(
@@ -530,12 +564,15 @@ def draft_answer(
 
             # Emit: synthesis complete
             if bus is not None:
-                bus.emit("tool_progress", {
-                    "tool": "draft_answer",
-                    "phase": "synthesized",
-                    "data": {"answer_length": len(answer), "tier": tier},
-                    "duration_ms": synth_ms,
-                })
+                bus.emit(
+                    "tool_progress",
+                    {
+                        "tool": "draft_answer",
+                        "phase": "synthesized",
+                        "data": {"answer_length": len(answer), "tier": tier},
+                        "duration_ms": synth_ms,
+                    },
+                )
 
             # ── Phase 2: Critique (tier-dependent) ──
             t1 = time.time()
@@ -562,33 +599,39 @@ def draft_answer(
                         f"coverage={citation_result['coverage']}). "
                         f"Programmatic check passed — LLM critique skipped."
                     )
-                    print(f"[draft_answer] STRONG: citation check PASS "
-                          f"({len(citation_result['cited'])} cited, "
-                          f"coverage={citation_result['coverage']})")
+                    print(
+                        f"[draft_answer] STRONG: citation check PASS "
+                        f"({len(citation_result['cited'])} cited, "
+                        f"coverage={citation_result['coverage']})"
+                    )
 
             if tier == "medium":
                 # Focused LLM critique — voice + attribution only, no revision loop
                 critique_text, passed, dimensions = critique_answer(
-                    ctx, question, answer, evidence=evidence, model=model,
+                    ctx,
+                    question,
+                    answer,
+                    evidence=evidence,
+                    model=model,
                     focus="voice_attribution",
                 )
-                print(f"[draft_answer] MEDIUM: focused critique "
-                      f"{'PASS' if passed else 'FAIL'}")
+                print(f"[draft_answer] MEDIUM: focused critique {'PASS' if passed else 'FAIL'}")
 
             elif tier == "weak":
                 # Full critique + revision loop (original behavior)
                 critique_text, passed, dimensions = critique_answer(
-                    ctx, question, answer, evidence=evidence, model=model,
+                    ctx,
+                    question,
+                    answer,
+                    evidence=evidence,
+                    model=model,
                 )
 
                 if not passed:
                     # Determine failed dimensions for targeted revision
-                    failed_dims = {
-                        k: v for k, v in dimensions.items() if v["verdict"] == "FAIL"
-                    }
-                    cosmetic_only = (
-                        bool(failed_dims)
-                        and all(k in COSMETIC_DIMENSIONS for k in failed_dims)
+                    failed_dims = {k: v for k, v in dimensions.items() if v["verdict"] == "FAIL"}
+                    cosmetic_only = bool(failed_dims) and all(
+                        k in COSMETIC_DIMENSIONS for k in failed_dims
                     )
 
                     if cosmetic_only:
@@ -653,30 +696,31 @@ def draft_answer(
 
             # Emit: critique complete
             if bus is not None:
-                bus.emit("tool_progress", {
-                    "tool": "draft_answer",
-                    "phase": "critiqued",
-                    "data": {
-                        "tier": tier,
-                        "passed": passed,
-                        "revised": revised,
-                        "citation_check": {
-                            "valid": citation_result["valid"],
-                            "cited_count": len(citation_result["cited"]),
-                            "coverage": citation_result["coverage"],
+                bus.emit(
+                    "tool_progress",
+                    {
+                        "tool": "draft_answer",
+                        "phase": "critiqued",
+                        "data": {
+                            "tier": tier,
+                            "passed": passed,
+                            "revised": revised,
+                            "citation_check": {
+                                "valid": citation_result["valid"],
+                                "cited_count": len(citation_result["cited"]),
+                                "coverage": citation_result["coverage"],
+                            },
                         },
+                        "duration_ms": crit_ms,
                     },
-                    "duration_ms": crit_ms,
-                })
+                )
 
             # Wire QualityGate — record draft + final critique outcome
             if quality is not None:
                 quality.record_draft(len(answer))
                 quality.record_critique(passed, critique_text)
 
-            failed_dims_list = [
-                k for k, v in dimensions.items() if v["verdict"] == "FAIL"
-            ]
+            failed_dims_list = [k for k, v in dimensions.items() if v["verdict"] == "FAIL"]
             total_ms = synth_ms + crit_ms
             print(
                 f"[draft_answer] {'PASS' if passed else 'FAIL'}"

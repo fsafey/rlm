@@ -34,8 +34,13 @@ def _seed_evidence(ctx: SearchContext, ids: list[int], score: float = 0.8) -> No
     """
     for i in ids:
         ctx.evidence.register_hit(
-            {"id": str(i), "question": f"Q{i}", "answer": f"A{i}",
-             "score": score, "metadata": {"primary_topic": f"topic_{i}"}}
+            {
+                "id": str(i),
+                "question": f"Q{i}",
+                "answer": f"A{i}",
+                "score": score,
+                "metadata": {"primary_topic": f"topic_{i}"},
+            }
         )
     ctx.evidence.log_search(query="seeded", num_results=len(ids))
 
@@ -59,10 +64,7 @@ def _make_results(ids: list[int], score: float = 0.8) -> dict:
 def _make_eval_ratings(ids: list[int], rating: str = "RELEVANT") -> dict:
     """Build a mock evaluate_results() return dict."""
     return {
-        "ratings": [
-            {"id": str(i), "rating": rating, "confidence": 4}
-            for i in ids
-        ],
+        "ratings": [{"id": str(i), "rating": rating, "confidence": 4} for i in ids],
         "suggestion": "Proceed to synthesis",
         "raw": "mocked",
     }
@@ -84,10 +86,10 @@ class TestSaturationDetection:
         # Extra query 2 returns same ids 1-5 (0 new) — low yield 2 → STOP
         # Extra query 3 should NOT be called
         mock_search.side_effect = [
-            _make_results([1, 2, 3, 4, 5]),    # main query
-            _make_results([1, 2, 3, 4, 5]),    # extra 1: 0 new
-            _make_results([1, 2, 3, 4, 5]),    # extra 2: 0 new → stop
-            _make_results([6, 7, 8, 9, 10]),   # extra 3: should not reach
+            _make_results([1, 2, 3, 4, 5]),  # main query
+            _make_results([1, 2, 3, 4, 5]),  # extra 1: 0 new
+            _make_results([1, 2, 3, 4, 5]),  # extra 2: 0 new → stop
+            _make_results([6, 7, 8, 9, 10]),  # extra 3: should not reach
         ]
         mock_eval.return_value = _make_eval_ratings([1, 2, 3, 4, 5], "PARTIAL")
 
@@ -111,21 +113,19 @@ class TestSaturationDetection:
         """A search with >1 new results resets the consecutive counter."""
         ctx = _make_ctx()
         mock_search.side_effect = [
-            _make_results([1, 2, 3]),          # main: 3 new
-            _make_results([1, 2, 3]),          # extra 1: 0 new — low yield 1
-            _make_results([4, 5, 6]),          # extra 2: 3 new — reset!
-            _make_results([4, 5, 6]),          # extra 3: 0 new — low yield 1
-            _make_results([4, 5, 6]),          # extra 4: 0 new — low yield 2 → stop
-            _make_results([7, 8, 9]),          # extra 5: should not reach
+            _make_results([1, 2, 3]),  # main: 3 new
+            _make_results([1, 2, 3]),  # extra 1: 0 new — low yield 1
+            _make_results([4, 5, 6]),  # extra 2: 3 new — reset!
+            _make_results([4, 5, 6]),  # extra 3: 0 new — low yield 1
+            _make_results([4, 5, 6]),  # extra 4: 0 new — low yield 2 → stop
+            _make_results([7, 8, 9]),  # extra 5: should not reach
         ]
         mock_eval.return_value = _make_eval_ratings([1, 2, 3], "PARTIAL")
 
         result = research(
             ctx,
             "test query",
-            extra_queries=[
-                {"query": f"variant {i}"} for i in range(5)
-            ],
+            extra_queries=[{"query": f"variant {i}"} for i in range(5)],
         )
 
         assert mock_search.call_count == 5
@@ -146,10 +146,12 @@ class TestTierGating:
         # Pre-seed evidence so QualityGate.confidence can reach 50+
         # (quality_score from registry + breadth from search_log)
         _seed_evidence(ctx, list(range(1, 9)), score=0.85)
+        # Seeding logs a search → is_exploring would be True without this
+        ctx.quality._explore_graduated = True
         # Main query returns 8 results, all rated RELEVANT → strong tier
         mock_search.side_effect = [
             _make_results(list(range(1, 9)), score=0.85),  # main: 8 results
-            _make_results([9, 10]),                        # should not reach
+            _make_results([9, 10]),  # should not reach
         ]
         mock_eval.return_value = _make_eval_ratings(list(range(1, 9)), "RELEVANT")
 
@@ -170,11 +172,11 @@ class TestTierGating:
         # Main query returns 4 RELEVANT → medium tier
         # Should allow 2 more extras (MEDIUM_EXTRA_BUDGET=2), then stop
         mock_search.side_effect = [
-            _make_results([1, 2, 3, 4], score=0.7),      # main: medium tier
-            _make_results([5, 6]),                        # extra 1: budget 1
-            _make_results([7, 8]),                        # extra 2: budget 2 → stop
-            _make_results([9, 10]),                       # extra 3: should not reach
-            _make_results([11, 12]),                      # extra 4: should not reach
+            _make_results([1, 2, 3, 4], score=0.7),  # main: medium tier
+            _make_results([5, 6]),  # extra 1: budget 1
+            _make_results([7, 8]),  # extra 2: budget 2 → stop
+            _make_results([9, 10]),  # extra 3: should not reach
+            _make_results([11, 12]),  # extra 4: should not reach
         ]
         # Use return_value (not side_effect) — safe for all _incremental_evaluate
         # calls including the final post-loop one
@@ -241,10 +243,10 @@ class TestCheckpointEvaluation:
         """Second evaluation checkpoint at search 3."""
         ctx = _make_ctx()
         mock_search.side_effect = [
-            _make_results([1, 2]),          # search 1
-            _make_results([3, 4]),          # search 2
-            _make_results([5, 6]),          # search 3 → checkpoint
-            _make_results([7, 8]),          # search 4
+            _make_results([1, 2]),  # search 1
+            _make_results([3, 4]),  # search 2
+            _make_results([5, 6]),  # search 3 → checkpoint
+            _make_results([7, 8]),  # search 4
         ]
         mock_eval.return_value = _make_eval_ratings([1, 2], "PARTIAL")
 
@@ -263,8 +265,8 @@ class TestCheckpointEvaluation:
         """Unevaluated results after loop still get evaluated."""
         ctx = _make_ctx()
         mock_search.side_effect = [
-            _make_results([1, 2]),          # search 1: evaluated at checkpoint
-            _make_results([3, 4]),          # search 2: unevaluated
+            _make_results([1, 2]),  # search 1: evaluated at checkpoint
+            _make_results([3, 4]),  # search 2: unevaluated
         ]
         mock_eval.return_value = _make_eval_ratings([1, 2], "PARTIAL")
 
@@ -283,19 +285,17 @@ class TestIntegration:
 
     @patch("rlm_search.tools.composite_tools.evaluate_results")
     @patch("rlm_search.tools.composite_tools.search")
-    def test_strong_tier_at_checkpoint_stops_remaining_extras(
-        self, mock_search, mock_eval
-    ):
+    def test_strong_tier_at_checkpoint_stops_remaining_extras(self, mock_search, mock_eval):
         """If checkpoint eval reaches strong tier, remaining extras are skipped."""
         ctx = _make_ctx()
         # NO pre-seeding — let evidence accumulate naturally across searches.
         # Use side_effect so mock only rates what's actually passed (prevents
         # leaking ratings for IDs not yet searched).
         mock_search.side_effect = [
-            _make_results(list(range(1, 5)), score=0.9),     # search 1: 4 results
-            _make_results(list(range(5, 9)), score=0.9),     # search 2: 4 new
-            _make_results(list(range(9, 12)), score=0.9),    # search 3: 3 new → checkpoint
-            _make_results([20, 21]),                          # should not reach
+            _make_results(list(range(1, 5)), score=0.9),  # search 1: 4 results
+            _make_results(list(range(5, 9)), score=0.9),  # search 2: 4 new
+            _make_results(list(range(9, 12)), score=0.9),  # search 3: 3 new → checkpoint
+            _make_results([20, 21]),  # should not reach
         ]
         mock_eval.side_effect = lambda ctx, q, results, **kw: _make_eval_ratings(
             [int(r["id"]) for r in results], "RELEVANT"
@@ -313,6 +313,90 @@ class TestIntegration:
         # search 4 (extra 3) → gate check: strong → stop
         assert mock_search.call_count == 3
         assert result["search_count"] == 3
+
+
+# ── Explore Phase: Yield Recording ──
+
+
+class TestExploreYieldRecording:
+    """research() should call record_search_yield() after each search batch."""
+
+    @patch("rlm_search.tools.composite_tools.evaluate_results")
+    @patch("rlm_search.tools.composite_tools.search")
+    def test_yields_recorded_per_batch(self, mock_search, mock_eval):
+        ctx = _make_ctx()
+        mock_search.side_effect = [
+            _make_results([1, 2, 3]),  # main: 3 new
+            _make_results([1, 2, 4]),  # extra 1: 1 new (id 4)
+        ]
+        mock_eval.return_value = _make_eval_ratings([1, 2, 3], "PARTIAL")
+
+        research(ctx, "test query", extra_queries=[{"query": "v1"}])
+
+        # Should have recorded 2 yields
+        assert len(ctx.quality._search_yields) == 2
+        assert ctx.quality._search_yields[0] == 3.0  # main: 3 new
+        assert ctx.quality._search_yields[1] == 1.0  # extra: 1 new
+
+
+# ── Explore Phase: Gate Relaxation ──
+
+
+class TestExploreGateRelaxation:
+    """During explore phase, strong/medium tier gates should NOT stop search."""
+
+    @patch("rlm_search.tools.composite_tools.evaluate_results")
+    @patch("rlm_search.tools.composite_tools.search")
+    def test_strong_tier_does_not_stop_during_explore(self, mock_search, mock_eval):
+        """Even with 6+ RELEVANT (strong tier), explore phase lets extras run."""
+        ctx = _make_ctx()
+        # Pre-seed: 8 RELEVANT results at high score → strong tier
+        _seed_evidence(ctx, list(range(1, 9)), score=0.85)
+        # Force explore phase: gate not graduated, has searches
+        assert ctx.quality.phase == "explore"
+
+        mock_search.side_effect = [
+            _make_results(list(range(1, 9)), score=0.85),  # main
+            _make_results([9, 10], score=0.85),  # extra 1: 2 new
+            _make_results([11, 12], score=0.85),  # extra 2: 2 new
+        ]
+        mock_eval.return_value = _make_eval_ratings(list(range(1, 9)), "RELEVANT")
+
+        result = research(
+            ctx,
+            "test query",
+            extra_queries=[{"query": "v1"}, {"query": "v2"}],
+        )
+
+        # All 3 searches should run (explore overrides strong gate)
+        assert mock_search.call_count == 3
+        assert result["search_count"] == 3
+
+    @patch("rlm_search.tools.composite_tools.evaluate_results")
+    @patch("rlm_search.tools.composite_tools.search")
+    def test_gate_applies_after_graduation(self, mock_search, mock_eval):
+        """After explore graduates, tier gates resume normal behavior."""
+        ctx = _make_ctx()
+        _seed_evidence(ctx, list(range(1, 9)), score=0.85)
+        # Force graduation
+        ctx.quality._explore_graduated = True
+        assert ctx.quality.phase != "explore"
+
+        mock_search.side_effect = [
+            _make_results(list(range(1, 9)), score=0.85),
+            _make_results([9, 10]),
+        ]
+        mock_eval.return_value = _make_eval_ratings(list(range(1, 9)), "RELEVANT")
+
+        result = research(
+            ctx,
+            "test query",
+            extra_queries=[{"query": "should not run"}],
+        )
+
+        # Strong tier → stop after main query (normal gating resumes)
+        assert mock_search.call_count == 1
+        assert result["search_count"] == 1
 
 
 # Import research at module level — after all helper definitions

@@ -19,6 +19,7 @@ class SearchSettings(BaseModel):
     max_depth: int | None = None
     sub_iterations: int | None = None
     max_delegation_depth: int | None = None
+    search_mode: str | None = None  # "explore" | "legacy" — None = use env default
 
 
 class SearchResponse(BaseModel):

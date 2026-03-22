@@ -30,6 +30,7 @@ SESSION_TIMEOUT = int(os.getenv("SESSION_TIMEOUT", "1800"))  # 30 min default
 SEARCH_BACKEND_PORT = int(os.getenv("SEARCH_BACKEND_PORT", "8092"))
 SEARCH_FRONTEND_PORT = int(os.getenv("SEARCH_FRONTEND_PORT", "3002"))
 SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")  # empty = no auth required
+SEARCH_MODE = os.getenv("SEARCH_MODE", "explore")  # "explore" | "legacy"
 
 print(
     f"[CONFIG] cascade={CASCADE_API_URL} backend={RLM_BACKEND} model={RLM_MODEL} sub_model={RLM_SUB_MODEL or '(same)'} classify_model={RLM_CLASSIFY_MODEL} max_iter={RLM_MAX_ITERATIONS} sub_iter={RLM_SUB_ITERATIONS} max_depth={RLM_MAX_DEPTH} max_deleg_depth={RLM_MAX_DELEGATION_DEPTH} backend_port={SEARCH_BACKEND_PORT} frontend_port={SEARCH_FRONTEND_PORT}"

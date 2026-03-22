@@ -37,6 +37,7 @@ from rlm_search.config import (
     RLM_SUB_ITERATIONS,
     RLM_SUB_MODEL,
     SEARCH_API_KEY,
+    SEARCH_MODE,
     SESSION_TIMEOUT,
 )
 from rlm_search.kb_overview import build_kb_overview
@@ -152,6 +153,7 @@ def _build_rlm_kwargs(
     max_delegation_depth = settings.get("max_delegation_depth")
     if max_delegation_depth is None:
         max_delegation_depth = RLM_MAX_DELEGATION_DEPTH
+    search_mode = settings.get("search_mode") or SEARCH_MODE
 
     if backend == "claude_cli":
         backend_kwargs: dict[str, Any] = {"model": model}
@@ -182,6 +184,7 @@ def _build_rlm_kwargs(
         sub_iterations=sub_iterations,
         query=query,
         classify_model=RLM_CLASSIFY_MODEL,
+        search_mode=search_mode,
     )
 
     return {

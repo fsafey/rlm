@@ -55,6 +55,9 @@ class QualityGate:
 
     evidence: EvidenceStore
 
+    # --- Feature toggle ---
+    explore_enabled: bool = True  # False = legacy mode (no explore phase)
+
     # --- Thresholds (defaulted from prompt_constants) ---
     READY_THRESHOLD: int = _READY_THRESHOLD
     STALL_SEARCH_COUNT: int = _STALL_SEARCH_COUNT
@@ -203,7 +206,7 @@ class QualityGate:
             return "stalled"
 
         # Explore phase: at least 1 search, not yet graduated, below saturation
-        if not self._explore_graduated and n_searches > 0:
+        if self.explore_enabled and not self._explore_graduated and n_searches > 0:
             if self.saturation_score >= _EXPLORE_SATURATION_THRESHOLD:
                 self._explore_graduated = True
                 # Fall through to continue/ready/finalize

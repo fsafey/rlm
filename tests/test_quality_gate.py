@@ -309,6 +309,19 @@ class TestExplorePhase:
         guidance = gate.guidance()
         assert "saturation" in guidance.lower() or "%" in guidance
 
+    def test_explore_disabled_skips_explore_phase(self):
+        """When explore_enabled=False, phase skips explore entirely (legacy mode)."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence, explore_enabled=False)
+        # Would be "explore" with explore_enabled=True
+        assert gate.phase == "continue"
+
+    def test_explore_enabled_default_true(self):
+        """Default is explore_enabled=True."""
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate.explore_enabled is True
+
     def test_check_progress_includes_saturation_in_explore(self):
         """check_progress() should include saturation_score when in explore phase."""
         from unittest.mock import MagicMock

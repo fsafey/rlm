@@ -1,0 +1,230 @@
+{
+  "summary": {
+    "total": 20,
+    "passed": 20,
+    "with_research": 20,
+    "avg_llm_s": 4.08
+  },
+  "results": [
+    {
+      "query": "Is it permissible to combine fasts for Qadaa and the six white days in Shawwal?",
+      "category": "WP",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 442,
+      "classify_time_s": 7.3,
+      "llm_time_s": 3.8,
+      "prefill": false
+    },
+    {
+      "query": "Can I pray sitting down due to back pain?",
+      "category": "PT",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 640,
+      "classify_time_s": 5.4,
+      "llm_time_s": 3.9,
+      "prefill": false
+    },
+    {
+      "query": "What invalidates the fast during Ramadan?",
+      "category": "WP",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 482,
+      "classify_time_s": 6.0,
+      "llm_time_s": 3.9,
+      "prefill": false
+    },
+    {
+      "query": "Is it permissible to delay Isha prayer until midnight?",
+      "category": "PT",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 539,
+      "classify_time_s": 5.5,
+      "llm_time_s": 3.7,
+      "prefill": false
+    },
+    {
+      "query": "Can I take a mortgage to buy a house in the West?",
+      "category": "FN",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 713,
+      "classify_time_s": 10.3,
+      "llm_time_s": 4.4,
+      "prefill": false
+    },
+    {
+      "query": "Is cryptocurrency trading halal?",
+      "category": "FN",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 3,
+      "response_length": 1069,
+      "classify_time_s": 8.3,
+      "llm_time_s": 6.1,
+      "prefill": false
+    },
+    {
+      "query": "Can I work at a restaurant that serves alcohol?",
+      "category": "FN",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 708,
+      "classify_time_s": 26.3,
+      "llm_time_s": 5.3,
+      "prefill": false
+    },
+    {
+      "query": "Is it permissible to invest in stocks of companies that deal partially in haram?",
+      "category": "FN",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 737,
+      "classify_time_s": 8.5,
+      "llm_time_s": 5.0,
+      "prefill": false
+    },
+    {
+      "query": "Is temporary marriage with a Christian woman permissible?",
+      "category": "MF",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 640,
+      "classify_time_s": 6.9,
+      "llm_time_s": 3.7,
+      "prefill": false
+    },
+    {
+      "query": "What are the conditions for a valid nikah?",
+      "category": "MF",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 446,
+      "classify_time_s": 8.3,
+      "llm_time_s": 3.0,
+      "prefill": false
+    },
+    {
+      "query": "Can a woman initiate divorce in Islam?",
+      "category": "MF",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 3,
+      "response_length": 912,
+      "classify_time_s": 15.2,
+      "llm_time_s": 5.9,
+      "prefill": false
+    },
+    {
+      "query": "Is it obligatory to pay mahr before consummation?",
+      "category": "MF",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 557,
+      "classify_time_s": 7.4,
+      "llm_time_s": 3.6,
+      "prefill": false
+    },
+    {
+      "query": "How do I perform ghusl janabat correctly?",
+      "category": "PT",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 508,
+      "classify_time_s": 5.2,
+      "llm_time_s": 3.6,
+      "prefill": false
+    },
+    {
+      "query": "Does touching a dog invalidate wudu?",
+      "category": "PT",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 449,
+      "classify_time_s": 15.3,
+      "llm_time_s": 3.3,
+      "prefill": false
+    },
+    {
+      "query": "Can I pray with nail polish on?",
+      "category": "PT",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 489,
+      "classify_time_s": 5.9,
+      "llm_time_s": 3.2,
+      "prefill": false
+    },
+    {
+      "query": "What is the ruling on combining Dhuhr and Asr prayers?",
+      "category": "PT",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 441,
+      "classify_time_s": 6.2,
+      "llm_time_s": 3.1,
+      "prefill": false
+    },
+    {
+      "query": "Is music haram in Shia Islam?",
+      "category": "BE",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 697,
+      "classify_time_s": 8.5,
+      "llm_time_s": 4.1,
+      "prefill": false
+    },
+    {
+      "query": "Can I celebrate Nowruz as a Muslim?",
+      "category": "BE",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 3,
+      "response_length": 804,
+      "classify_time_s": 6.2,
+      "llm_time_s": 4.8,
+      "prefill": false
+    },
+    {
+      "query": "What is the ruling on tattoos?",
+      "category": "BE",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 2,
+      "response_length": 533,
+      "classify_time_s": 7.3,
+      "llm_time_s": 3.5,
+      "prefill": false
+    },
+    {
+      "query": "Is it sinful to have doubts about faith?",
+      "category": "BE",
+      "has_code": true,
+      "has_research": true,
+      "code_block_count": 3,
+      "response_length": 620,
+      "classify_time_s": 8.6,
+      "llm_time_s": 3.7,
+      "prefill": false
+    }
+  ]
+}

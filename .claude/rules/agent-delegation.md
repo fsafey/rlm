@@ -36,8 +36,9 @@ When spawning any agent, provide:
 
 1. **Concrete objective**: Not "research sandboxes" but "compare Modal vs Prime sandbox cold start times at 100 concurrent calls"
 2. **Output format**: What structure to return (findings table, design doc, diff, review report)
-3. **Scope boundaries**: What's in scope, what's explicitly out
+3. **Scope boundaries**: What's in scope, what's explicitly out. List allowed files/directories explicitly.
 4. **Context**: Key files, recent decisions, constraints the agent needs to know
+5. **Commit discipline**: Agent must verify staged files are in-scope before committing (`git diff --cached --name-only`)
 
 ## Scaling Rules
 

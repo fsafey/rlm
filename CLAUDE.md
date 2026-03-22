@@ -33,6 +33,8 @@ Recursive Language Models (RLMs) — task-agnostic inference paradigm enabling L
 
 - Format: `type(scope): description`
 - Run before PR: `make check` (lint + format + test)
+- **Before any edits**: verify branch with `git branch --show-current` — never commit directly to main
+- **Subagent commits**: each agent must ONLY modify files directly related to its assigned task. Before committing, run `git diff --cached --name-only` and unstage any out-of-scope files with `git reset HEAD <file>`
 
 ### Security
 

@@ -374,6 +374,32 @@ class TestExploreGateRelaxation:
 
     @patch("rlm_search.tools.composite_tools.evaluate_results")
     @patch("rlm_search.tools.composite_tools.search")
+    def test_saturation_gate_fires_during_explore(self, mock_search, mock_eval):
+        """Consecutive low-yield gate still applies during explore (genuine depletion)."""
+        ctx = _make_ctx()
+        _seed_evidence(ctx, list(range(1, 9)), score=0.85)
+        assert ctx.quality.phase == "explore"
+
+        mock_search.side_effect = [
+            _make_results(list(range(1, 9)), score=0.85),  # main
+            _make_results(list(range(1, 9)), score=0.85),  # extra 1: 0 new
+            _make_results(list(range(1, 9)), score=0.85),  # extra 2: 0 new → stop
+            _make_results([9, 10], score=0.85),  # extra 3: should not run
+        ]
+        mock_eval.return_value = _make_eval_ratings(list(range(1, 9)), "RELEVANT")
+
+        result = research(
+            ctx,
+            "test query",
+            extra_queries=[{"query": f"v{i}"} for i in range(3)],
+        )
+
+        # Saturation gate stops even during explore
+        assert mock_search.call_count == 3
+        assert result["search_count"] == 3
+
+    @patch("rlm_search.tools.composite_tools.evaluate_results")
+    @patch("rlm_search.tools.composite_tools.search")
     def test_gate_applies_after_graduation(self, mock_search, mock_eval):
         """After explore graduates, tier gates resume normal behavior."""
         ctx = _make_ctx()

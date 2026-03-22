@@ -170,6 +170,7 @@ def research(
             # Global gate state (shared across all specs)
             seen_ids: set[str] = set()
             consecutive_low = 0
+            tier = "weak"  # default; updated by gate checks when not exploring
             medium_budget = MEDIUM_EXTRA_BUDGET
             _eval_offset = 0  # tracks how far _incremental_evaluate has processed
 
@@ -207,12 +208,13 @@ def research(
                     else:
                         r = search(ctx, q, filters=f, top_k=k)
                     batch_ids = {str(h["id"]) for h in r["results"]}
+                    new_unique_main = len(batch_ids - seen_ids)
                     seen_ids.update(batch_ids)
                     all_results.extend(r["results"])
                     search_count += 1
                     # Record yield for explore phase velocity tracking
                     if ctx.quality:
-                        ctx.quality.record_search_yield(len(batch_ids))
+                        ctx.quality.record_search_yield(new_unique_main)
                 except Exception as e:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")

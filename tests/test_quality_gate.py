@@ -308,3 +308,20 @@ class TestExplorePhase:
         gate = QualityGate(evidence=evidence)
         guidance = gate.guidance()
         assert "saturation" in guidance.lower() or "%" in guidance
+
+    def test_check_progress_includes_saturation_in_explore(self):
+        """check_progress() should include saturation_score when in explore phase."""
+        from unittest.mock import MagicMock
+
+        from rlm_search.tools.context import SearchContext
+        from rlm_search.tools.progress_tools import check_progress
+
+        ctx = SearchContext(api_url="http://test:8095")
+        ctx.llm_query = MagicMock(return_value="mocked")
+        ctx.evidence.log_search(query="q1", num_results=5)
+        assert ctx.quality.phase == "explore"
+
+        result = check_progress(ctx)
+
+        assert "saturation_score" in result
+        assert isinstance(result["saturation_score"], int)

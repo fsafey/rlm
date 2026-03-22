@@ -225,6 +225,11 @@ def check_progress(ctx: ToolContext) -> dict:
                 strategy = _suggest_strategy(ctx, categories_explored)
                 guidance = f"Confidence at {confidence}%. {strategy}"
 
+        # -- Saturation (explore phase) --
+        saturation_score = None
+        if quality is not None:
+            saturation_score = quality.saturation_score
+
         # -- Audit trail --
         audit = _format_audit_trail(ctx)
 
@@ -235,6 +240,8 @@ def check_progress(ctx: ToolContext) -> dict:
             f"sources={n_sources} | relevant={relevant_count} | "
             f"partial={partial_count} | top_score={top_score:.2f}"
         )
+        if saturation_score is not None and phase == "explore":
+            print(f"  saturation={saturation_score}%")
         print(f"  Searches tried:\n{audit}")
 
         tc.set_summary(
@@ -247,6 +254,7 @@ def check_progress(ctx: ToolContext) -> dict:
                 "partial": partial_count,
                 "top_score": round(top_score, 3),
                 "categories_explored": sorted(categories_explored),
+                "saturation_score": saturation_score,
             }
         )
 
@@ -261,4 +269,5 @@ def check_progress(ctx: ToolContext) -> dict:
             "top_score": round(top_score, 3),
             "query_diversity": round(diversity, 2),
             "categories_explored": sorted(categories_explored),
+            "saturation_score": saturation_score,
         }

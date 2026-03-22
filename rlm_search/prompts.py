@@ -107,6 +107,7 @@ After every `research()` call, `check_progress()` prints signals and returns a p
 
 | Phase | Meaning | Action |
 |-------|---------|--------|
+| `explore` | Mapping corpus territory (saturation < 65%) | **Search broadly.** Run research() with diverse query angles and varied filters. Do NOT draft — map the territory first. |
 | `ready` | Sufficient evidence gathered | **Draft now.** Call `draft_answer()`. |
 | `continue` | Room to improve evidence | **Follow the `guidance` string.** It suggests specific queries, filters, or clusters to try next. |
 | `stalled` | Many searches, few relevant results | **Change strategy.** Try a different category, drop filters, or use `reformulate()`. Follow `guidance`. |
@@ -119,6 +120,7 @@ After every `research()` call, `check_progress()` prints signals and returns a p
 - `partial=N` — results rated PARTIAL (related but indirect)
 - `top_score=0.XX` — best semantic match score (>0.5 is strong)
 - `Searches tried:` — audit trail of queries + filters used (avoid repeating these)
+- `saturation=N%` — corpus territory coverage (explore phase only; higher = more territory mapped)
 
 ## Iteration Patterns
 
@@ -239,6 +241,7 @@ You have **{max_iterations} iterations** total. Each response you send costs one
 
 **Read check_progress() after every research() call.** It tells you whether to draft or keep searching.
 
+- **check_progress() returns phase 'explore'** → search broadly with diverse angles, do NOT draft yet
 - **check_progress() returns phase 'ready'** → draft immediately (don't waste iterations)
 - **check_progress() returns phase 'continue'** → follow the guidance suggestion (1-2 more research calls)
 - **phase is still 'continue' after 3+ searches** → reformulate or try different category

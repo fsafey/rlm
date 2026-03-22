@@ -166,3 +166,73 @@ class TestCritiqueTier:
         gate = QualityGate(evidence=evidence)
         # relevance=35, quality=7, breadth=0 => confidence=42 < 75
         assert gate.critique_tier == "medium"
+
+
+class TestExploreState:
+    def test_record_search_yield_appends(self):
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(5)
+        gate.record_search_yield(3)
+        assert gate._search_yields == [5.0, 3.0]
+
+    def test_explore_graduated_default_false(self):
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate._explore_graduated is False
+
+    def test_info_velocity_no_yields_returns_1(self):
+        """No search data → assume high velocity (keep exploring)."""
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate._info_velocity == 1.0
+
+    def test_info_velocity_high_yields(self):
+        """Many new IDs per search → high velocity."""
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(8)
+        gate.record_search_yield(7)
+        assert gate._info_velocity > 0.8
+
+    def test_info_velocity_zero_yields(self):
+        """Zero new IDs → velocity near zero."""
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        assert gate._info_velocity < 0.1
+
+    def test_info_velocity_decaying(self):
+        """Recent low yields weigh more than early high yields."""
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(10)  # early: high
+        gate.record_search_yield(0)  # recent: zero
+        gate.record_search_yield(0)  # recent: zero
+        # Velocity should be low because recent searches are unproductive
+        assert gate._info_velocity < 0.5
+
+    def test_saturation_score_zero_initially(self):
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate.saturation_score == 0
+
+    def test_saturation_score_rises_with_low_velocity(self):
+        """When searches stop finding new things, saturation rises."""
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+            evidence.log_search(query=f"q{i}", num_results=3)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        assert gate.saturation_score > 50
+
+    def test_saturation_score_low_with_high_velocity(self):
+        """When searches keep finding new things, saturation stays low."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        evidence.log_search(query="q2", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(8)
+        gate.record_search_yield(7)
+        assert gate.saturation_score < 40

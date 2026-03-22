@@ -10,6 +10,9 @@ from rlm_search.prompt_constants import (
     EXPLORE_MIN_SEARCHES as _EXPLORE_MIN_SEARCHES,
 )
 from rlm_search.prompt_constants import (
+    EXPLORE_SATURATION_THRESHOLD as _EXPLORE_SATURATION_THRESHOLD,
+)
+from rlm_search.prompt_constants import (
     MEDIUM_RELEVANT_MIN as _MEDIUM_RELEVANT_MIN,
 )
 from rlm_search.prompt_constants import (
@@ -187,13 +190,25 @@ class QualityGate:
 
     @property
     def phase(self) -> str:
-        """Determine current search phase from evidence state."""
+        """Determine current search phase from evidence state.
+
+        Phase progression: explore → continue → ready → finalize
+        Stalled overrides explore (don't explore a desert).
+        """
         n_searches = len(self.evidence.search_log)
         counts = self.evidence.rating_counts()
         relevant = counts.get("RELEVANT", 0)
 
         if n_searches >= self.STALL_SEARCH_COUNT and relevant < 2:
             return "stalled"
+
+        # Explore phase: at least 1 search, not yet graduated, below saturation
+        if not self._explore_graduated and n_searches > 0:
+            if self.saturation_score >= _EXPLORE_SATURATION_THRESHOLD:
+                self._explore_graduated = True
+                # Fall through to continue/ready/finalize
+            else:
+                return "explore"
 
         conf = self.confidence
         if conf >= self.READY_THRESHOLD:
@@ -208,6 +223,13 @@ class QualityGate:
     def guidance(self) -> str:
         """Return guidance string for the LM based on current phase."""
         p = self.phase
+        if p == "explore":
+            sat = self.saturation_score
+            return (
+                f"Explore phase (saturation {sat}%). "
+                "Run broad research() with diverse query angles and varied filters. "
+                "Do NOT draft yet — map the territory first."
+            )
         if p == "stalled":
             return (
                 "Evidence insufficient after multiple searches."

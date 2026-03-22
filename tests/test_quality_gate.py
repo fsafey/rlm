@@ -236,3 +236,75 @@ class TestExploreState:
         gate.record_search_yield(8)
         gate.record_search_yield(7)
         assert gate.saturation_score < 40
+
+
+class TestExplorePhase:
+    def test_initial_phase_is_explore(self):
+        """Fresh gate with some searches but no velocity data → explore."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        assert gate.phase == "explore"
+
+    def test_explore_graduates_on_saturation(self):
+        """Once saturation >= threshold, phase transitions to continue."""
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+            evidence.log_search(query=f"q{i}", num_results=3)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        assert gate.phase != "explore"
+
+    def test_graduation_is_irreversible(self):
+        """Once graduated from explore, can't go back even if saturation drops."""
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+            evidence.log_search(query=f"q{i}", num_results=3)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        _ = gate.phase  # triggers graduation
+        assert gate._explore_graduated is True
+        gate.record_search_yield(10)
+        gate.record_search_yield(10)
+        assert gate.phase != "explore"
+
+    def test_stalled_overrides_explore(self):
+        """Stalled takes priority: 6+ searches with <2 relevant → stalled, not explore."""
+        evidence = EvidenceStore()
+        for i in range(7):
+            evidence.log_search(query=f"q{i}", num_results=0)
+        gate = QualityGate(evidence=evidence)
+        assert gate.phase == "stalled"
+
+    def test_empty_gate_is_not_explore(self):
+        """Zero searches → phase should not be explore. It should be continue."""
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate.phase == "continue"
+
+    def test_explore_guidance_says_dont_draft(self):
+        """During explore, guidance should discourage drafting."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        assert gate.phase == "explore"
+        guidance = gate.guidance()
+        assert "Do NOT draft" in guidance or "Do not draft" in guidance
+
+    def test_explore_guidance_includes_saturation(self):
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        guidance = gate.guidance()
+        assert "saturation" in guidance.lower() or "%" in guidance

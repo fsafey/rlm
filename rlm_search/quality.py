@@ -7,14 +7,18 @@ from typing import Any
 
 from rlm_search.evidence import EvidenceStore
 from rlm_search.prompt_constants import (
+    MEDIUM_RELEVANT_MIN as _MEDIUM_RELEVANT_MIN,
+)
+from rlm_search.prompt_constants import (
     READY_THRESHOLD as _READY_THRESHOLD,
 )
 from rlm_search.prompt_constants import (
     STALL_SEARCH_COUNT as _STALL_SEARCH_COUNT,
 )
 from rlm_search.prompt_constants import (
-    MEDIUM_RELEVANT_MIN as _MEDIUM_RELEVANT_MIN,
     STRONG_CONFIDENCE_MIN as _STRONG_CONFIDENCE_MIN,
+)
+from rlm_search.prompt_constants import (
     STRONG_RELEVANT_MIN as _STRONG_RELEVANT_MIN,
 )
 from rlm_search.prompt_constants import (

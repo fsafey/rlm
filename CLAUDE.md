@@ -41,6 +41,15 @@ Recursive Language Models (RLMs) — task-agnostic inference paradigm enabling L
 - **NEVER** commit API keys or secrets
 - Environment variables for all provider keys (OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.)
 
+### Validation (before declaring a task complete)
+
+- Run `uv run ruff check --fix . && uv run ruff format .`
+- Run `uv run pytest` (or relevant subset) — all tests must pass
+- If DB-touching: verify SQL column names match the actual schema
+- If API-touching: verify response shapes match what the frontend destructures
+- If cross-layer: trace the data flow end-to-end (DB → API → frontend)
+- List any assumptions made that could be wrong
+
 ## Essential Commands
 
 ```bash

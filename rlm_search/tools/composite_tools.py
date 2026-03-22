@@ -235,8 +235,8 @@ def research(
 
                     if tier == "strong":
                         print(
-                            f"[research] GATE: strong tier reached, "
-                            f"skipping remaining extras"
+                            "[research] GATE: strong tier reached, "
+                            "skipping remaining extras"
                         )
                         _gate_stopped = True
                         _emit(ctx, "research", "gate_stopped", {

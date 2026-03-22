@@ -13,10 +13,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from rlm_search.evidence import EvidenceStore
-from rlm_search.quality import QualityGate
 from rlm_search.tools.context import SearchContext
 
 

@@ -3,7 +3,9 @@
 # - Shows staged files for visibility
 # - Warns (does NOT block) if on main/master branch
 
-set -euo pipefail
+set -eo pipefail
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || dirname "$0"/../..)}"
 
 INPUT=$(cat /dev/stdin)
 
@@ -24,7 +26,7 @@ fi
 CONTEXT=""
 
 # Get current branch
-BRANCH=$(git -C "$CLAUDE_PROJECT_DIR" branch --show-current 2>/dev/null || echo "unknown")
+BRANCH=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "unknown")
 
 # Warn if on main or master
 if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
@@ -32,7 +34,7 @@ if [[ "$BRANCH" == "main" || "$BRANCH" == "master" ]]; then
 fi
 
 # Show staged files
-STAGED=$(git -C "$CLAUDE_PROJECT_DIR" diff --cached --name-only 2>/dev/null || echo "")
+STAGED=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || echo "")
 
 if [[ -z "$STAGED" ]]; then
   CONTEXT+="No files currently staged. The commit may fail or stage files via -a flag."

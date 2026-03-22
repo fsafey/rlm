@@ -4,6 +4,23 @@ from rlm_search.evidence import EvidenceStore
 from rlm_search.quality import QualityGate
 
 
+def test_explore_constants_exist():
+    """All explore constants are importable and have expected types."""
+    from rlm_search.prompt_constants import (
+        EXPLORE_EXTRA_BUDGET,
+        EXPLORE_MIN_SEARCHES,
+        EXPLORE_SATURATION_THRESHOLD,
+        VELOCITY_DECAY,
+        VELOCITY_SATURATE,
+    )
+
+    assert isinstance(EXPLORE_SATURATION_THRESHOLD, int)
+    assert isinstance(EXPLORE_MIN_SEARCHES, int)
+    assert isinstance(VELOCITY_DECAY, float)
+    assert isinstance(VELOCITY_SATURATE, float)
+    assert isinstance(EXPLORE_EXTRA_BUDGET, int)
+
+
 class TestQualityGateConfidence:
     def test_initial_confidence_is_zero(self):
         gate = QualityGate(evidence=EvidenceStore())

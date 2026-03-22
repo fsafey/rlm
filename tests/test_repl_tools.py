@@ -2084,6 +2084,8 @@ class TestCheckProgress:
         """3 relevant sources with good scores → phase=ready, confidence>=60."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
+        # Graduate explore phase — this test is about ready, not explore
+        ctx.quality._explore_graduated = True
         # Register 3 hits and rate them RELEVANT via evidence store
         for i in range(3):
             ctx.evidence.register_hit({"id": str(i), "question": "Q", "answer": "A", "score": 0.8})
@@ -2116,6 +2118,8 @@ class TestCheckProgress:
         """3 identical queries with no relevant → phase=continue (QualityGate has no repeating)."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
+        # Graduate explore phase — this test is about repeating detection, not explore
+        ctx.quality._explore_graduated = True
         for _ in range(3):
             ctx.evidence.log_search(query="same query", num_results=3)
 
@@ -2127,6 +2131,8 @@ class TestCheckProgress:
         """Draft recorded + critique passed + confidence>=60 → phase=finalize."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
+        # Graduate explore phase — this test is about finalize, not explore
+        ctx.quality._explore_graduated = True
         # Build enough evidence for confidence >= 60
         for i in range(3):
             ctx.evidence.register_hit({"id": str(i), "question": "Q", "answer": "A", "score": 0.8})
@@ -2171,6 +2177,8 @@ class TestCheckProgress:
         """Only FN searched, no relevant → QualityGate gives generic continue guidance."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
+        # Graduate explore phase — this test is about strategy guidance, not explore
+        ctx.quality._explore_graduated = True
         ctx.evidence.log_search(query="q", num_results=3, filters={"parent_code": "FN"})
 
         result = ns["check_progress"]()
@@ -2182,6 +2190,8 @@ class TestCheckProgress:
         """All categories searched, no relevant → QualityGate gives generic continue guidance."""
         ns = self._exec_ns()
         ctx = ns["_ctx"]
+        # Graduate explore phase — this test is about cluster strategy, not explore
+        ctx.quality._explore_graduated = True
         # Mark all categories as explored
         for code in ["FN", "PT", "BE"]:
             ctx.evidence.log_search(query=f"q_{code}", num_results=3, filters={"parent_code": code})

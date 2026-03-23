@@ -57,6 +57,7 @@ def build_search_setup_code(
     classify_model: str = "",
     pipeline_mode: str = "",
     existing_answer: str | None = None,
+    search_mode: str = "explore",
 ) -> str:
     """Return Python code string executed in LocalREPL via setup_code parameter.
 
@@ -68,6 +69,7 @@ def build_search_setup_code(
     so mutations from register_hit() are visible to the LM via ``print(source_registry)``
     without re-assignment.
     """
+    explore_enabled = search_mode != "legacy"
     code = f"""\
 import os as _os
 from rlm_search.bus import EventBus as _EventBus
@@ -84,7 +86,7 @@ from rlm_search.tools import progress_tools as _prog
 # Create departments
 _bus = globals().get("_sse_event_bus") or _EventBus()
 _evidence = _EvidenceStore()
-_quality = _QualityGate(evidence=_evidence)
+_quality = _QualityGate(evidence=_evidence, explore_enabled={explore_enabled!r})
 
 _ctx = _SearchContext(
     api_url={api_url!r},

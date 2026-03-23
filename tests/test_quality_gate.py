@@ -4,6 +4,23 @@ from rlm_search.evidence import EvidenceStore
 from rlm_search.quality import QualityGate
 
 
+def test_explore_constants_exist():
+    """All explore constants are importable and have expected types."""
+    from rlm_search.prompt_constants import (
+        EXPLORE_EXTRA_BUDGET,
+        EXPLORE_MIN_SEARCHES,
+        EXPLORE_SATURATION_THRESHOLD,
+        VELOCITY_DECAY,
+        VELOCITY_SATURATE,
+    )
+
+    assert isinstance(EXPLORE_SATURATION_THRESHOLD, int)
+    assert isinstance(EXPLORE_MIN_SEARCHES, int)
+    assert isinstance(VELOCITY_DECAY, float)
+    assert isinstance(VELOCITY_SATURATE, float)
+    assert isinstance(EXPLORE_EXTRA_BUDGET, int)
+
+
 class TestQualityGateConfidence:
     def test_initial_confidence_is_zero(self):
         gate = QualityGate(evidence=EvidenceStore())
@@ -149,3 +166,175 @@ class TestCritiqueTier:
         gate = QualityGate(evidence=evidence)
         # relevance=35, quality=7, breadth=0 => confidence=42 < 75
         assert gate.critique_tier == "medium"
+
+
+class TestExploreState:
+    def test_record_search_yield_appends(self):
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(5)
+        gate.record_search_yield(3)
+        assert gate._search_yields == [5.0, 3.0]
+
+    def test_explore_graduated_default_false(self):
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate._explore_graduated is False
+
+    def test_info_velocity_no_yields_returns_1(self):
+        """No search data → assume high velocity (keep exploring)."""
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate._info_velocity == 1.0
+
+    def test_info_velocity_high_yields(self):
+        """Many new IDs per search → high velocity."""
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(8)
+        gate.record_search_yield(7)
+        assert gate._info_velocity > 0.8
+
+    def test_info_velocity_zero_yields(self):
+        """Zero new IDs → velocity near zero."""
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        assert gate._info_velocity < 0.1
+
+    def test_info_velocity_decaying(self):
+        """Recent low yields weigh more than early high yields."""
+        gate = QualityGate(evidence=EvidenceStore())
+        gate.record_search_yield(10)  # early: high
+        gate.record_search_yield(0)  # recent: zero
+        gate.record_search_yield(0)  # recent: zero
+        # Velocity should be low because recent searches are unproductive
+        assert gate._info_velocity < 0.5
+
+    def test_saturation_score_zero_initially(self):
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate.saturation_score == 0
+
+    def test_saturation_score_rises_with_low_velocity(self):
+        """When searches stop finding new things, saturation rises."""
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+            evidence.log_search(query=f"q{i}", num_results=3)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        assert gate.saturation_score > 50
+
+    def test_saturation_score_low_with_high_velocity(self):
+        """When searches keep finding new things, saturation stays low."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        evidence.log_search(query="q2", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(8)
+        gate.record_search_yield(7)
+        assert gate.saturation_score < 40
+
+
+class TestExplorePhase:
+    def test_initial_phase_is_explore(self):
+        """Fresh gate with some searches but no velocity data → explore."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        assert gate.phase == "explore"
+
+    def test_explore_graduates_on_saturation(self):
+        """Once saturation >= threshold, phase transitions to continue."""
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+            evidence.log_search(query=f"q{i}", num_results=3)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        assert gate.phase != "explore"
+
+    def test_graduation_is_irreversible(self):
+        """Once graduated from explore, can't go back even if saturation drops."""
+        evidence = EvidenceStore()
+        for i in range(4):
+            evidence.register_hit(
+                {"id": f"h{i}", "question": "Q", "answer": "A", "score": 0.7, "metadata": {}}
+            )
+            evidence.set_rating(f"h{i}", "RELEVANT", confidence=3)
+            evidence.log_search(query=f"q{i}", num_results=3)
+        gate = QualityGate(evidence=evidence)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        gate.record_search_yield(0)
+        _ = gate.phase  # triggers graduation
+        assert gate._explore_graduated is True
+        gate.record_search_yield(10)
+        gate.record_search_yield(10)
+        assert gate.phase != "explore"
+
+    def test_stalled_overrides_explore(self):
+        """Stalled takes priority: 6+ searches with <2 relevant → stalled, not explore."""
+        evidence = EvidenceStore()
+        for i in range(7):
+            evidence.log_search(query=f"q{i}", num_results=0)
+        gate = QualityGate(evidence=evidence)
+        assert gate.phase == "stalled"
+
+    def test_empty_gate_is_not_explore(self):
+        """Zero searches → phase should not be explore. It should be continue."""
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate.phase == "continue"
+
+    def test_explore_guidance_says_dont_draft(self):
+        """During explore, guidance should discourage drafting."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        assert gate.phase == "explore"
+        guidance = gate.guidance()
+        assert "Do NOT draft" in guidance or "Do not draft" in guidance
+
+    def test_explore_guidance_includes_saturation(self):
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence)
+        guidance = gate.guidance()
+        assert "saturation" in guidance.lower() or "%" in guidance
+
+    def test_explore_disabled_skips_explore_phase(self):
+        """When explore_enabled=False, phase skips explore entirely (legacy mode)."""
+        evidence = EvidenceStore()
+        evidence.log_search(query="q1", num_results=5)
+        gate = QualityGate(evidence=evidence, explore_enabled=False)
+        # Would be "explore" with explore_enabled=True
+        assert gate.phase == "continue"
+
+    def test_explore_enabled_default_true(self):
+        """Default is explore_enabled=True."""
+        gate = QualityGate(evidence=EvidenceStore())
+        assert gate.explore_enabled is True
+
+    def test_check_progress_includes_saturation_in_explore(self):
+        """check_progress() should include saturation_score when in explore phase."""
+        from unittest.mock import MagicMock
+
+        from rlm_search.tools.context import SearchContext
+        from rlm_search.tools.progress_tools import check_progress
+
+        ctx = SearchContext(api_url="http://test:8095")
+        ctx.llm_query = MagicMock(return_value="mocked")
+        ctx.evidence.log_search(query="q1", num_results=5)
+        assert ctx.quality.phase == "explore"
+
+        result = check_progress(ctx)
+
+        assert "saturation_score" in result
+        assert isinstance(result["saturation_score"], int)

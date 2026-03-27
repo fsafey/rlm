@@ -30,7 +30,7 @@ Cascade Search API (https://cascade.imam-us.org)
 Layer 2: Sub-agent tools (evaluate_results, reformulate, critique_answer)
          Wrap llm_query() with role-specific prompts. Fired by the main agent on demand.
 
-Layer 1: REPL tools (search, browse, kb_overview, fiqh_lookup, format_evidence)
+Layer 1: REPL tools (search, browse, fiqh_lookup, format_evidence)
          Python functions calling Cascade API. Injected via setup_code.
 
 Layer 0: Orchestrating LM
@@ -201,7 +201,6 @@ Composite tools (`research`, `draft_answer`) record parent-child relationships v
 | `search` | `num_results`, `total`, `query` |
 | `browse` | `num_results`, `total` |
 | `fiqh_lookup` | `num_bridges`, `num_related` |
-| `kb_overview` | `num_categories`, `total_documents` |
 | `evaluate_results` | `num_rated`, `relevant`, `partial`, `off_topic` |
 | `reformulate` | `num_queries` |
 | `critique_answer` | `verdict` |
@@ -224,7 +223,6 @@ The LM has access to these functions inside its Python REPL. Tools are injected 
 
 | Tool | Signature | Purpose |
 |------|-----------|---------|
-| `kb_overview()` | `-> dict \| None` | Pre-cached taxonomy: categories, cluster labels (with doc counts), sample questions, subtopic tags. Call first to orient. |
 | `search()` | `(query, filters=None, top_k=10) -> dict` | Semantic search. Returns `{results: [{id, score, question, answer, metadata}], total}`. Auto-bridges Arabic/English. |
 | `browse()` | `(filters=None, offset=0, limit=20, sort_by=None, group_by=None, group_limit=4) -> dict` | Filter-based browsing. Returns results, facets, grouped_results. Use for exploration, not answering. |
 | `fiqh_lookup()` | `(query) -> dict` | 453-term fiqh dictionary with Arabic/English bridging. For written answers, not search queries. |
@@ -247,7 +245,7 @@ These wrap `llm_query()` with role-specific prompts. Each costs one sub-LLM call
 | `reformulate()` | `(question, failed_query, top_score) -> list[str]` | Top score < 0.3 — returns up to 3 alternative query strings. |
 | `critique_answer()` | `(question, draft) -> str` | Before FINAL — returns PASS/FAIL verdict checking citations, topic drift, unsupported claims. |
 
-Classification is pre-computed at search init via `init_classify()` — access the result via the `classification` variable in the REPL.
+Classification is computed from search result metadata after the first `research()` call — access the result via the `classification` variable in the REPL.
 
 ### Utility
 
@@ -268,7 +266,7 @@ Classification is pre-computed at search init via `init_classify()` — access t
 | `BE` | Beliefs & Ethics |
 | `OT` | Other Topics |
 
-**Filter keys:** `parent_code` (str, e.g. `"PT"`), `cluster_label` (str, discover via `kb_overview()`), `subtopics` (str), `primary_topic` (str).
+**Filter keys:** `parent_code` (str, e.g. `"PT"`), `cluster_label` (str, discover via `browse()`), `subtopics` (str), `primary_topic` (str).
 
 Example: `search("zakat", filters={"parent_code": "FN", "cluster_label": "Khums Asset Liability"})`
 
@@ -276,7 +274,7 @@ Example: `search("zakat", filters={"parent_code": "FN", "cluster_label": "Khums 
 
 | Situation | Action |
 |-----------|--------|
-| Starting a question | `kb_overview()` → `search(query, ...)` |
+| Starting a question | `search(query, ...)` → review `classification` |
 | Search scores < 0.3 | `reformulate(question, failed_query, top_score)` → search alternatives |
 | Unsure if results match | `evaluate_results(question, results)` |
 | Large result set | `format_evidence()` → `llm_query()` |
@@ -301,7 +299,6 @@ rlm_search/
   bus.py                 # EventBus: single append-only event channel
   config.py              # Env var loading
   evidence.py            # EvidenceStore: owns source_registry, search_log, ratings
-  kb_overview.py         # build_kb_overview() — async startup taxonomy fetch
   models.py              # Pydantic request/response models
   prompt_constants.py    # Shared thresholds and confidence weights
   prompts.py             # System prompt: tool docs, selection guide, worked examples

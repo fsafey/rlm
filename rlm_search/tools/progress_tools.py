@@ -31,7 +31,7 @@ def _compute_confidence(
 
 def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
     """Taxonomy-aware next-action suggestion with copy-paste-ready code."""
-    kb = ctx.kb_overview_data
+    kb = getattr(ctx, "kb_overview_data", None)
     if not kb:
         return "Try broader search terms or different filters."
 

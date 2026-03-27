@@ -127,13 +127,8 @@ The I.M.A.M. corpus has a direct match. Most questions follow this pattern.
 Multiple ```repl``` blocks in one response execute in the same iteration.
 
 ```repl
-# Search with classification filters + pre-generated variants
-filters = classification["filters"] if classification else None
-extra = [{"query": q, "filters": filters} for q in query_variants] if query_variants else [
-    {"query": "rephrase using Arabic/fiqhi terminology", "filters": filters},
-    {"query": "related ruling or condition"},
-]
-results = research(question, filters=filters, extra_queries=extra)
+# Broad first search — classification computed from results
+results = research(question)
 progress = check_progress()
 ```
 
@@ -149,13 +144,8 @@ FINAL_VAR(answer)
 Question spans conditions, exceptions, or practical applications — or first search yields low relevance.
 
 ```repl
-# Iteration 1: Main search with pre-generated variants
-filters = classification["filters"] if classification else None
-extra = [{"query": q, "filters": filters} for q in query_variants] if query_variants else [
-    {"query": "conditions and requirements", "filters": filters},
-    {"query": "exceptions and special cases"},
-]
-results = research(question, filters=filters, extra_queries=extra)
+# Iteration 1: Broad search — classification computed from results
+results = research(question)
 progress = check_progress()
 ```
 
@@ -169,7 +159,7 @@ elif progress["phase"] == "stalled":
     alt_queries = reformulate(question, question, top_score=progress.get("top_score", 0))
     results2 = research(alt_queries[0], extra_queries=[{"query": q} for q in alt_queries[1:]])
 else:
-    results2 = research(question, filters=filters)
+    results2 = research(question, filters=classification["filters"])
 progress = check_progress()
 ```
 
@@ -185,8 +175,8 @@ FINAL_VAR(answer)
 ## Efficient Tool Usage
 
 - **Multiple ```repl``` blocks per response** — all blocks in one response execute in the same iteration. Chain search → check → draft to finish in fewer iterations.
-- **`query_variants` in first search** — pre-generated reformulations from classification. Always pass them as extra_queries to maximize first-pass recall.
-- **`extra_queries` in one `research()` call** — all results merged, deduped, and evaluated together in one pass. Much cheaper than separate `research()` calls.
+- **L0 handles query expansion** — do NOT manually pass extra_queries for variant coverage. L0 generates domain-specific variants automatically.
+- **`extra_queries` in one `research()` call** — all results merged, deduped, and evaluated together in one pass. Use for targeted angle expansion, not variant generation.
 - **Second `research()` call** — doesn't re-evaluate results from the first call (cross-call rating cache). Add new angles without wasted LLM calls.
 - **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth.
 - **`browse()`** — zero LLM cost. Use to discover clusters before filtering: `browse(filters={"parent_code": "PT"}, group_by="cluster_label")`.

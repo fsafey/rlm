@@ -549,101 +549,6 @@ class TestBrowseFunction:
         assert grouped_hit["metadata"]["parent_code"] == "PT"
 
 
-class TestKbOverviewFunction:
-    """Test kb_overview() function generation and behavior."""
-
-    def test_defines_kb_overview_with_data(self):
-        """kb_overview() must be defined when data is provided."""
-        overview_data = {
-            "collection": "enriched_gemini",
-            "total_documents": 100,
-            "categories": {"PT": {"name": "Prayer", "document_count": 50, "clusters": {}}},
-            "global_facets": {},
-        }
-        code = build_search_setup_code(api_url="http://localhost", kb_overview_data=overview_data)
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        assert "kb_overview" in ns
-        assert callable(ns["kb_overview"])
-
-    def test_kb_overview_returns_data(self):
-        """kb_overview() must return a dict with collection, total_documents, categories."""
-        overview_data = {
-            "collection": "enriched_gemini",
-            "total_documents": 18835,
-            "categories": {
-                "PT": {
-                    "name": "Prayer & Tahara",
-                    "document_count": 5200,
-                    "clusters": {"Ghusl": "How to do ghusl?"},
-                    "facets": {},
-                }
-            },
-            "global_facets": {"parent_code": {"PT": 5200}},
-        }
-        code = build_search_setup_code(api_url="http://localhost", kb_overview_data=overview_data)
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        result = ns["kb_overview"]()
-        assert result is not None
-        assert isinstance(result, dict)
-        assert result["collection"] == "enriched_gemini"
-        assert result["total_documents"] == 18835
-        cats = result["categories"]
-        assert isinstance(cats, list)
-        assert len(cats) == 1
-        assert cats[0]["code"] == "PT"
-        assert cats[0]["document_count"] == 5200
-        assert "Ghusl" in cats[0]["cluster_labels"]
-
-    def test_kb_overview_returns_none_without_data(self):
-        """kb_overview() must return None gracefully when no data provided."""
-        code = build_search_setup_code(api_url="http://localhost", kb_overview_data=None)
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        result = ns["kb_overview"]()
-        assert result is None
-
-    def test_kb_overview_prints_formatted_summary(self, capsys):
-        """kb_overview() must print a human-readable taxonomy summary."""
-        overview_data = {
-            "collection": "enriched_gemini",
-            "total_documents": 18835,
-            "categories": {
-                "PT": {
-                    "name": "Prayer & Tahara",
-                    "document_count": 5200,
-                    "clusters": {
-                        "Ghusl": "How to do ghusl?",
-                        "Wudu": "Does bleeding break wudu?",
-                    },
-                    "facets": {},
-                }
-            },
-            "global_facets": {},
-        }
-        code = build_search_setup_code(api_url="http://localhost", kb_overview_data=overview_data)
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        ns["kb_overview"]()
-        captured = capsys.readouterr()
-        assert "Knowledge Base: enriched_gemini" in captured.out
-        assert "18,835 documents" in captured.out
-        assert "PT" in captured.out
-        assert "Prayer & Tahara" in captured.out
-        assert "Ghusl" in captured.out
-
-    def test_kb_overview_prints_warning_when_none(self, capsys):
-        """kb_overview() must print warning when data is None."""
-        code = build_search_setup_code(api_url="http://localhost", kb_overview_data=None)
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        ns["kb_overview"]()
-        captured = capsys.readouterr()
-        assert "WARNING" in captured.out
-        assert "unavailable" in captured.out
-
-
 class TestSetupCodeInLocalREPL:
     """Test that setup code works when injected into a real LocalREPL."""
 
@@ -658,12 +563,10 @@ class TestSetupCodeInLocalREPL:
             assert "format_evidence" in repl.locals
             assert "fiqh_lookup" in repl.locals
             assert "browse" in repl.locals
-            assert "kb_overview" in repl.locals
             assert callable(repl.locals["search"])
             assert callable(repl.locals["format_evidence"])
             assert callable(repl.locals["fiqh_lookup"])
             assert callable(repl.locals["browse"])
-            assert callable(repl.locals["kb_overview"])
             assert isinstance(repl.locals["search_log"], list)
             assert "tool_calls" in repl.locals
             assert isinstance(repl.locals["tool_calls"], list)
@@ -684,21 +587,9 @@ class TestSetupCodeInLocalREPL:
             repl.cleanup()
 
 
-def _make_sub_agent_ns(kb_overview_data=None):
+def _make_sub_agent_ns():
     """Helper: build setup code namespace with mock llm_query wired into _ctx."""
-    mock_overview = kb_overview_data or {
-        "collection": "test",
-        "total_documents": 100,
-        "categories": {
-            "PT": {
-                "name": "Prayer",
-                "document_count": 50,
-                "facets": {},
-                "clusters": {"Ghusl": "How to perform ghusl?"},
-            }
-        },
-    }
-    code = build_search_setup_code(api_url="http://localhost:8091", kb_overview_data=mock_overview)
+    code = build_search_setup_code(api_url="http://localhost:8091")
     # Provide dummy llm callables so bootstrap can wire them into _ctx
     ns: dict = {
         "llm_query": lambda prompt, model=None: "",
@@ -1245,71 +1136,6 @@ class TestCritiqueAnswer:
         assert result["passed"] is True
         assert "[Source: 1] Q: Real A: Evidence" in prompts_seen[0]
         assert "Noise" not in prompts_seen[0]
-
-
-class TestClassificationInSetupCode:
-    """Tests for init_classify() wired into setup_code."""
-
-    def test_classify_question_wrapper_removed(self):
-        """classify_question should no longer be in the generated namespace."""
-        code = build_search_setup_code(api_url="http://localhost:8091")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        assert "classify_question" not in ns
-
-    def test_classification_variable_exposed(self):
-        """classification variable should be defined in the namespace."""
-        code = build_search_setup_code(api_url="http://localhost:8091")
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        assert "classification" in ns
-        # Without query, init_classify is not called, so classification is None
-        assert ns["classification"] is None
-
-    @patch("rlm_search.tools.api_tools.requests.post")
-    @patch("rlm_search.tools.subagent_tools.get_client")
-    @patch("rlm_search.config.RLM_BACKEND", "claude_cli")
-    @patch("rlm_search.config.ANTHROPIC_API_KEY", "")
-    def test_init_classify_called_with_query(self, mock_get_client, mock_post):
-        """When query is provided, init_classify runs and sets classification."""
-        mock_client = MagicMock()
-        mock_client.completion.return_value = "CATEGORY: PT"
-        mock_get_client.return_value = mock_client
-
-        # Mock browse response for Phase 2
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "hits": [],
-            "total": 50,
-            "has_more": False,
-            "facets": {"clusters": [], "subtopics": []},
-            "grouped_results": {
-                "clusters": [
-                    {"label": "Ghusl", "total_count": 50, "hits": [{"question": "How to perform ghusl?"}]},
-                ]
-            },
-        }
-        mock_resp.raise_for_status = MagicMock()
-        mock_post.return_value = mock_resp
-
-        kb = {
-            "categories": {
-                "PT": {"name": "Prayer", "clusters": {"Ghusl": "g"}},
-            },
-            "total_documents": 50,
-        }
-        code = build_search_setup_code(
-            api_url="http://localhost:8091",
-            kb_overview_data=kb,
-            query="How to perform ghusl?",
-            classify_model="test-model",
-        )
-        ns: dict = {}
-        exec(code, ns)  # noqa: S102
-        assert ns["classification"] is not None
-        assert ns["classification"]["category"] == "PT"
-        assert ns["classification"]["filters"] == {"parent_code": "PT"}
 
 
 def _make_search_mock(hits=None):
@@ -2009,57 +1835,11 @@ class TestToolCallsTracking:
         assert ns["tool_calls"][2]["tool"] == "browse"
 
 
-# --- KB fixture with categories and clusters for progress tests ---
-
-_KB_PROGRESS = {
-    "collection": "test",
-    "total_documents": 5000,
-    "categories": {
-        "FN": {
-            "name": "Finance & Transactions",
-            "document_count": 2000,
-            "clusters": {"Zakat": "How to calculate zakat?"},
-            "facets": {
-                "clusters": [
-                    {"value": "Zakat", "count": 500},
-                    {"value": "Banking", "count": 300},
-                ]
-            },
-        },
-        "PT": {
-            "name": "Prayer & Tahara",
-            "document_count": 2500,
-            "clusters": {"Ghusl": "How to perform ghusl?"},
-            "facets": {
-                "clusters": [
-                    {"value": "Ghusl", "count": 400},
-                    {"value": "Wudu", "count": 350},
-                ]
-            },
-        },
-        "BE": {
-            "name": "Beliefs & Ethics",
-            "document_count": 500,
-            "clusters": {"Iman": "What is iman?"},
-            "facets": {
-                "clusters": [
-                    {"value": "Iman", "count": 200},
-                ]
-            },
-        },
-    },
-}
-
-
-_UNSET = object()
-
-
 class TestCheckProgress:
     """Tests for the check_progress() progress advisor."""
 
-    def _exec_ns(self, kb_data=_UNSET):
-        data = _KB_PROGRESS if kb_data is _UNSET else kb_data
-        code = build_search_setup_code(api_url="http://api.test", kb_overview_data=data)
+    def _exec_ns(self):
+        code = build_search_setup_code(api_url="http://api.test")
         ns: dict = {
             "llm_query": lambda prompt, model=None: "",
             "llm_query_batched": lambda prompts, model=None: [""] * len(prompts),
@@ -2250,8 +2030,8 @@ class TestCheckProgress:
         assert tc["error"] is None
 
     def test_no_kb_data_graceful(self):
-        """kb_overview_data=None → still works, QualityGate gives generic guidance."""
-        ns = self._exec_ns(kb_data=None)
+        """QualityGate gives generic guidance in empty state."""
+        ns = self._exec_ns()
         result = ns["check_progress"]()
 
         assert result["phase"] == "continue"

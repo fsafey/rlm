@@ -102,14 +102,12 @@ class TestSetupCodeV2Integration:
 
         code = build_search_setup_code(
             api_url="https://test.com",
-            kb_overview_data=None,
             rlm_model="test-model",
             rlm_backend="anthropic",
             depth=0,
             max_delegation_depth=1,
             sub_iterations=3,
             query="test question",
-            classify_model="test-model",
         )
 
         # The setup code should execute without errors in a real LocalREPL

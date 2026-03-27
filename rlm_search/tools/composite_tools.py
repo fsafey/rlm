@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import re
 import time
+from collections import Counter
 from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
@@ -120,6 +121,109 @@ def _incremental_evaluate(
     }
 
 
+def _extract_classification(results: list[dict]) -> dict:
+    """Compute classification from search result metadata via majority vote.
+
+    Pure function — no LLM calls, no side effects (~5ms).
+
+    Args:
+        results: Search results, each with ``result["metadata"]["parent_code"]``
+                 and ``result["metadata"]["cluster_label"]``.
+
+    Returns:
+        Classification dict with category, confidence, clusters, filters,
+        strategy, query_variants, and also_category.
+    """
+    if not results:
+        return {
+            "category": "",
+            "confidence": "LOW",
+            "clusters": "",
+            "filters": {},
+            "strategy": "No results to classify.",
+            "query_variants": [],
+            "also_category": "",
+        }
+
+    # 1. Count parent_code distribution
+    parent_counts: Counter[str] = Counter()
+    for r in results:
+        pc = r.get("metadata", {}).get("parent_code", "")
+        if pc:
+            parent_counts[pc] += 1
+
+    if not parent_counts:
+        return {
+            "category": "",
+            "confidence": "LOW",
+            "clusters": "",
+            "filters": {},
+            "strategy": "No parent_code metadata found.",
+            "query_variants": [],
+            "also_category": "",
+        }
+
+    # 2. Majority vote
+    category, dominant_count = parent_counts.most_common(1)[0]
+    total = sum(parent_counts.values())
+    concentration = dominant_count / total if total > 0 else 0.0
+    max_score = max((r.get("score", 0.0) for r in results), default=0.0)
+
+    # 3. Confidence level
+    if concentration >= 0.70 and max_score > 0.5:
+        confidence = "HIGH"
+    elif concentration >= 0.50 or max_score > 0.3:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+
+    # 4. Top 3 cluster_label values from dominant category
+    cluster_counts: Counter[str] = Counter()
+    for r in results:
+        md = r.get("metadata", {})
+        if md.get("parent_code") == category:
+            cl = md.get("cluster_label", "")
+            if cl:
+                cluster_counts[cl] += 1
+    top_clusters = [label for label, _ in cluster_counts.most_common(3)]
+    clusters_str = ", ".join(top_clusters)
+    top_cluster = top_clusters[0] if top_clusters else category
+
+    # 5. Runner-up
+    runner_up = ""
+    if len(parent_counts) >= 2:
+        runner_up = parent_counts.most_common(2)[1][0]
+
+    also_category = runner_up if confidence == "LOW" else ""
+
+    # 6. Filters
+    filters = {"parent_code": category} if confidence != "LOW" else {}
+
+    # 7. Strategy string
+    if confidence == "HIGH":
+        strategy = f"Strong match — {top_cluster} in {category}. Filter by category."
+    elif confidence == "MEDIUM":
+        strategy = (
+            f"Moderate match — {top_cluster} in {category}. "
+            f"Use category filter, skip cluster filter."
+        )
+    else:
+        strategy = (
+            f"Weak match — mixed results across {category} and {runner_up}. "
+            f"Search broadly without filters."
+        )
+
+    return {
+        "category": category,
+        "confidence": confidence,
+        "clusters": clusters_str,
+        "filters": filters,
+        "strategy": strategy,
+        "query_variants": [],
+        "also_category": also_category,
+    }
+
+
 def research(
     ctx: ToolContext,
     query: str | list,
@@ -215,6 +319,14 @@ def research(
                     # Record yield for explore phase velocity tracking
                     if ctx.quality:
                         ctx.quality.record_search_yield(new_unique_main)
+
+                    # ── Script-based classification (runs once, ~5ms) ──
+                    if ctx.classification is None and r["results"]:
+                        ctx.classification = _extract_classification(r["results"])
+                        _emit(ctx, "research", "classified", {
+                            "category": ctx.classification["category"],
+                            "confidence": ctx.classification["confidence"],
+                        })
                 except Exception as e:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")

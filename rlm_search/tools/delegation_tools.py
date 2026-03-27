@@ -209,7 +209,6 @@ def _run_child_rlm(
 
     setup_code = build_search_setup_code(
         api_url=CASCADE_API_URL,
-        kb_overview_data=ctx.kb_overview_data,
         rlm_model=child_model,
         rlm_backend=backend,
         depth=child_depth,

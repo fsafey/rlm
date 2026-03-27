@@ -32,3 +32,9 @@ EXPLORE_MIN_SEARCHES = 2  # minimum searches before explore can graduate
 VELOCITY_DECAY = 0.7  # exponential decay per search step (recent searches weighted more)
 VELOCITY_SATURATE = 5.0  # 5+ new unique IDs per search = max velocity (1.0)
 EXPLORE_EXTRA_BUDGET = 2  # additional extra_queries allowed during explore phase
+
+# Classification: confidence thresholds (from search-result voting)
+CLASSIFY_CONCENTRATION_HIGH = 0.70  # ≥70% of top-K results share dominant parent_code
+CLASSIFY_CONCENTRATION_MEDIUM = 0.50  # ≥50% concentration
+CLASSIFY_SCORE_HIGH = 0.5  # max rerank score above this = strong signal
+CLASSIFY_SCORE_MEDIUM = 0.3  # max rerank score above this = moderate signal

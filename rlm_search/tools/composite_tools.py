@@ -10,6 +10,10 @@ from collections.abc import Generator
 from typing import TYPE_CHECKING, Any
 
 from rlm_search.prompt_constants import (
+    CLASSIFY_CONCENTRATION_HIGH,
+    CLASSIFY_CONCENTRATION_MEDIUM,
+    CLASSIFY_SCORE_HIGH,
+    CLASSIFY_SCORE_MEDIUM,
     EVAL_CHECKPOINT_SEARCH,
     EXPLORE_EXTRA_BUDGET,
     MEDIUM_EXTRA_BUDGET,
@@ -145,12 +149,17 @@ def _extract_classification(results: list[dict]) -> dict:
             "also_category": "",
         }
 
-    # 1. Count parent_code distribution
+    # 1. Count parent_code distribution (warn on missing metadata)
     parent_counts: Counter[str] = Counter()
+    missing_pc = 0
     for r in results:
         pc = r.get("metadata", {}).get("parent_code", "")
         if pc:
             parent_counts[pc] += 1
+        else:
+            missing_pc += 1
+    if missing_pc:
+        print(f"[classify] WARNING: {missing_pc}/{len(results)} results missing parent_code metadata")
 
     if not parent_counts:
         return {
@@ -169,10 +178,10 @@ def _extract_classification(results: list[dict]) -> dict:
     concentration = dominant_count / total if total > 0 else 0.0
     max_score = max((r.get("score", 0.0) for r in results), default=0.0)
 
-    # 3. Confidence level
-    if concentration >= 0.70 and max_score > 0.5:
+    # 3. Confidence level (thresholds from prompt_constants)
+    if concentration >= CLASSIFY_CONCENTRATION_HIGH and max_score > CLASSIFY_SCORE_HIGH:
         confidence = "HIGH"
-    elif concentration >= 0.50 or max_score > 0.3:
+    elif concentration >= CLASSIFY_CONCENTRATION_MEDIUM or max_score > CLASSIFY_SCORE_MEDIUM:
         confidence = "MEDIUM"
     else:
         confidence = "LOW"

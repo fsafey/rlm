@@ -2,59 +2,15 @@
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
-
-def _trim_kb_overview(data: dict[str, Any]) -> dict[str, Any]:
-    """Trim kb_overview_data for setup_code embedding to reduce token count.
-
-    Keeps category structure, top 20 clusters, top 8 subtopic facets per category.
-    Drops global_facets (unused by tools). Full data available via kb_overview() tool.
-    """
-    out: dict[str, Any] = {}
-    for key, val in data.items():
-        if key == "global_facets":
-            continue  # unused by any tool
-        if key == "categories":
-            trimmed_cats: dict[str, Any] = {}
-            for code, cat in val.items():
-                tc: dict[str, Any] = {
-                    "name": cat.get("name", code),
-                    "document_count": cat.get("document_count", 0),
-                }
-                # Keep clusters (labels + sample Qs) — cap at 10
-                clusters = cat.get("clusters", {})
-                if clusters:
-                    tc["clusters"] = dict(list(clusters.items())[:10])
-                # Keep subtopic facets — cap at 8
-                facets = cat.get("facets", {})
-                if facets:
-                    trimmed_facets: dict[str, Any] = {}
-                    for fk, fv in facets.items():
-                        if isinstance(fv, list):
-                            trimmed_facets[fk] = fv[:8]
-                        else:
-                            trimmed_facets[fk] = fv
-                    tc["facets"] = trimmed_facets
-                trimmed_cats[code] = tc
-            out["categories"] = trimmed_cats
-        else:
-            out[key] = val
-    return out
-
-
 def build_search_setup_code(
     api_url: str,
     timeout: int = 30,
-    kb_overview_data: dict[str, Any] | None = None,
     rlm_model: str = "",
     rlm_backend: str = "",
     depth: int = 0,
     max_delegation_depth: int = 1,
     sub_iterations: int = 3,
     query: str = "",
-    classify_model: str = "",
     pipeline_mode: str = "",
     existing_answer: str | None = None,
     search_mode: str = "explore",
@@ -80,7 +36,6 @@ from rlm_search.tools import api_tools as _api
 from rlm_search.tools import subagent_tools as _sub
 from rlm_search.tools import composite_tools as _comp
 from rlm_search.tools import format_tools as _fmt
-from rlm_search.tools import kb as _kb_mod
 from rlm_search.tools import progress_tools as _prog
 
 # Create departments
@@ -111,40 +66,15 @@ _ctx._record_rlm_call = globals().get("_record_rlm_call")
 _ctx.pipeline_mode = {pipeline_mode!r}
 """
 
-    # Embed kb_overview data as JSON (avoids nested brace escaping issues)
-    # Trim to reduce setup_code token count — full data still available via kb_overview() tool
-    if kb_overview_data is not None:
-        trimmed = _trim_kb_overview(kb_overview_data)
-        kb_json_str = json.dumps(trimmed)
-        code += f"\nimport json as _json\n_ctx.kb_overview_data = _json.loads({kb_json_str!r})\n"
-
     if existing_answer is not None:
         code += f"\n_ctx.existing_answer = {existing_answer!r}\n"
 
-    # Run init_classify at setup_code time (zero iteration cost)
     if query:
-        code += f"\n_sub.init_classify(_ctx, {query!r}, model={classify_model!r})\n"
         code += f"\nquestion = {query!r}\n"
-    code += "\nclassification = _ctx.classification\n"
-    code += "\nquery_variants = (classification or {}).get('query_variants', [])\n"
 
-    # Print setup summary — captured as setup_summary for inclusion in iteration 0 user message
     code += """
-if classification:
-    _parts = [f"Category: {classification['category']} ({classification['confidence']})"]
-    if classification.get('clusters'):
-        _parts.append(f"Clusters: {classification['clusters']}")
-    if classification.get('also_category'):
-        _parts.append(f"Also: {classification['also_category']}")
-    if query_variants:
-        _parts.append(f"Query variants: {query_variants}")
-    _parts.append(f"Strategy: {classification['strategy']}")
-    print("Pre-classification: " + " | ".join(_parts))
-    print(f"\\nREPL variables ready: question, classification, query_variants, filters=classification['filters']")
-    print("Write a ```repl``` block to call research() — do NOT answer in plain text.")
-else:
-    print("Pre-classification: skipped (no kb_overview_data)")
-    print("Write a ```repl``` block to call research(question) — do NOT answer in plain text.")
+print("Classification: computed after first research() call.")
+print("Write a ```repl``` block to call research(question) — do NOT answer in plain text.")
 """
 
     code += """
@@ -161,9 +91,6 @@ def format_evidence(results, max_per_source=3):
 
 def fiqh_lookup(query):
     return _api.fiqh_lookup(_ctx, query)
-
-def kb_overview():
-    return _kb_mod.kb_overview(_ctx)
 
 def evaluate_results(question, results, top_n=5, model=None):
     return _sub.evaluate_results(_ctx, question, results, top_n=top_n, model=model)

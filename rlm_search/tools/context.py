@@ -38,7 +38,6 @@ class SearchContext:
 
     # --- Delegation config ---
     classification: dict | None = None
-    kb_overview_data: dict | None = None
     _rlm_model: str = ""
     _rlm_backend: str = ""
     _depth: int = 0

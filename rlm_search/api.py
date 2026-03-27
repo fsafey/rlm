@@ -29,7 +29,6 @@ from rlm_search.config import (
     CASCADE_API_KEY,
     CASCADE_API_URL,
     RLM_BACKEND,
-    RLM_CLASSIFY_MODEL,
     RLM_MAX_DELEGATION_DEPTH,
     RLM_MAX_DEPTH,
     RLM_MAX_ITERATIONS,
@@ -40,7 +39,6 @@ from rlm_search.config import (
     SEARCH_MODE,
     SESSION_TIMEOUT,
 )
-from rlm_search.kb_overview import build_kb_overview
 from rlm_search.models import HealthResponse, SearchRequest, SearchResponse
 from rlm_search.prompts import build_system_prompt
 from rlm_search.repl_tools import build_search_setup_code
@@ -49,9 +47,6 @@ from rlm_search.sse import create_sse_router
 from rlm_search.streaming_logger import StreamingLoggerV2
 
 _log = logging.getLogger("rlm_search")
-
-# Cached KB overview — built once at startup, shared across searches
-_kb_overview_cache: dict | None = None
 
 # Active searches: search_id -> EventBus
 _searches: dict[str, EventBus] = {}
@@ -176,14 +171,12 @@ def _build_rlm_kwargs(
 
     setup_code = build_search_setup_code(
         api_url=CASCADE_API_URL,
-        kb_overview_data=_kb_overview_cache,
         rlm_model=model,
         rlm_backend=backend,
         depth=0,
         max_delegation_depth=max_delegation_depth,
         sub_iterations=sub_iterations,
         query=query,
-        classify_model=RLM_CLASSIFY_MODEL,
         search_mode=search_mode,
     )
 
@@ -364,8 +357,6 @@ def _run_search_v2(
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    global _kb_overview_cache
-
     if CASCADE_API_KEY:
         os.environ["_RLM_CASCADE_API_KEY"] = CASCADE_API_KEY
 
@@ -373,11 +364,6 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _app.state.cascade_url = url if status == "connected" else None
     if status == "connected":
         _log.info("Cascade API at %s is reachable.", url)
-        _kb_overview_cache = await build_kb_overview(url, CASCADE_API_KEY)
-        if _kb_overview_cache:
-            n_cats = len(_kb_overview_cache.get("categories", {}))
-            n_docs = _kb_overview_cache.get("total_documents", 0)
-            _log.info("KB overview built: %d categories, %d total docs", n_cats, n_docs)
     else:
         _log.warning("Cascade API at %s is not reachable.", url)
 

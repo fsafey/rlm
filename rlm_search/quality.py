@@ -122,8 +122,17 @@ class QualityGate:
 
     # --- Critique tracking ---
 
-    def record_critique(self, passed: bool, verdict: str) -> None:
-        self._last_critique = {"passed": passed, "verdict": verdict}
+    def record_critique(
+        self,
+        passed: bool,
+        verdict: str,
+        dimensions: dict[str, dict[str, str]] | None = None,
+    ) -> None:
+        self._last_critique = {
+            "passed": passed,
+            "verdict": verdict,
+            "dimensions": dimensions or {},
+        }
 
     @property
     def last_critique(self) -> dict[str, Any] | None:
@@ -162,10 +171,17 @@ class QualityGate:
         # Factor 4: Draft exists
         draft_score = WEIGHT_DRAFT if self._has_draft else 0
 
-        # Factor 5: Critique outcome
+        # Factor 5: Critique outcome (graduated per-dimension)
         critique_score = 0
         if self._last_critique is not None:
-            critique_score = WEIGHT_CRITIQUE if self._last_critique["passed"] else 5
+            dims = self._last_critique.get("dimensions", {})
+            if dims:
+                # ~2.5 points per passing dimension (6 dims × 2.5 = 15 max)
+                n_passed = sum(1 for d in dims.values() if d.get("verdict") == "PASS")
+                critique_score = min(WEIGHT_CRITIQUE, int(WEIGHT_CRITIQUE * n_passed / max(len(dims), 1)))
+            else:
+                # Fallback: no structured dimensions available (binary)
+                critique_score = WEIGHT_CRITIQUE if self._last_critique["passed"] else 5
 
         return min(
             100, relevance_score + quality_score + breadth_score + draft_score + critique_score

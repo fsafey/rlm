@@ -720,7 +720,7 @@ def draft_answer(
             # Wire QualityGate — record draft + final critique outcome
             if quality is not None:
                 quality.record_draft(len(answer))
-                quality.record_critique(passed, critique_text)
+                quality.record_critique(passed, critique_text, dimensions)
 
             failed_dims_list = [k for k, v in dimensions.items() if v["verdict"] == "FAIL"]
             total_ms = synth_ms + crit_ms

@@ -91,12 +91,14 @@ class StreamingLoggerV2(RLMLogger):
         sources: list[dict[str, Any]],
         execution_time: float,
         usage: dict[str, Any],
+        confidence: int | None = None,
     ) -> None:
         data = {
             "answer": answer,
             "sources": sources,
             "execution_time": execution_time,
             "usage": usage,
+            "confidence": confidence,
         }
         self.bus.emit("done", data)
         entry = {"type": "done", "timestamp": datetime.now().isoformat(), **data}

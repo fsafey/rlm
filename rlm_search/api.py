@@ -333,11 +333,17 @@ def _run_search_v2(
                 usage_summary.merge(child_usage)
         usage = usage_summary.to_dict() if usage_summary else {}
 
+        # Read final confidence from QualityGate (includes draft + critique bonuses)
+        final_confidence: int | None = None
+        if ctx is not None and ctx.quality is not None:
+            final_confidence = ctx.quality.confidence
+
         logger.mark_done(
             answer=_strip_sources_section(result.response or ""),
             sources=sources,
             execution_time=result.execution_time,
             usage=usage,
+            confidence=final_confidence,
         )
 
     except SearchCancelled:

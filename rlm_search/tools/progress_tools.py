@@ -30,103 +30,48 @@ def _compute_confidence(
 
 
 def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
-    """Taxonomy-aware next-action suggestion with copy-paste-ready code."""
-    kb = getattr(ctx, "kb_overview_data", None)
-    if not kb:
+    """Taxonomy-aware next-action suggestion using classification context."""
+    if not ctx.classification:
         return "Try broader search terms or different filters."
 
-    all_categories = kb.get("categories", {})
+    classified = ctx.classification
+    category = classified.get("category", "")
+    confidence = classified.get("confidence", "LOW")
 
-    # When pre-classification exists, suggest within classified domain first
-    if ctx.classification and ctx.classification.get("category"):
-        classified_code = ctx.classification["category"]
-        classified_cat = all_categories.get(classified_code)
+    # LOW confidence: skip cluster suggestion entirely — broad search first
+    if confidence == "LOW":
+        strategy = classified.get("strategy", "")
+        also = classified.get("also_category", "")
+        base = strategy if strategy else "Low confidence classification — search broadly without filters."
+        if also:
+            base += f" Also consider category {also}."
+        return base
 
-        if not classified_cat:
-            print(
-                f"[strategy] WARNING: classified category '{classified_code}' "
-                "not found in kb_overview"
-            )
-            # Fall through to heuristic below
-        else:
-            # LOW confidence: skip cluster suggestion entirely — broad search first
-            if ctx.classification.get("confidence") == "LOW":
-                strategy = ctx.classification.get("strategy", "")
-                also = ctx.classification.get("also_category", "")
-                base = (
-                    strategy
-                    if strategy
-                    else "Low confidence classification — search broadly without filters."
-                )
-                if also:
-                    base += f" Also consider category {also}."
-                return base
-
-            # Find which classified clusters haven't been searched yet
-            classified_clusters = [
-                c.strip() for c in ctx.classification.get("clusters", "").split(",") if c.strip()
-            ]
-            used_clusters = {
-                e.get("filters", {}).get("cluster_label")
-                for e in ctx.search_log
-                if e.get("filters")
-            } - {None}
-
-            unsearched = [c for c in classified_clusters if c not in used_clusters]
-
-            if unsearched:
-                cluster = unsearched[0]
-                return (
-                    f'Try classified cluster "{cluster}" in {classified_cat["name"]}: '
-                    f"research(query, "
-                    f'filters={{"parent_code": "{classified_code}", '
-                    f'"cluster_label": "{cluster}"}})'
-                )
-
-            # All classified clusters explored — use classification strategy
-            strategy = ctx.classification.get("strategy", "")
-            if strategy:
-                return f"Classified clusters explored. Strategy: {strategy}"
-            return "All classified clusters explored. Draft with current evidence."
-
-    # No classification — fall back to biggest-unexplored heuristic
-    unexplored = {
-        code: cat
-        for code, cat in all_categories.items()
-        if code not in categories_explored and cat.get("document_count", 0) > 50
-    }
-
-    if unexplored:
-        best_code, best_cat = max(unexplored.items(), key=lambda x: x[1].get("document_count", 0))
-        clusters = best_cat.get("facets", {}).get("clusters", [])
-        top_cluster = clusters[0]["value"] if clusters else None
-        suggestion = f"Unexplored: {best_cat['name']} ({best_cat['document_count']} docs)."
-        if top_cluster:
-            suggestion += (
-                f" Try: research(query, "
-                f'filters={{"parent_code": "{best_code}", '
-                f'"cluster_label": "{top_cluster}"}})'
-            )
-        return suggestion
-
-    # All categories explored — suggest cluster-level exploration
+    # Find which classified clusters haven't been searched yet
+    classified_clusters = [
+        c.strip() for c in classified.get("clusters", "").split(",") if c.strip()
+    ]
     used_clusters = {
-        e.get("filters", {}).get("cluster_label") for e in ctx.search_log if e.get("filters")
+        e.get("filters", {}).get("cluster_label")
+        for e in ctx.search_log
+        if e.get("filters")
     } - {None}
 
-    for code, cat in all_categories.items():
-        clusters = cat.get("facets", {}).get("clusters", [])
-        for cluster in clusters[:5]:
-            if cluster["value"] not in used_clusters and cluster["count"] > 20:
-                return (
-                    f'Try cluster "{cluster["value"]}" in {cat["name"]}'
-                    f" ({cluster['count']} docs): "
-                    f"research(query, "
-                    f'filters={{"parent_code": "{code}", '
-                    f'"cluster_label": "{cluster["value"]}"}})'
-                )
+    unsearched = [c for c in classified_clusters if c not in used_clusters]
 
-    return "All major categories and clusters explored. Draft with current evidence."
+    if unsearched:
+        cluster = unsearched[0]
+        return (
+            f'Try cluster "{cluster}" in {category}: '
+            f'research(query, filters={{"parent_code": "{category}", '
+            f'"cluster_label": "{cluster}"}})'
+        )
+
+    # All classified clusters explored — use classification strategy
+    strategy = classified.get("strategy", "")
+    if strategy:
+        return strategy
+    return "All classified clusters explored. Draft with current evidence."
 
 
 def _format_audit_trail(ctx: ToolContext) -> str:

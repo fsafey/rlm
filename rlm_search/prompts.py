@@ -46,9 +46,6 @@ Read this after every `research()` call. It tells you what to do next.
 - `confidence`: 0-100% score from evidence quality, relevance, and search breadth.
 - `guidance`: Concrete next-step suggestion (often copy-paste-ready code).
 
-### kb_overview() -> dict | None
-Taxonomy overview: categories, clusters, doc counts. Call first to orient.
-
 ### rlm_query(sub_question, instructions=None) -> dict
 Delegate a sub-question to a child agent with its own search tools and iteration budget.
 - Child sources auto-merge into your `source_registry`.

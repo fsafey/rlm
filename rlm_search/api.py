@@ -80,7 +80,7 @@ async def _check_cascade_health(
 def _check_api_key(request: Request) -> None:
     """Validate x-api-key header when SEARCH_API_KEY is configured."""
     if not SEARCH_API_KEY:
-        return
+        raise HTTPException(status_code=503, detail="API key not configured")
     key = request.headers.get("x-api-key", "")
     if not hmac.compare_digest(key, SEARCH_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")

@@ -845,11 +845,14 @@ def draft_answer(
 
             failed_dims_list = [k for k, v in dimensions.items() if v["verdict"] == "FAIL"]
             total_ms = synth_ms + crit_ms
+            # Read post-draft confidence (includes draft + critique bonuses)
+            final_confidence = quality.confidence if quality is not None else None
             print(
                 f"[draft_answer] {'PASS' if passed else 'FAIL'}"
                 f" tier={tier}"
                 f"{' (revised)' if revised else ''}"
                 f" | {len(answer)} chars | {len(evidence)} evidence entries"
+                f" | confidence={final_confidence}"
                 f" | {total_ms}ms"
             )
             if failed_dims_list:
@@ -863,6 +866,7 @@ def draft_answer(
                     "answer_preview": answer,
                     "critique_verdict": "PASS" if passed else "FAIL",
                     "critique_reason": critique_text or "",
+                    "confidence": final_confidence,
                     "citation_check": {
                         "valid": citation_result["valid"],
                         "cited_count": len(citation_result["cited"]),

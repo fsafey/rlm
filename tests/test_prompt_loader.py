@@ -159,10 +159,13 @@ class TestRoundTrip:
     """Extracted layers must reproduce the original monolithic prompt."""
 
     def test_assembled_matches_monolith(self):
-        """The assembled default layers must match AGENTIC_SEARCH_SYSTEM_PROMPT exactly."""
+        """Assembled layers + placeholder injection must match AGENTIC_SEARCH_SYSTEM_PROMPT."""
         from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
+        from rlm_search.tool_gate import generate_availability_section
 
         assembled = assemble_prompt()  # uses default layers_dir
+        # Apply same placeholder replacement as prompts.py
+        assembled = assembled.replace("{TOOL_GATE_SECTION}", generate_availability_section())
 
         assert assembled.strip() == AGENTIC_SEARCH_SYSTEM_PROMPT.strip(), (
             "Assembled layers diverged from AGENTIC_SEARCH_SYSTEM_PROMPT. "

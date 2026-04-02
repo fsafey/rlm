@@ -61,9 +61,11 @@ FINAL_VAR(answer)
 - **L0 handles query expansion** — do NOT manually pass extra_queries for variant coverage. L0 generates domain-specific variants automatically.
 - **`extra_queries` in one `research()` call** — all results merged, deduped, and evaluated together in one pass. Use for targeted angle expansion, not variant generation.
 - **Second `research()` call** — doesn't re-evaluate results from the first call (cross-call rating cache). Add new angles without wasted LLM calls.
-- **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth. Gated at HIGH and MEDIUM confidence.
-- **`browse()`** — zero LLM cost. Use to discover clusters before filtering: `browse(filters={"parent_code": "PT"}, group_by="cluster_label")`. Gated at HIGH confidence.
-- **`reformulate()`** — generates 3 alternative queries. Use when top_score < 0.3 or when stalled. Gated at HIGH confidence — if unavailable, rephrase manually and use `research()` with `extra_queries`.
+- **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth.
+- **`browse()`** — zero LLM cost. Use to discover clusters before filtering: `browse(filters={"parent_code": "PT"}, group_by="cluster_label")`.
+- **`reformulate()`** — generates 3 alternative queries. Use when top_score < 0.3 or when stalled.
+
+> **Note:** Some tools above may be unavailable depending on your gate tier — see **Tool Availability**.
 
 ## Anti-Patterns (avoid these)
 

@@ -38,11 +38,4 @@ Delegate a sub-question to a child agent with its own search tools and iteration
 - `llm_query(prompt)` — raw LLM call (advanced; prefer research/draft_answer for most tasks)
 - `search_log`, `source_registry` — session state
 
-### Tool Availability
-
-After the first `research()` call, tools may be gated based on classification confidence:
-- **HIGH confidence** (single category): Low-level tools (`browse`, `reformulate`, `critique_answer`, `evaluate_results`, `rlm_query`) are removed. Use `research()` + `draft_answer()` directly.
-- **MEDIUM confidence**: `rlm_query` is removed (too expensive for moderate-confidence queries). All other tools available.
-- **LOW confidence** or cross-category: All tools available.
-
-**Gating is permanent for the session.** Once tools are removed, they do not come back. Plan your strategy with the tools you have — don't retry a gated tool expecting it to return. If you get a `NameError`, the gate has restricted it.
+{TOOL_GATE_SECTION}

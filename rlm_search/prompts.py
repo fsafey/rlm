@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from rlm_search.config import PROMPT_LAYERS_DIR
 from rlm_search.prompt_loader import assemble_prompt, load_preamble
+from rlm_search.tool_gate import generate_availability_section
 
 # Sourced from _preamble.md — single source of truth.
 # PROMPT_LAYERS_DIR override is checked first, so per-corpus deployments
@@ -11,7 +12,11 @@ from rlm_search.prompt_loader import assemble_prompt, load_preamble
 DOMAIN_PREAMBLE = load_preamble(override_dir=PROMPT_LAYERS_DIR)
 
 # Both cached at import time — restart server to pick up changes.
-AGENTIC_SEARCH_SYSTEM_PROMPT = assemble_prompt(overrides_dir=PROMPT_LAYERS_DIR)
+_raw_prompt = assemble_prompt(overrides_dir=PROMPT_LAYERS_DIR)
+# Inject programmatically generated sections (single source of truth from code).
+AGENTIC_SEARCH_SYSTEM_PROMPT = _raw_prompt.replace(
+    "{TOOL_GATE_SECTION}", generate_availability_section()
+)
 
 
 def build_system_prompt(

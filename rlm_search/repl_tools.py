@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 def build_search_setup_code(
     api_url: str,
     timeout: int = 30,

@@ -1,6 +1,6 @@
 """Tests for tool gating by classification confidence."""
 
-from rlm_search.tool_gate import apply_gate, compute_tool_tier, TIER_REMOVALS
+from rlm_search.tool_gate import TIER_REMOVALS, apply_gate, compute_tool_tier
 
 
 class TestComputeToolTier:

@@ -188,9 +188,15 @@ _run_search():
 - `sse.py` — SSE router (reads EventBus, supports replay)
 - `prompt_constants.py` — shared thresholds/weights
 
+**Persistence** — `public.agentic_searches` table (Supabase Postgres):
+- Stores every completed search: query, answer, sources (jsonb), iterations (jsonb), usage, confidence
+- Written by the admin workbench proxy path (`_SearchAccumulator` → `save_search()`)
+- Key columns: `search_id`, `query`, `answer`, `sources`, `iterations`, `done_confidence`, `execution_time_ms`, `tool_progress`, `sub_iterations`, `source_registry`
+
 **Env vars** (`rlm_search/config.py`, loaded via `python-dotenv`):
 - `CASCADE_API_URL` (default `https://cascade.vworksflow.com`), `CASCADE_API_KEY`
 - `ANTHROPIC_API_KEY`, `RLM_BACKEND`, `RLM_MODEL`, `RLM_MAX_ITERATIONS`, `RLM_MAX_DEPTH`
+- `PROMPT_LAYERS_DIR` — optional override directory for prompt layer files (shadows defaults in `rlm_search/prompt_layers/`)
 
 **Frontend** (`search-app/`): Vite + React 19 + Tailwind + shadcn/ui. Proxies `/api/*` → `localhost:8092`.
 

@@ -1,6 +1,7 @@
 .PHONY: help install install-dev install-modal run-all \
         quickstart docker-repl lm-repl modal-repl \
-        lint format test check backend frontend tunnel
+        lint format test check backend frontend tunnel \
+        admin admin-dev
 
 help:
 	@echo "RLM Examples Makefile"
@@ -25,6 +26,8 @@ help:
 	@echo "  make backend        - Start rlm_search API server (SEARCH_BACKEND_PORT, default 8092)"
 	@echo "  make frontend       - Start search frontend (SEARCH_FRONTEND_PORT, default 3002)"
 	@echo "  make tunnel         - Start backend + frontend + Cloudflare Tunnel (shareable URL)"
+	@echo "  make admin          - Launch admin workbench and open RLM search page"
+	@echo "  make admin-dev      - Same as admin, but uses THIS repo's RLM backend on :8092"
 
 install:
 	uv sync
@@ -82,3 +85,12 @@ tunnel:
 	$(MAKE) frontend & \
 	sleep 3; \
 	cloudflared tunnel --url http://localhost:$$FPORT
+
+ADMIN_DIR ?= /Users/farieds/Project/standalone-search/4_FRONTEND_ADMIN
+ADMIN_URL  = http://localhost:4173/rlm-search
+
+admin:
+	@ADMIN_DIR=$(ADMIN_DIR) ./scripts/admin-dev.sh --no-backend
+
+admin-dev:
+	@ADMIN_DIR=$(ADMIN_DIR) ./scripts/admin-dev.sh

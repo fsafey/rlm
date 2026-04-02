@@ -92,6 +92,8 @@ This project includes a `Makefile` to simplify common tasks.
 
 - `make install`: Install base dependencies.
 - `make check`: Run linter, formatter, and tests.
+- `make admin`: Launch the admin workbench and open the RLM search page in your browser.
+- `make admin-dev`: Same as `admin`, but starts the RLM backend from **this repo** on `:8092` so you can test local changes end-to-end.
 
 To run a quick test:
 ```bash

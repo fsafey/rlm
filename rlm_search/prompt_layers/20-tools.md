@@ -37,3 +37,12 @@ Delegate a sub-question to a child agent with its own search tools and iteration
 - `critique_answer(question, draft, evidence=None, model=None)` — PASS/FAIL review; pass `format_evidence(results)` for evidence-grounded critique, or omit to auto-pull from session sources
 - `llm_query(prompt)` — raw LLM call (advanced; prefer research/draft_answer for most tasks)
 - `search_log`, `source_registry` — session state
+
+### Tool Availability
+
+After the first `research()` call, tools may be gated based on classification confidence:
+- **HIGH confidence** (single category): Low-level tools (`browse`, `reformulate`, `critique_answer`, `evaluate_results`, `rlm_query`) are removed. Use `research()` + `draft_answer()` directly.
+- **MEDIUM confidence**: `rlm_query` is removed (too expensive for moderate-confidence queries). All other tools available.
+- **LOW confidence** or cross-category: All tools available.
+
+If you get a `NameError` for a tool, the gate has restricted it — work with the tools you have.

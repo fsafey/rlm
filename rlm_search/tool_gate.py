@@ -87,30 +87,41 @@ def generate_availability_section() -> str:
     """Generate the Tool Availability prompt section from TIER_REMOVALS.
 
     Single source of truth — no hand-typed tool lists in prompt layers.
+    Uses a table for scannability + a core-tools line for quick reference.
     """
-    lines = [
-        "### Tool Availability",
-        "",
-        "After `research()`, tools are gated by classification confidence."
-        " **Gating is permanent for the session.**",
-        "",
-    ]
+    # Core tools = tools never removed in any tier
+    all_removed = frozenset().union(*(TIER_REMOVALS.values()))
+    core = sorted(ALL_REPL_TOOLS - all_removed)
+
+    # Build table rows
+    rows = []
     for tier in ("focused", "standard", "full"):
         removed = TIER_REMOVALS[tier]
         condition = TIER_CONDITIONS[tier]
-        lines.append(f"**{tier}** ({condition}):")
         if not removed:
-            lines.append("  All tools available.")
+            removed_str = "—"
         else:
-            available = sorted(ALL_REPL_TOOLS - removed)
-            lines.append(f"  Available: `{'`, `'.join(available)}`")
-            lines.append(f"  Removed: `{'`, `'.join(sorted(removed))}`")
-        lines.append("")
+            removed_str = ", ".join(f"`{t}`" for t in sorted(removed))
+        rows.append(f"| **{tier}** | {condition} | {removed_str} |")
 
-    lines.append(
-        "If a tool raises `NameError`, the gate removed it — work with the tools you have."
+    core_str = ", ".join(f"`{t}`" for t in core)
+
+    return "\n".join(
+        [
+            "### Tool Availability",
+            "",
+            "After `research()`, tools are gated by classification confidence."
+            " **Gating is permanent for the session.**",
+            "",
+            f"Core tools (always available): {core_str}",
+            "",
+            "| Tier | Condition | Removed |",
+            "|------|-----------|---------|",
+            *rows,
+            "",
+            "If a tool raises `NameError`, the gate removed it — work with what you have.",
+        ]
     )
-    return "\n".join(lines)
 
 
 def apply_gate(namespace: dict[str, Any], tier: str) -> list[str]:

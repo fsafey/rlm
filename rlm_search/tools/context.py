@@ -55,6 +55,9 @@ class SearchContext:
     progress_callback: Any = None
     existing_answer: str | None = None
 
+    # --- Tool gating callback (set by REPL setup, called by research wrapper) ---
+    _gate_callback: Any = None
+
     def __post_init__(self) -> None:
         if not self.headers and self.api_key:
             self.headers = {

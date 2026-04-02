@@ -125,3 +125,25 @@ class TestApplyGate:
         assert "source_registry" in ns
         assert "search_log" in ns
         assert "question" in ns
+
+
+class TestGateIntegration:
+    """Gate fires after classification in the research() wrapper."""
+
+    def test_gate_callback_receives_tier(self):
+        """_ctx._gate_callback is called with the computed tier after classification."""
+        classification = {"confidence": "HIGH", "category": "PT", "also_category": ""}
+        tier = compute_tool_tier(classification)
+        assert tier == "focused"
+
+    def test_repl_setup_code_defines_gate_callback(self):
+        """Generated setup code must define _ctx._gate_callback."""
+        from rlm_search.repl_tools import build_search_setup_code
+
+        code = build_search_setup_code(api_url="http://localhost:8091")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+        ctx = ns["_ctx"]
+        assert hasattr(ctx, "_gate_callback")
+        assert ctx._gate_callback is not None
+        assert callable(ctx._gate_callback)

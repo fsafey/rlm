@@ -219,7 +219,7 @@ to avoid sub-tool collisions.
 
 When adding a new tool for rlm_search:
 1. Include `[tool_name]` stdout prefix in the tool function
-2. Add detection in `search-app/src/components/SearchProgress.tsx:detectActivity()`
+2. Add detection in the admin workbench (`4_FRONTEND_ADMIN`)
 3. Add transition text in `getActiveText()`
 
 ---

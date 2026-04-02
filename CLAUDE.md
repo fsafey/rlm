@@ -16,7 +16,6 @@ Recursive Language Models (RLMs) — task-agnostic inference paradigm enabling L
 | `tests/`             | pytest test suite                                      |
 | `visualizer/`        | Next.js trajectory viewer (shadcn/ui)                  |
 | `rlm_search/`        | FastAPI agentic search backend (port 8092)             |
-| `search-app/`        | Vite + React search UI (port 3002, proxies to 8092)   |
 | `examples/`          | Usage examples                                         |
 | `docs/`              | Documentation site (Next.js)                           |
 
@@ -59,7 +58,6 @@ uv run ruff check --fix . && uv run ruff format .  # Lint + format
 uv run python -c "from rlm import RLM"  # Verify import
 uv sync --group dev --group test        # Install dev deps
 cd visualizer && npm run dev            # Trajectory viewer (localhost:3001)
-cd search-app && npm run dev            # Search UI (localhost:3002)
 ```
 
 ### Agentic Search
@@ -67,11 +65,10 @@ cd search-app && npm run dev            # Search UI (localhost:3002)
 ```bash
 uv pip install fastapi uvicorn httpx    # Search deps (NOT in pyproject.toml)
 make backend                            # Search API server (port 8092)
-make frontend                           # Search UI dev server (port 3002)
-make tunnel                             # All of the above + Cloudflare Tunnel (shareable URL)
+make admin-dev                          # Backend + admin workbench frontend (port 4173)
 ```
 
-`make tunnel` requires `cloudflared` (`brew install cloudflared`). Vite allows `*.trycloudflare.com` hosts via `allowedHosts` in `search-app/vite.config.ts`.
+Frontend lives in the admin workbench repo (`4_FRONTEND_ADMIN`). `make admin-dev` starts the RLM backend on `:8092` and the admin workbench on `:4173`.
 
 ### Optional Dependency Groups
 

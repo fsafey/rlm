@@ -24,8 +24,6 @@ help:
 	@echo "  make test           - Run tests"
 	@echo "  make check          - Run lint + format + tests"
 	@echo "  make backend        - Start rlm_search API server (SEARCH_BACKEND_PORT, default 8092)"
-	@echo "  make frontend       - Start search frontend (SEARCH_FRONTEND_PORT, default 3002)"
-	@echo "  make tunnel         - Start backend + frontend + Cloudflare Tunnel (shareable URL)"
 	@echo "  make admin          - Launch admin workbench and open RLM search page"
 	@echo "  make admin-dev      - Same as admin, but uses THIS repo's RLM backend on :8092"
 
@@ -67,24 +65,6 @@ backend:
 	PORT=$${SEARCH_BACKEND_PORT:-8092}; \
 	trap 'lsof -ti :'"$$PORT"' | xargs kill -9 2>/dev/null; exit 0' INT TERM; \
 	uv run uvicorn rlm_search.api:app --port $$PORT --app-dir $(CURDIR) 2>&1 | tee /tmp/rlm_search
-
-frontend:
-	cd search-app && SEARCH_FRONTEND_PORT=$${SEARCH_FRONTEND_PORT:-3002} SEARCH_BACKEND_PORT=$${SEARCH_BACKEND_PORT:-8092} npm run dev
-
-tunnel:
-	@echo "Starting RLM Search with Cloudflare Tunnel..."
-	@BPORT=$${SEARCH_BACKEND_PORT:-8092}; FPORT=$${SEARCH_FRONTEND_PORT:-3002}; \
-	echo "Backend: http://localhost:$$BPORT"; \
-	echo "Frontend: http://localhost:$$FPORT"; \
-	echo ""; \
-	echo "Killing existing processes on ports $$BPORT and $$FPORT..."; \
-	lsof -ti :$$BPORT :$$FPORT 2>/dev/null | xargs kill 2>/dev/null || true; \
-	sleep 1; \
-	$(MAKE) backend & \
-	sleep 2; \
-	$(MAKE) frontend & \
-	sleep 3; \
-	cloudflared tunnel --url http://localhost:$$FPORT
 
 ADMIN_DIR ?= /Users/farieds/Project/standalone-search/4_FRONTEND_ADMIN
 ADMIN_URL  = http://localhost:4173/rlm-search

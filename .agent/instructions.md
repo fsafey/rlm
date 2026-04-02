@@ -8,12 +8,11 @@ This project uses `uv` for dependency management and `Makefile` for running comm
 - **Run Tests**: `make test` (uses `uv run pytest`)
 - **Lint/Format**: `make check` (runs lint, format, and test)
 - **Start Backend**: `make backend`
-- **Start Frontend**: `make frontend`
+- **Start Frontend**: `make admin-dev` (admin workbench + RLM backend)
 
 ## Project Structure
 
 - `rlm/`: Core Recursive Language Model logic
 - `rlm_search/`: Search backend implementation
-- `search-app/`: Frontend application
 - `visualizer/`: RLM trajectory visualizer
 - `examples/`: Example scripts

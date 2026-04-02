@@ -147,3 +147,79 @@ class TestGateIntegration:
         assert hasattr(ctx, "_gate_callback")
         assert ctx._gate_callback is not None
         assert callable(ctx._gate_callback)
+
+
+class TestReplGateWiring:
+    """Full integration: setup code -> research() -> classification -> gate fires."""
+
+    def test_gate_removes_tools_after_high_confidence_classification(self):
+        """After research() returns with HIGH classification, expensive tools are gone."""
+        from rlm_search.repl_tools import build_search_setup_code
+
+        code = build_search_setup_code(api_url="http://localhost:8091", query="test question")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        # Before classification, all tools present
+        assert "browse" in ns
+        assert "reformulate" in ns
+
+        # Simulate classification landing on _ctx
+        ns["_ctx"].classification = {
+            "confidence": "HIGH",
+            "category": "PT",
+            "also_category": "",
+            "clusters": "Wudu",
+            "filters": {"parent_code": "PT"},
+            "strategy": "Strong match.",
+            "query_variants": [],
+        }
+
+        # Fire the gate callback directly (normally research() does this)
+        ns["_ctx"]._gate_callback(ns["_ctx"].classification)
+
+        # Expensive tools should be removed
+        assert "browse" not in ns
+        assert "reformulate" not in ns
+        assert "critique_answer" not in ns
+        assert "evaluate_results" not in ns
+
+        # Core tools remain
+        assert "research" in ns
+        assert "draft_answer" in ns
+        assert "check_progress" in ns
+        assert "search" in ns
+        assert "fiqh_lookup" in ns
+        assert "format_evidence" in ns
+
+    def test_gate_is_idempotent(self):
+        """Calling gate callback twice doesn't error (second call is a no-op)."""
+        from rlm_search.repl_tools import build_search_setup_code
+
+        code = build_search_setup_code(api_url="http://localhost:8091", query="test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        classification = {"confidence": "HIGH", "category": "PT", "also_category": ""}
+        ns["_ctx"].classification = classification
+        ns["_ctx"]._gate_callback(classification)
+        # Second call — should not raise
+        ns["_ctx"]._gate_callback(classification)
+
+        assert "research" in ns
+
+    def test_low_confidence_keeps_all_tools(self):
+        """LOW confidence -> full tier -> no tools removed."""
+        from rlm_search.repl_tools import build_search_setup_code
+
+        code = build_search_setup_code(api_url="http://localhost:8091", query="test")
+        ns: dict = {}
+        exec(code, ns)  # noqa: S102
+
+        classification = {"confidence": "LOW", "category": "PT", "also_category": "BE"}
+        ns["_ctx"].classification = classification
+        ns["_ctx"]._gate_callback(classification)
+
+        assert "browse" in ns
+        assert "reformulate" in ns
+        assert "critique_answer" in ns

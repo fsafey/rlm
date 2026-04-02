@@ -30,12 +30,12 @@ def build_system_prompt(
 
 You have **{max_iterations} iterations** total. Each response you send costs one iteration — but you can include **multiple ```repl``` blocks in a single response** and they execute sequentially within the same iteration. Use this to chain dependent steps (search → check → draft) in one turn.
 
-**Read check_progress() after every research() call.** It tells you whether to draft or keep searching.
+**Read `results["progress"]` after every `research()` call** — progress is auto-checked.
 
-- **check_progress() returns phase 'explore'** → search broadly with diverse angles, do NOT draft yet
-- **check_progress() returns phase 'ready'** → draft immediately (don't waste iterations)
-- **check_progress() returns phase 'continue'** → follow the guidance suggestion (1-2 more research calls)
-- **phase is still 'continue' after 3+ searches** → reformulate or try different category
+- **phase 'explore'** → search broadly with diverse angles, do NOT draft yet
+- **phase 'ready'** → draft immediately (don't waste iterations)
+- **phase 'continue'** → follow the guidance suggestion (1-2 more research calls)
+- **phase still 'continue' after 3+ searches** → reformulate or try different category
 - **After iteration {max_iterations - 3}** → draft and finalize regardless of evidence quality
 
 Most questions resolve in 1-2 iterations. Use more only when check_progress says to."""

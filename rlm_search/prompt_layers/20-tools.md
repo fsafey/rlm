@@ -7,7 +7,8 @@ Search, evaluate relevance, and deduplicate — all in one call.
   List mode merges all results for a single dedup + eval pass.
 - `filters`: Optional dict, e.g. `{"parent_code": "FN"}`. See **Taxonomy**.
 - `extra_queries`: Additional search angles — merged and deduped with the main query in one pass.
-- Returns: `{"results": [...], "ratings": {id: rating}, "search_count": N, "eval_summary": str}`
+- Returns: `{"results": [...], "ratings": {id: rating}, "search_count": N, "eval_summary": str, "progress": {...}}`
+- `progress` includes `phase`, `confidence`, `guidance` — same as `check_progress()`. No need to call `check_progress()` separately after `research()`.
 - **Efficiency**: Results rated in prior `research()` calls are remembered — re-searching doesn't re-evaluate known IDs.
 
 ### draft_answer(question, results, instructions=None, model=None) -> dict
@@ -17,7 +18,8 @@ Synthesize, critique, and revise an answer from search results.
 - Internally: formats evidence → synthesis → evidence-grounded critique → one revision if FAIL.
 
 ### check_progress() -> dict
-Read this after every `research()` call. It tells you what to do next.
+Progress status — already included in `research()` return value as `progress` key.
+Call standalone only after non-research actions (e.g. `browse()`).
 - `phase`: Your next action (see **Reading check_progress** below).
 - `confidence`: 0-100% score from evidence quality, relevance, and search breadth.
 - `guidance`: Concrete next-step suggestion (often copy-paste-ready code).

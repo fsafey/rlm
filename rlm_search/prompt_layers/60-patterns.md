@@ -5,9 +5,8 @@ The I.M.A.M. corpus has a direct match. Most questions follow this pattern.
 Multiple ```repl``` blocks in one response execute in the same iteration.
 
 ```repl
-# Broad first search — classification computed from results
+# Broad first search — progress auto-checked, classification computed
 results = research(question)
-progress = check_progress()
 ```
 
 ```repl
@@ -22,28 +21,24 @@ FINAL_VAR(answer)
 Question spans conditions, exceptions, or practical applications — or first search yields low relevance.
 
 ```repl
-# Iteration 1: Broad search — classification computed from results
+# Iteration 1: Broad search — progress auto-checked
 results = research(question)
-progress = check_progress()
 ```
 
 ```repl
-# Iteration 2: Follow check_progress() guidance
+# Iteration 2: Branch on results["progress"] from research()
+progress = results["progress"]
 if progress["phase"] == "continue" and '"' in progress.get("guidance", ""):
-    # guidance often suggests a cluster — parse and use it
     suggested = progress["guidance"].split('"')[1]
     results2 = research(question, filters={"parent_code": classification["category"], "cluster_label": suggested})
 elif progress["phase"] in ("stalled", "repeating"):
-    # reformulate() may be gated (HIGH confidence) — use research with new angles instead
     try:
         alt_queries = reformulate(question, question, top_score=progress.get("top_score", 0))
         results2 = research(alt_queries[0], extra_queries=[{"query": q} for q in alt_queries[1:]])
     except NameError:
-        # Gated — use synonyms/rephrasings directly
         results2 = research(question, filters={"parent_code": classification["category"]})
 else:
     results2 = research(question, filters=classification["filters"])
-progress = check_progress()
 ```
 
 ```repl
@@ -69,9 +64,10 @@ FINAL_VAR(answer)
 
 ## Anti-Patterns (avoid these)
 
-- **Searching the same query twice** — check `search_log` or the audit trail in check_progress.
-- **Ignoring check_progress guidance** — it suggests specific next steps. Follow them.
-- **Extra blocks to inspect results** — don't write blocks just to print or read data. `research()` and `check_progress()` already print summaries.
+- **Searching the same query twice** — check `search_log` or the audit trail in `results["progress"]`.
+- **Ignoring progress guidance** — `results["progress"]["guidance"]` suggests specific next steps. Follow them.
+- **Calling `check_progress()` after `research()`** — redundant. `research()` already auto-checks and includes progress in its return value.
+- **Extra blocks to inspect results** — don't write blocks just to print or read data. `research()` already prints summaries.
 - **Drafting with low confidence when iterations remain** — if confidence < 40% and you have iterations left, invest in more research.
 - **Using rlm_query for single-topic questions** — direct `research()` with `extra_queries` is 3x cheaper.
 - **Calling `critique_answer()` after `draft_answer()`** — `draft_answer()` already critiques and revises internally (tier-dependent). Additional standalone critique is redundant and adds 40-70s of wasted LLM time.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 
 from rlm_search.prompt_loader import discover_layers, assemble_prompt
@@ -107,3 +106,18 @@ class TestOverrideLayers:
         assert "corpus-specific rules" in result
         # Custom layer sorts after core by prefix
         assert result.index("core") < result.index("corpus-specific rules")
+
+
+class TestRoundTrip:
+    """Extracted layers must reproduce the original monolithic prompt."""
+
+    def test_assembled_matches_monolith(self):
+        """The assembled default layers must match AGENTIC_SEARCH_SYSTEM_PROMPT exactly."""
+        from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT
+
+        assembled = assemble_prompt()  # uses default layers_dir
+
+        assert assembled.strip() == AGENTIC_SEARCH_SYSTEM_PROMPT.strip(), (
+            "Assembled layers diverged from AGENTIC_SEARCH_SYSTEM_PROMPT. "
+            "Diff the two strings to find the discrepancy."
+        )

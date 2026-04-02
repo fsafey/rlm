@@ -1,6 +1,6 @@
 """Tests for tool gating by classification confidence."""
 
-from rlm_search.tool_gate import compute_tool_tier, TIER_REMOVALS
+from rlm_search.tool_gate import apply_gate, compute_tool_tier, TIER_REMOVALS
 
 
 class TestComputeToolTier:
@@ -53,3 +53,75 @@ class TestTierRemovals:
 
     def test_full_removes_nothing(self):
         assert TIER_REMOVALS["full"] == frozenset()
+
+
+class TestApplyGate:
+    """apply_gate removes tool functions from a namespace dict."""
+
+    def _make_namespace(self) -> dict:
+        """Simulate a REPL namespace with tool functions."""
+        return {
+            "research": lambda: None,
+            "draft_answer": lambda: None,
+            "check_progress": lambda: None,
+            "search": lambda: None,
+            "browse": lambda: None,
+            "fiqh_lookup": lambda: None,
+            "reformulate": lambda: None,
+            "critique_answer": lambda: None,
+            "evaluate_results": lambda: None,
+            "rlm_query": lambda: None,
+            "format_evidence": lambda: None,
+            "source_registry": {},
+            "search_log": [],
+            "question": "test",
+        }
+
+    def test_focused_removes_expensive_tools(self):
+        ns = self._make_namespace()
+        removed = apply_gate(ns, "focused")
+        assert "rlm_query" not in ns
+        assert "browse" not in ns
+        assert "reformulate" not in ns
+        assert "critique_answer" not in ns
+        assert "evaluate_results" not in ns
+        assert set(removed) == {
+            "rlm_query", "browse", "reformulate", "critique_answer", "evaluate_results",
+        }
+
+    def test_focused_keeps_core_tools(self):
+        ns = self._make_namespace()
+        apply_gate(ns, "focused")
+        assert "research" in ns
+        assert "draft_answer" in ns
+        assert "check_progress" in ns
+        assert "search" in ns
+        assert "fiqh_lookup" in ns
+
+    def test_full_removes_nothing(self):
+        ns = self._make_namespace()
+        removed = apply_gate(ns, "full")
+        assert removed == []
+        assert "rlm_query" in ns
+
+    def test_standard_removes_rlm_query_only(self):
+        ns = self._make_namespace()
+        removed = apply_gate(ns, "standard")
+        assert "rlm_query" not in ns
+        assert "browse" in ns
+        assert removed == ["rlm_query"]
+
+    def test_missing_tool_is_silently_skipped(self):
+        """If a tool was never injected (e.g. rlm_query at max depth), skip it."""
+        ns = {"research": lambda: None, "draft_answer": lambda: None}
+        removed = apply_gate(ns, "focused")
+        assert "research" in ns
+        # Only tools that were actually present get reported
+        assert all(name not in ns for name in removed)
+
+    def test_non_callable_keys_untouched(self):
+        ns = self._make_namespace()
+        apply_gate(ns, "focused")
+        assert "source_registry" in ns
+        assert "search_log" in ns
+        assert "question" in ns

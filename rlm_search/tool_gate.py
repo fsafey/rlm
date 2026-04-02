@@ -52,3 +52,22 @@ def compute_tool_tier(classification: dict[str, Any] | None) -> str:
     if confidence == "MEDIUM":
         return "standard"
     return "full"
+
+
+def apply_gate(namespace: dict[str, Any], tier: str) -> list[str]:
+    """Remove tool bindings from namespace based on tier.
+
+    Args:
+        namespace: Mutable dict (e.g. REPL locals or combined globals).
+        tier: One of "focused", "standard", "full".
+
+    Returns:
+        Sorted list of tool names that were actually removed.
+    """
+    to_remove = TIER_REMOVALS.get(tier, frozenset())
+    removed = []
+    for name in sorted(to_remove):
+        if name in namespace:
+            del namespace[name]
+            removed.append(name)
+    return removed

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 def build_search_setup_code(
     api_url: str,
     timeout: int = 30,
@@ -107,6 +108,9 @@ def check_progress():
 
 def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None):
     result = _comp.research(_ctx, query, filters=filters, top_k=top_k, extra_queries=extra_queries, eval_model=eval_model)
+    # Fire tool gate after classification lands (runs once)
+    if _ctx.classification is not None and _ctx._gate_callback is not None:
+        _ctx._gate_callback(_ctx.classification)
     progress = _prog.check_progress(_ctx)
     if progress["phase"] == "ready":
         print(f"\\n>>> PROGRESS: Evidence sufficient (confidence {progress['confidence']}%). Call draft_answer() now.")
@@ -118,6 +122,29 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
 
 def draft_answer(question, results, instructions=None, model=None):
     return _comp.draft_answer(_ctx, question, results, instructions=instructions, model=model)
+
+# ── Tool gating — restrict tools after classification lands ───────────
+from rlm_search.tool_gate import compute_tool_tier as _compute_tier, apply_gate as _apply_gate
+
+_gate_applied = False
+
+def _gate_callback(classification):
+    global _gate_applied
+    if _gate_applied:
+        return
+    _gate_applied = True
+    _tier = _compute_tier(classification)
+    if _tier == "full":
+        return
+    # Get the namespace that holds the wrapper functions.
+    # All wrappers are defined at module-level in the exec'd code,
+    # so they live in the combined globals dict.
+    _ns = research.__globals__
+    _removed = _apply_gate(_ns, _tier)
+    if _removed:
+        print(f"[gate] Tier={_tier} — removed tools: {', '.join(_removed)}")
+
+_ctx._gate_callback = _gate_callback
 
 # ── Mutable state aliases (delegate to departments) ─────────────────────
 # source_registry is a LIVE reference to EvidenceStore._registry

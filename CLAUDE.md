@@ -170,11 +170,18 @@ _run_search():
   logger = StreamingLoggerV2(bus=bus)  # emits all events through bus
   build_search_setup_code()      # injects search(), browse(), SearchContext
   RLM(
-    custom_system_prompt=...,    # tool docs + domain taxonomy
+    custom_system_prompt=build_system_prompt(max_iterations),
     environment_kwargs={"setup_code": setup_code},
     logger=logger
   ).completion(query)
 ```
+
+**Prompt layers** (`rlm_search/prompt_layers/`):
+- System prompt assembled from numbered `.md` files (`00-core.md`, `10-domain.md`, ..., `80-final.md`)
+- `prompt_loader.py` — `discover_layers()` + `assemble_prompt()` with override support
+- `_preamble.md` — `DOMAIN_PREAMBLE` source (underscore prefix = metadata, excluded from assembly)
+- `PROMPT_LAYERS_DIR` env var overrides default layers per-deployment (same-name files shadow defaults)
+- Both `DOMAIN_PREAMBLE` and `AGENTIC_SEARCH_SYSTEM_PROMPT` cached at import time — restart to pick up changes
 
 **REPL tools** (injected via `setup_code`):
 - `search(query, collection, filters, top_k)` → Cascade API (`CASCADE_API_URL`, default `https://cascade.vworksflow.com`)
@@ -187,6 +194,7 @@ _run_search():
 - `sessions.py` — SessionManager (session lifecycle)
 - `sse.py` — SSE router (reads EventBus, supports replay)
 - `prompt_constants.py` — shared thresholds/weights
+- `tool_gate.py` — ToolGate (tier computation + namespace removal after classification)
 
 **Persistence** — `public.agentic_searches` table (Supabase Postgres):
 - Stores every completed search: query, answer, sources (jsonb), iterations (jsonb), usage, confidence
@@ -219,5 +227,5 @@ uv run pytest -k "test_parsing" -v                # By pattern
 - `tests/mock_lm.py` provides a mock BaseLM for tests that don't need real API calls
 - Persistence tests: `tests/test_local_repl_persistent.py`, `tests/test_multi_turn_integration.py`
 - No real API calls in CI — mock or skip
-- Search tests: `tests/test_repl_tools.py`, `tests/test_api_v2.py`, `tests/test_event_bus.py`, `tests/test_evidence_store.py`, `tests/test_quality_gate.py`, `tests/test_session_manager.py`, `tests/test_sse.py`, `tests/test_streaming_v2.py`, `tests/test_tracker_v2.py`
+- Search tests: `tests/test_repl_tools.py`, `tests/test_api_v2.py`, `tests/test_event_bus.py`, `tests/test_evidence_store.py`, `tests/test_quality_gate.py`, `tests/test_session_manager.py`, `tests/test_sse.py`, `tests/test_streaming_v2.py`, `tests/test_tracker_v2.py`, `tests/test_tool_gate.py`
 - Search API tests use `starlette.testclient.TestClient` (sync, no httpx needed)

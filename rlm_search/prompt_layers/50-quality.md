@@ -1,6 +1,6 @@
-## Reading check_progress()
+## Reading Progress
 
-After every `research()` call, `check_progress()` prints signals and returns a phase:
+`research()` auto-checks progress and includes it in `results["progress"]`. These are the phases:
 
 | Phase | Meaning | Action |
 |-------|---------|--------|

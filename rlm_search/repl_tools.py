@@ -111,6 +111,7 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
     # Fire tool gate after classification lands (runs once)
     if _ctx.classification is not None and _ctx._gate_callback is not None:
         _ctx._gate_callback(_ctx.classification)
+    # Auto-check progress (no need to call check_progress() separately)
     progress = _prog.check_progress(_ctx)
     if progress["phase"] == "ready":
         print(f"\\n>>> PROGRESS: Evidence sufficient (confidence {progress['confidence']}%). Call draft_answer() now.")
@@ -118,6 +119,7 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
         print(f"\\n>>> PROGRESS: Draft complete. Call FINAL_VAR(answer) to finish.")
     elif progress["phase"] in ("stalled", "repeating"):
         print(f"\\n>>> PROGRESS: {progress['guidance']}")
+    result["progress"] = progress
     return result
 
 def draft_answer(question, results, instructions=None, model=None):

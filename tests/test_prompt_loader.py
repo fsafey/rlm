@@ -171,16 +171,12 @@ class TestRoundTrip:
 
 
 class TestBuildSystemPromptLayers:
-    """build_system_prompt() uses layer assembly internally."""
+    """build_system_prompt() uses cached AGENTIC_SEARCH_SYSTEM_PROMPT."""
 
-    def test_build_with_override_dir(self, tmp_path: Path):
-        from rlm_search.prompts import build_system_prompt
+    def test_build_includes_budget_and_base(self):
+        from rlm_search.prompts import AGENTIC_SEARCH_SYSTEM_PROMPT, build_system_prompt
 
-        overrides = tmp_path / "overrides"
-        overrides.mkdir()
-        (overrides / "10-domain.md").write_text("You are a medical search concierge.")
+        prompt = build_system_prompt(max_iterations=10)
 
-        prompt = build_system_prompt(max_iterations=10, layers_override_dir=overrides)
-
-        assert "medical search concierge" in prompt
-        assert "10 iterations" in prompt  # budget section still appended
+        assert prompt.startswith(AGENTIC_SEARCH_SYSTEM_PROMPT)
+        assert "10 iterations" in prompt

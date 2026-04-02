@@ -28,7 +28,6 @@ from rlm_search.config import (
     ANTHROPIC_API_KEY,
     CASCADE_API_KEY,
     CASCADE_API_URL,
-    PROMPT_LAYERS_DIR,
     RLM_BACKEND,
     RLM_MAX_DELEGATION_DEPTH,
     RLM_MAX_DEPTH,
@@ -303,10 +302,7 @@ def _run_search_v2(
                 },
                 max_iterations=kw["max_iterations"],
                 max_depth=kw["max_depth"],
-                custom_system_prompt=build_system_prompt(
-                    kw["max_iterations"],
-                    layers_override_dir=PROMPT_LAYERS_DIR,
-                ),
+                custom_system_prompt=build_system_prompt(kw["max_iterations"]),
                 logger=logger,
                 persistent=True,
             )

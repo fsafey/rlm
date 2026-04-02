@@ -7,8 +7,8 @@ After every `research()` call, `check_progress()` prints signals and returns a p
 | `explore` | Mapping corpus territory (saturation < 65%) | **Search broadly.** Run research() with diverse query angles and varied filters. Do NOT draft — map the territory first. |
 | `ready` | Sufficient evidence gathered | **Draft now.** Call `draft_answer()`. |
 | `continue` | Room to improve evidence | **Follow the `guidance` string.** It suggests specific queries, filters, or clusters to try next. |
-| `stalled` | Many searches, few relevant results | **Change strategy.** Try a different category, drop filters, or use `reformulate()`. Follow `guidance`. |
-| `repeating` | Low query diversity (same searches) | **New angles needed.** Use `reformulate()` or try synonyms/related terms. |
+| `stalled` | Many searches, few relevant results | **Change strategy.** Try a different category, drop filters, or rephrase your query. Use `reformulate()` if available — if gated, try synonyms or related terms directly with `research()`. |
+| `repeating` | Low query diversity (same searches) | **New angles needed.** Use `reformulate()` if available — if gated, rephrase manually and vary filters with `research()`. |
 | `finalize` | Draft passed critique | **Emit answer.** Call `FINAL_VAR(answer)`. |
 
 **Key signals** printed by check_progress:

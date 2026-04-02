@@ -45,4 +45,4 @@ After the first `research()` call, tools may be gated based on classification co
 - **MEDIUM confidence**: `rlm_query` is removed (too expensive for moderate-confidence queries). All other tools available.
 - **LOW confidence** or cross-category: All tools available.
 
-If you get a `NameError` for a tool, the gate has restricted it — work with the tools you have.
+**Gating is permanent for the session.** Once tools are removed, they do not come back. Plan your strategy with the tools you have — don't retry a gated tool expecting it to return. If you get a `NameError`, the gate has restricted it.

@@ -252,7 +252,7 @@ class QualityGate:
         if p == "stalled":
             return (
                 "Evidence insufficient after multiple searches."
-                " Try reformulate() or broaden filters."
+                " Broaden filters, try different query angles, or rephrase your search terms."
             )
         if p == "ready":
             return "Evidence sufficient. Call draft_answer() to synthesize."

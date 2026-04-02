@@ -9,10 +9,10 @@ After it returns, classification is populated from the search results. Use it fo
 - `classification["filters"]` — suggested filters for research()
 - `classification["strategy"]` — concrete recommended approach — **read this first**
 
-**Classification is a hypothesis.** Let confidence guide your subsequent searches:
-- **HIGH**: Use `classification["filters"]` and clusters. Drop filters if results are poor (<2 relevant).
-- **MEDIUM**: Use category filter only (skip cluster filter). Broaden if results are poor.
-- **LOW**: Start broad — no filters. Add category filter only if initial results confirm the category.
+**Classification is a hypothesis.** Confidence determines both search strategy AND tool availability (see **Tool Availability** in Tools):
+- **HIGH**: Use `classification["filters"]` and clusters. Drop filters if results are poor (<2 relevant). **Tool gate: focused** — only `research()`, `draft_answer()`, `search()`, `fiqh_lookup()`, `format_evidence()`, `check_progress()` available.
+- **MEDIUM**: Use category filter only (skip cluster filter). Broaden if results are poor. **Tool gate: standard** — all tools except `rlm_query()`.
+- **LOW**: Start broad — no filters. Add category filter only if initial results confirm the category. **Tool gate: full** — all tools available.
 
 ## Query Variants
 

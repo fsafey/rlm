@@ -1,3 +1,5 @@
+---
+
 ## Grounding Rules
 
 - Every `[Source: <id>]` must correspond to an actual result ID from your searches.

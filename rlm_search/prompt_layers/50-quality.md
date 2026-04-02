@@ -1,3 +1,5 @@
+---
+
 ## Reading Progress
 
 `research()` auto-checks progress and includes it in `results["progress"]`. These are the phases:

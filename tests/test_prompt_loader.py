@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rlm_search.prompt_loader import assemble_prompt, discover_layers, load_preamble
+from rlm_search.prompt_loader import (
+    assemble_prompt,
+    discover_layers,
+    load_layer_file,
+    load_preamble,
+)
 
 
 class TestDiscoverLayers:
@@ -171,6 +176,75 @@ class TestRoundTrip:
             "Assembled layers diverged from AGENTIC_SEARCH_SYSTEM_PROMPT. "
             "Diff the two strings to find the discrepancy."
         )
+
+
+class TestLoadLayerFile:
+    """Load a single named layer file with override support."""
+
+    def test_reads_from_default_dir(self, tmp_path: Path):
+        (tmp_path / "_voice.md").write_text("VOICE & TONE:\n- Be declarative.")
+
+        result = load_layer_file("_voice.md", layers_dir=tmp_path)
+        assert result == "VOICE & TONE:\n- Be declarative.\n\n"
+
+    def test_override_dir_takes_precedence(self, tmp_path: Path):
+        defaults = tmp_path / "defaults"
+        defaults.mkdir()
+        (defaults / "_voice.md").write_text("Default voice.")
+
+        overrides = tmp_path / "overrides"
+        overrides.mkdir()
+        (overrides / "_voice.md").write_text("Custom voice for medical corpus.")
+
+        result = load_layer_file("_voice.md", layers_dir=defaults, override_dir=overrides)
+        assert "medical corpus" in result
+        assert "Default" not in result
+
+    def test_falls_back_to_default_when_no_override(self, tmp_path: Path):
+        defaults = tmp_path / "defaults"
+        defaults.mkdir()
+        (defaults / "_voice.md").write_text("Default voice.")
+
+        overrides = tmp_path / "overrides"
+        overrides.mkdir()
+
+        result = load_layer_file("_voice.md", layers_dir=defaults, override_dir=overrides)
+        assert "Default voice" in result
+
+    def test_returns_empty_when_no_file(self, tmp_path: Path):
+        result = load_layer_file("_voice.md", layers_dir=tmp_path)
+        assert result == ""
+
+    def test_skips_empty_file(self, tmp_path: Path):
+        (tmp_path / "_voice.md").write_text("   \n  ")
+        result = load_layer_file("_voice.md", layers_dir=tmp_path)
+        assert result == ""
+
+
+class TestBuiltInLayerFiles:
+    """Built-in _voice.md and _answer_format.md load correctly."""
+
+    def test_voice_loads(self):
+        result = load_layer_file("_voice.md")
+        assert "VOICE & TONE" in result
+        assert "I.M.A.M." in result
+
+    def test_answer_format_loads(self):
+        result = load_layer_file("_answer_format.md")
+        assert "## Answer" in result
+        assert "## Sources Consulted" in result
+        assert "## Confidence Assessment" in result
+
+    def test_cached_exports_match_direct_load(self):
+        from rlm_search.prompts import ANSWER_FORMAT, VOICE
+
+        assert VOICE == load_layer_file("_voice.md")
+        assert ANSWER_FORMAT == load_layer_file("_answer_format.md")
+
+    def test_prompt_layers_dir_override(self, tmp_path: Path):
+        (tmp_path / "_voice.md").write_text("Custom voice for testing.")
+        result = load_layer_file("_voice.md", override_dir=tmp_path)
+        assert "Custom voice for testing" in result
 
 
 class TestBuildSystemPromptLayers:

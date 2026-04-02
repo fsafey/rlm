@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from rlm_search.config import PROMPT_LAYERS_DIR
-from rlm_search.prompt_loader import assemble_prompt, load_preamble
+from rlm_search.prompt_loader import assemble_prompt, load_layer_file, load_preamble
 from rlm_search.tool_gate import generate_availability_section
 
 # Sourced from _preamble.md — single source of truth.
 # PROMPT_LAYERS_DIR override is checked first, so per-corpus deployments
 # get a consistent preamble across system prompt and tool sub-prompts.
 DOMAIN_PREAMBLE = load_preamble(override_dir=PROMPT_LAYERS_DIR)
+VOICE = load_layer_file("_voice.md", override_dir=PROMPT_LAYERS_DIR)
+ANSWER_FORMAT = load_layer_file("_answer_format.md", override_dir=PROMPT_LAYERS_DIR)
 
 # Both cached at import time — restart server to pick up changes.
 _raw_prompt = assemble_prompt(overrides_dir=PROMPT_LAYERS_DIR)

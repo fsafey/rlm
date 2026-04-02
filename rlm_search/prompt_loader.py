@@ -29,12 +29,42 @@ def discover_layers(layers_dir: Path | None = None) -> list[PromptLayer]:
 
     layers = []
     for path in sorted(directory.glob("*.md")):
+        if path.name.startswith("_"):
+            continue
         content = path.read_text().strip()
         if not content:
             continue
         layers.append(PromptLayer(name=path.name, content=content, path=path))
 
     return layers
+
+
+def load_preamble(
+    layers_dir: Path | None = None,
+    override_dir: Path | None = None,
+) -> str:
+    """Load domain preamble from ``_preamble.md``.
+
+    Checks override_dir first, falls back to layers_dir (or built-in default).
+    Returns the file content with a trailing ``\\n\\n``, or ``""`` if not found.
+    """
+    default_dir = layers_dir or _DEFAULT_LAYERS_DIR
+
+    # Override takes precedence
+    if override_dir is not None:
+        override_path = override_dir / "_preamble.md"
+        if override_path.is_file():
+            content = override_path.read_text().strip()
+            if content:
+                return content + "\n\n"
+
+    default_path = default_dir / "_preamble.md"
+    if default_path.is_file():
+        content = default_path.read_text().strip()
+        if content:
+            return content + "\n\n"
+
+    return ""
 
 
 def assemble_prompt(

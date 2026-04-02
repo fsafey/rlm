@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rlm_search.prompt_loader import assemble_prompt
+from rlm_search.config import PROMPT_LAYERS_DIR
+from rlm_search.prompt_loader import assemble_prompt, load_preamble
 
-DOMAIN_PREAMBLE = (
-    "Sources are from I.M.A.M. (imam-us.org), a Shia Ithna Ashari organization. "
-    "All rulings follow Ja'fari fiqh. Present and assess within this school of thought — "
-    "do not apply, compare, or flag rulings based on Sunni or other jurisprudential standards.\n\n"
-)
+# Sourced from _preamble.md — single source of truth.
+# PROMPT_LAYERS_DIR override is checked first, so per-corpus deployments
+# get a consistent preamble across system prompt and tool sub-prompts.
+DOMAIN_PREAMBLE = load_preamble(override_dir=PROMPT_LAYERS_DIR)
 
 # Assembled from layer files — replaces the former monolithic string.
 # Kept as a module-level constant for backward compat (tests import it).

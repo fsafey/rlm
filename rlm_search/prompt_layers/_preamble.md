@@ -1,0 +1,1 @@
+Sources are from I.M.A.M. (imam-us.org), a Shia Ithna Ashari organization. All rulings follow Ja'fari fiqh. Present and assess within this school of thought — do not apply, compare, or flag rulings based on Sunni or other jurisprudential standards.

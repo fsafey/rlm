@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rlm_search.prompt_loader import assemble_prompt, discover_layers
+from rlm_search.prompt_loader import assemble_prompt, discover_layers, load_preamble
 
 
 class TestDiscoverLayers:
@@ -44,6 +44,53 @@ class TestDiscoverLayers:
     def test_missing_directory_returns_empty(self, tmp_path: Path):
         layers = discover_layers(tmp_path / "nonexistent")
         assert layers == []
+
+    def test_skips_underscore_prefixed_files(self, tmp_path: Path):
+        (tmp_path / "00-core.md").write_text("core content")
+        (tmp_path / "_preamble.md").write_text("preamble metadata")
+
+        layers = discover_layers(tmp_path)
+        assert len(layers) == 1
+        assert layers[0].name == "00-core.md"
+
+
+class TestLoadPreamble:
+    """Load domain preamble from _preamble.md, with override support."""
+
+    def test_reads_from_default_dir(self, tmp_path: Path):
+        (tmp_path / "_preamble.md").write_text("Sources are from TestCorpus.\n")
+
+        result = load_preamble(layers_dir=tmp_path)
+        assert result == "Sources are from TestCorpus.\n\n"
+
+    def test_override_dir_takes_precedence(self, tmp_path: Path):
+        defaults = tmp_path / "defaults"
+        defaults.mkdir()
+        (defaults / "_preamble.md").write_text("Default preamble.")
+
+        overrides = tmp_path / "overrides"
+        overrides.mkdir()
+        (overrides / "_preamble.md").write_text("Custom preamble for medical corpus.")
+
+        result = load_preamble(layers_dir=defaults, override_dir=overrides)
+        assert "medical corpus" in result
+        assert "Default" not in result
+
+    def test_falls_back_to_default_when_no_override(self, tmp_path: Path):
+        defaults = tmp_path / "defaults"
+        defaults.mkdir()
+        (defaults / "_preamble.md").write_text("Default preamble.")
+
+        overrides = tmp_path / "overrides"
+        overrides.mkdir()
+        # No _preamble.md in overrides
+
+        result = load_preamble(layers_dir=defaults, override_dir=overrides)
+        assert "Default preamble" in result
+
+    def test_returns_empty_when_no_file(self, tmp_path: Path):
+        result = load_preamble(layers_dir=tmp_path)
+        assert result == ""
 
 
 class TestAssemblePrompt:

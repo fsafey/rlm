@@ -170,11 +170,18 @@ _run_search():
   logger = StreamingLoggerV2(bus=bus)  # emits all events through bus
   build_search_setup_code()      # injects search(), browse(), SearchContext
   RLM(
-    custom_system_prompt=...,    # tool docs + domain taxonomy
+    custom_system_prompt=build_system_prompt(max_iterations),
     environment_kwargs={"setup_code": setup_code},
     logger=logger
   ).completion(query)
 ```
+
+**Prompt layers** (`rlm_search/prompt_layers/`):
+- System prompt assembled from numbered `.md` files (`00-core.md`, `10-domain.md`, ..., `80-final.md`)
+- `prompt_loader.py` — `discover_layers()` + `assemble_prompt()` with override support
+- `_preamble.md` — `DOMAIN_PREAMBLE` source (underscore prefix = metadata, excluded from assembly)
+- `PROMPT_LAYERS_DIR` env var overrides default layers per-deployment (same-name files shadow defaults)
+- Both `DOMAIN_PREAMBLE` and `AGENTIC_SEARCH_SYSTEM_PROMPT` cached at import time — restart to pick up changes
 
 **REPL tools** (injected via `setup_code`):
 - `search(query, collection, filters, top_k)` → Cascade API (`CASCADE_API_URL`, default `https://cascade.vworksflow.com`)

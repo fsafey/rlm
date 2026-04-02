@@ -136,7 +136,7 @@ class ClaudeCLI(BaseLM):
             cache_read_tokens = usage.get("cacheReadInputTokens", 0)
             output_tokens = usage.get("outputTokens", 0)
             self._model_call_counts[model_key] += 1
-            self._model_input_tokens[model_key] += input_tokens
+            self._model_input_tokens[model_key] += input_tokens + cache_read_tokens
             self._model_cache_read_tokens[model_key] += cache_read_tokens
             self._model_output_tokens[model_key] += output_tokens
 

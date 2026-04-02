@@ -187,6 +187,7 @@ _run_search():
 - `sessions.py` — SessionManager (session lifecycle)
 - `sse.py` — SSE router (reads EventBus, supports replay)
 - `prompt_constants.py` — shared thresholds/weights
+- `tool_gate.py` — ToolGate (tier computation + namespace removal after classification)
 
 **Persistence** — `public.agentic_searches` table (Supabase Postgres):
 - Stores every completed search: query, answer, sources (jsonb), iterations (jsonb), usage, confidence
@@ -219,5 +220,5 @@ uv run pytest -k "test_parsing" -v                # By pattern
 - `tests/mock_lm.py` provides a mock BaseLM for tests that don't need real API calls
 - Persistence tests: `tests/test_local_repl_persistent.py`, `tests/test_multi_turn_integration.py`
 - No real API calls in CI — mock or skip
-- Search tests: `tests/test_repl_tools.py`, `tests/test_api_v2.py`, `tests/test_event_bus.py`, `tests/test_evidence_store.py`, `tests/test_quality_gate.py`, `tests/test_session_manager.py`, `tests/test_sse.py`, `tests/test_streaming_v2.py`, `tests/test_tracker_v2.py`
+- Search tests: `tests/test_repl_tools.py`, `tests/test_api_v2.py`, `tests/test_event_bus.py`, `tests/test_evidence_store.py`, `tests/test_quality_gate.py`, `tests/test_session_manager.py`, `tests/test_sse.py`, `tests/test_streaming_v2.py`, `tests/test_tracker_v2.py`, `tests/test_tool_gate.py`
 - Search API tests use `starlette.testclient.TestClient` (sync, no httpx needed)

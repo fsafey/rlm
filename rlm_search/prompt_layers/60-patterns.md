@@ -33,9 +33,14 @@ if progress["phase"] == "continue" and '"' in progress.get("guidance", ""):
     # guidance often suggests a cluster — parse and use it
     suggested = progress["guidance"].split('"')[1]
     results2 = research(question, filters={"parent_code": classification["category"], "cluster_label": suggested})
-elif progress["phase"] == "stalled":
-    alt_queries = reformulate(question, question, top_score=progress.get("top_score", 0))
-    results2 = research(alt_queries[0], extra_queries=[{"query": q} for q in alt_queries[1:]])
+elif progress["phase"] in ("stalled", "repeating"):
+    # reformulate() may be gated (HIGH confidence) — use research with new angles instead
+    try:
+        alt_queries = reformulate(question, question, top_score=progress.get("top_score", 0))
+        results2 = research(alt_queries[0], extra_queries=[{"query": q} for q in alt_queries[1:]])
+    except NameError:
+        # Gated — use synonyms/rephrasings directly
+        results2 = research(question, filters={"parent_code": classification["category"]})
 else:
     results2 = research(question, filters=classification["filters"])
 progress = check_progress()
@@ -56,9 +61,9 @@ FINAL_VAR(answer)
 - **L0 handles query expansion** — do NOT manually pass extra_queries for variant coverage. L0 generates domain-specific variants automatically.
 - **`extra_queries` in one `research()` call** — all results merged, deduped, and evaluated together in one pass. Use for targeted angle expansion, not variant generation.
 - **Second `research()` call** — doesn't re-evaluate results from the first call (cross-call rating cache). Add new angles without wasted LLM calls.
-- **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth.
-- **`browse()`** — zero LLM cost. Use to discover clusters before filtering: `browse(filters={"parent_code": "PT"}, group_by="cluster_label")`.
-- **`reformulate()`** — generates 3 alternative queries. Use when top_score < 0.3 or when stalled.
+- **`rlm_query()`** — spawns a full child agent (~3 iterations). Only use when dimensions are truly independent and need their own search depth. Gated at HIGH and MEDIUM confidence.
+- **`browse()`** — zero LLM cost. Use to discover clusters before filtering: `browse(filters={"parent_code": "PT"}, group_by="cluster_label")`. Gated at HIGH confidence.
+- **`reformulate()`** — generates 3 alternative queries. Use when top_score < 0.3 or when stalled. Gated at HIGH confidence — if unavailable, rephrase manually and use `research()` with `extra_queries`.
 
 ## Anti-Patterns (avoid these)
 
@@ -68,3 +73,4 @@ FINAL_VAR(answer)
 - **Drafting with low confidence when iterations remain** — if confidence < 40% and you have iterations left, invest in more research.
 - **Using rlm_query for single-topic questions** — direct `research()` with `extra_queries` is 3x cheaper.
 - **Calling `critique_answer()` after `draft_answer()`** — `draft_answer()` already critiques and revises internally (tier-dependent). Additional standalone critique is redundant and adds 40-70s of wasted LLM time.
+- **Calling a gated tool without a try/except** — if a tool gets `NameError`, the gate removed it. Don't retry — use `research()` with different filters or angles instead.

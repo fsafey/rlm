@@ -1892,7 +1892,7 @@ class TestCheckProgress:
 
         result = ns["check_progress"]()
         assert result["phase"] == "stalled"
-        assert "reformulate" in result["guidance"]
+        assert "Broaden filters" in result["guidance"] or "different query" in result["guidance"]
 
     def test_repeating_low_diversity(self):
         """3 identical queries with no relevant → phase=continue (QualityGate has no repeating)."""

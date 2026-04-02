@@ -30,7 +30,14 @@ def _compute_confidence(
 
 
 def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
-    """Taxonomy-aware next-action suggestion using classification context."""
+    """Taxonomy-aware next-action suggestion using classification context.
+
+    Gating-aware: avoids suggesting browse()/reformulate() when the gate
+    has removed them (focused tier).
+    """
+    gate_tier = getattr(ctx, "_gate_tier", "full")
+    is_focused = gate_tier == "focused"
+
     if not ctx.classification:
         return "Try broader search terms or different filters."
 
@@ -67,10 +74,12 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
             f'"cluster_label": "{cluster}"}})'
         )
 
-    # All classified clusters explored — use classification strategy
+    # All classified clusters explored — suggest next action based on gate tier
     strategy = classified.get("strategy", "")
     if strategy:
         return strategy
+    if is_focused:
+        return "All classified clusters explored. Draft with current evidence using draft_answer()."
     return "All classified clusters explored. Draft with current evidence."
 
 

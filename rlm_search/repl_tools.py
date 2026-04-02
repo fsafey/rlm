@@ -134,6 +134,7 @@ def _gate_callback(classification):
         return
     _gate_applied = True
     _tier = _compute_tier(classification)
+    _ctx._gate_tier = _tier
     if _tier == "full":
         return
     # Get the namespace that holds the wrapper functions.

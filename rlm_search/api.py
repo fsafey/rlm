@@ -77,14 +77,26 @@ async def _check_cascade_health(
     return "connected", url
 
 
+_OPEN_PATHS = {"/health", "/api/health"}
+
+
 def _check_api_key(request: Request) -> None:
-    """Validate x-api-key header when SEARCH_API_KEY is configured."""
-    if not SEARCH_API_KEY:
+    """Validate x-api-key header. Accepts SEARCH_API_KEY or CASCADE_API_KEY.
+
+    Health endpoints are exempt (unauthenticated probes from admin API, load
+    balancers, etc.).
+    """
+    if request.url.path in _OPEN_PATHS:
+        return
+    allowed = SEARCH_API_KEY or CASCADE_API_KEY
+    if not allowed:
         raise HTTPException(status_code=503, detail="API key not configured")
     key = request.headers.get("x-api-key", "")
-    if not hmac.compare_digest(key, SEARCH_API_KEY):
+    if not key or not (
+        hmac.compare_digest(key, allowed)
+        or (CASCADE_API_KEY and hmac.compare_digest(key, CASCADE_API_KEY))
+    ):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
 
 def _strip_sources_section(text: str) -> str:
     """Remove ## Sources Consulted section — rendered as SourceCards in the frontend.
@@ -409,6 +421,10 @@ app.include_router(create_sse_router(_searches))
 
 @app.post("/api/search", response_model=SearchResponse)
 async def start_search(req: SearchRequest) -> SearchResponse:
+    query = req.get_query()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
     session_id = req.session_id
 
     if session_id:
@@ -430,7 +446,7 @@ async def start_search(req: SearchRequest) -> SearchResponse:
     _searches[search_id] = bus
 
     settings = req.settings.model_dump() if req.settings else {}
-    _executor.submit(_run_search_v2, search_id, req.query, settings, session_id)
+    _executor.submit(_run_search_v2, search_id, query, settings, session_id)
 
     return SearchResponse(search_id=search_id, session_id=session_id)
 
@@ -536,6 +552,7 @@ async def get_log(search_id: str) -> dict:
     }
 
 
+@app.get("/health", response_model=HealthResponse, include_in_schema=False)
 @app.get("/api/health", response_model=HealthResponse)
 async def health(request: Request) -> HealthResponse:
     cached_url: str | None = getattr(request.app.state, "cascade_url", None)

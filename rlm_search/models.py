@@ -6,9 +6,16 @@ from pydantic import BaseModel, Field
 
 
 class SearchRequest(BaseModel):
-    query: str
+    query: str | None = None
+    question: str | None = None  # alias accepted by admin API proxy
     settings: SearchSettings | None = None
     session_id: str | None = None  # None = new session; set for follow-up
+    mode: str | None = None  # ignored — accepted to avoid 422 from admin proxy
+
+    def get_query(self) -> str:
+        """Return query text, accepting either 'query' or 'question' field."""
+        q = self.query or self.question or ""
+        return q.strip()
 
 
 class SearchSettings(BaseModel):

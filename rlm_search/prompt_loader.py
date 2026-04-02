@@ -55,16 +55,16 @@ def assemble_prompt(
     layers = discover_layers(layers_dir)
 
     if overrides_dir is not None:
-        overrides = {l.name: l for l in discover_layers(overrides_dir)}
-        layers = [overrides.get(l.name, l) for l in layers]
+        override_map = {layer.name: layer for layer in discover_layers(overrides_dir)}
+        layers = [override_map.get(layer.name, layer) for layer in layers]
         # Also add any override-only layers (new files not in defaults)
-        default_names = {l.name for l in layers}
+        default_names = {layer.name for layer in layers}
         for override in discover_layers(overrides_dir):
             if override.name not in default_names:
                 layers.append(override)
-        layers.sort(key=lambda l: l.name)
+        layers.sort(key=lambda layer: layer.name)
 
     if not layers:
         return ""
 
-    return "\n\n".join(l.content for l in layers)
+    return "\n\n".join(layer.content for layer in layers)

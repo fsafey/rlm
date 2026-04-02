@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from rlm_search.prompt_loader import discover_layers, assemble_prompt
+from rlm_search.prompt_loader import assemble_prompt, discover_layers
 
 
 class TestDiscoverLayers:
@@ -17,7 +17,7 @@ class TestDiscoverLayers:
 
         layers = discover_layers(tmp_path)
 
-        assert [l.name for l in layers] == ["00-core.md", "10-domain.md", "20-tools.md"]
+        assert [layer.name for layer in layers] == ["00-core.md", "10-domain.md", "20-tools.md"]
         assert "REPL rules" in layers[0].content
         assert "I.M.A.M. preamble" in layers[1].content
 

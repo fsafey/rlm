@@ -28,6 +28,7 @@ from rlm_search.config import (
     ANTHROPIC_API_KEY,
     CASCADE_API_KEY,
     CASCADE_API_URL,
+    PROMPT_LAYERS_DIR,
     RLM_BACKEND,
     RLM_MAX_DELEGATION_DEPTH,
     RLM_MAX_DEPTH,
@@ -92,7 +93,9 @@ def _strip_sources_section(text: str) -> str:
     Handles both LF and CRLF line endings. Anchors on the next ## heading or end of
     string so mid-document headings are not consumed.
     """
-    return re.sub(r"\r?\n*## Sources Consulted\r?\n.*?(?=\r?\n+## |\Z)", "", text, flags=re.DOTALL).strip()
+    return re.sub(
+        r"\r?\n*## Sources Consulted\r?\n.*?(?=\r?\n+## |\Z)", "", text, flags=re.DOTALL
+    ).strip()
 
 
 def _extract_sources(answer: str, registry: dict[str, dict] | None = None) -> list[dict]:
@@ -300,7 +303,10 @@ def _run_search_v2(
                 },
                 max_iterations=kw["max_iterations"],
                 max_depth=kw["max_depth"],
-                custom_system_prompt=build_system_prompt(kw["max_iterations"]),
+                custom_system_prompt=build_system_prompt(
+                    kw["max_iterations"],
+                    layers_override_dir=PROMPT_LAYERS_DIR,
+                ),
                 logger=logger,
                 persistent=True,
             )

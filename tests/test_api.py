@@ -118,3 +118,18 @@ class TestBuildSystemPrompt:
 
         prompt = build_system_prompt(15)
         assert prompt.startswith(AGENTIC_SEARCH_SYSTEM_PROMPT)
+
+
+class TestLayerOverrideConfig:
+    """PROMPT_LAYERS_DIR config flows through to build_system_prompt."""
+
+    def test_override_dir_env_var(self, tmp_path, monkeypatch):
+        overrides = tmp_path / "layers"
+        overrides.mkdir()
+        (overrides / "10-domain.md").write_text("Custom domain layer.")
+
+        monkeypatch.setattr("rlm_search.config.PROMPT_LAYERS_DIR", overrides)
+
+        import rlm_search.config as cfg
+
+        assert cfg.PROMPT_LAYERS_DIR == overrides

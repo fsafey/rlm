@@ -39,7 +39,7 @@ class TestChildStreamingLogger:
         iteration = self._make_iteration(stdout="[search] query='test' results=3")
         child.log(iteration)
 
-        events = parent.bus.drain()
+        events = parent.bus.replay()
         sub_events = [e for e in events if e["type"] == "sub_iteration"]
         assert len(sub_events) == 1
         assert sub_events[0]["data"]["sub_question"] == "What is X?"
@@ -49,7 +49,7 @@ class TestChildStreamingLogger:
         parent = self._make_parent()
         child = ChildStreamingLogger(parent, "test")
         child.log_metadata(None)
-        events = parent.bus.drain()
+        events = parent.bus.replay()
         assert len(events) == 0
 
     def test_on_environment_ready_is_noop(self):
@@ -57,7 +57,7 @@ class TestChildStreamingLogger:
         parent = self._make_parent()
         child = ChildStreamingLogger(parent, "test")
         child.on_environment_ready()
-        events = parent.bus.drain()
+        events = parent.bus.replay()
         assert len(events) == 0
 
     def test_raise_if_cancelled_delegates_to_parent(self):
@@ -89,7 +89,7 @@ class TestChildStreamingLogger:
         parent = self._make_parent()
         child = ChildStreamingLogger(parent, "test")
         child.on_llm_start(1)
-        events = parent.bus.drain()
+        events = parent.bus.replay()
         assert len(events) == 0
 
     def test_on_code_executing_is_noop(self):
@@ -97,7 +97,7 @@ class TestChildStreamingLogger:
         parent = self._make_parent()
         child = ChildStreamingLogger(parent, "test")
         child.on_code_executing(1, 2)
-        events = parent.bus.drain()
+        events = parent.bus.replay()
         assert len(events) == 0
 
     def test_multiple_sub_iterations_accumulate(self):

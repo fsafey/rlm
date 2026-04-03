@@ -1,5 +1,6 @@
-"""rlm_search/bus.py"""
+"""rlm_search/bus.py — push-based event channel with async queue."""
 
+import asyncio
 import threading
 from datetime import datetime
 from typing import Any
@@ -14,40 +15,57 @@ class SearchCancelled(Exception):
 class EventBus:
     """Single append-only event channel for all rlm_search streaming.
 
-    All departments emit here. SSE stream reads from here.
-    Replaces: dual-channel streaming, stdout tag parsing,
-    progress_callback, _parent_logger ref.
+    Producer threads call emit() (thread-safe).
+    SSE consumer calls bind_and_replay() once, then awaits next_event().
+    No polling — events are pushed via asyncio.Queue.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._queue: list[dict[str, Any]] = []  # pending (not yet drained)
-        self._log: list[dict[str, Any]] = []  # all events ever (for replay)
+        self._log: list[dict[str, Any]] = []
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._async_q: asyncio.Queue[dict[str, Any]] | None = None
         self._cancelled = False
         self._done = False
 
+    def bind_and_replay(
+        self, loop: asyncio.AbstractEventLoop,
+    ) -> list[dict[str, Any]]:
+        """Atomically bind async queue and return all historical events.
+
+        Must be called exactly once from the SSE async context.
+        After this call, emit() pushes into the async queue.
+        """
+        with self._lock:
+            self._loop = loop
+            self._async_q = asyncio.Queue()
+            return self._log[:]
+
     def emit(self, event_type: str, data: dict[str, Any] | None = None) -> None:
-        """Append a typed event to the bus."""
+        """Append a typed event to the bus (thread-safe)."""
         event = {
             "type": event_type,
             "data": data or {},
             "timestamp": datetime.now().isoformat(),
         }
         with self._lock:
-            self._queue.append(event)
             self._log.append(event)
             if event_type in TERMINAL_EVENTS:
                 self._done = True
+        if self._loop is not None and self._async_q is not None:
+            self._loop.call_soon_threadsafe(self._async_q.put_nowait, event)
 
-    def drain(self) -> list[dict[str, Any]]:
-        """Return and clear pending events. Thread-safe."""
-        with self._lock:
-            events = self._queue[:]
-            self._queue.clear()
-        return events
+    async def next_event(self, timeout: float = 15.0) -> dict[str, Any] | None:
+        """Await the next event, or return None on timeout (for keepalive)."""
+        if self._async_q is None:
+            return None
+        try:
+            return await asyncio.wait_for(self._async_q.get(), timeout)
+        except asyncio.TimeoutError:
+            return None
 
     def replay(self) -> list[dict[str, Any]]:
-        """Return ALL events ever emitted (for reconnection). Does not clear."""
+        """Return ALL events ever emitted. Does not clear."""
         with self._lock:
             return self._log[:]
 

@@ -166,6 +166,9 @@ def _build_rlm_kwargs(
 
     if backend == "claude_cli":
         backend_kwargs: dict[str, Any] = {"model": model}
+    elif backend == "gemini":
+        backend_kwargs = {"model_name": model}
+        # GEMINI_API_KEY is read from env by the GeminiClient itself
     else:
         backend_kwargs = {"model_name": model}
         if ANTHROPIC_API_KEY:
@@ -176,6 +179,8 @@ def _build_rlm_kwargs(
     if sub_model and sub_model not in ("", "same") and sub_model != model:
         if backend == "claude_cli":
             sub_kwargs: dict[str, Any] = {"model": sub_model}
+        elif backend == "gemini":
+            sub_kwargs = {"model_name": sub_model}
         else:
             sub_kwargs = {"model_name": sub_model}
             if ANTHROPIC_API_KEY:

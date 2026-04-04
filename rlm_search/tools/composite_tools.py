@@ -425,6 +425,10 @@ def research(
                         )
                         break
 
+                    # Normalize: accept bare strings as {"query": str}
+                    if isinstance(eq, str):
+                        eq = {"query": eq}
+
                     # Execute search
                     try:
                         if is_w3:

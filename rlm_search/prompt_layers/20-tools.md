@@ -8,7 +8,7 @@ Search, evaluate relevance, and deduplicate — all in one call.
   `[{"query": str, "filters": dict, "top_k": int, "extra_queries": [...]}]`.
   List mode merges all results for a single dedup + eval pass.
 - `filters`: Optional dict, e.g. `{"parent_code": "FN"}`. See **Taxonomy**.
-- `extra_queries`: Additional search angles — merged and deduped with the main query in one pass.
+- `extra_queries`: Additional search angles as a list of dicts: `[{"query": "variant 1"}, {"query": "variant 2", "filters": {...}}]`. Each dict requires a `"query"` key; `"filters"` and `"top_k"` are optional. Merged and deduped with the main query in one pass.
 - Returns: `{"results": [...], "ratings": {id: rating}, "search_count": N, "eval_summary": str, "progress": {...}}`
 - `progress` includes `phase`, `confidence`, `guidance` — same as `check_progress()`. No need to call `check_progress()` separately after `research()`.
 - **Efficiency**: Results rated in prior `research()` calls are remembered — re-searching doesn't re-evaluate known IDs.

@@ -108,9 +108,15 @@ def check_progress():
 
 def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None):
     result = _comp.research(_ctx, query, filters=filters, top_k=top_k, extra_queries=extra_queries, eval_model=eval_model)
-    # Fire tool gate after classification lands (runs once)
+    # Fire tool gate after classification lands — but defer until explore phase
+    # has had enough data (saturation >= 50% or 2+ research calls).
+    # Firing too early on HIGH confidence removes tools the model needs to
+    # continue researching, causing premature draft_answer() calls.
     if _ctx.classification is not None and _ctx._gate_callback is not None:
-        _ctx._gate_callback(_ctx.classification)
+        _sat = _ctx.quality.saturation_score if _ctx.quality else 0
+        _n_searches = len(_ctx.evidence.search_log)
+        if _sat >= 50 or _n_searches >= 2:
+            _ctx._gate_callback(_ctx.classification)
     # Auto-check progress (no need to call check_progress() separately)
     progress = _prog.check_progress(_ctx)
     if progress["phase"] == "ready":
@@ -123,6 +129,15 @@ def research(query, filters=None, top_k=10, extra_queries=None, eval_model=None)
     return result
 
 def draft_answer(question, results, instructions=None, model=None):
+    # Warn (don't block) if drafting during explore phase with low saturation
+    if _ctx.quality:
+        _phase = _ctx.quality.phase
+        _sat = _ctx.quality.saturation_score
+        if _phase == "explore" and _sat < 50:
+            print(
+                f"\\n>>> WARNING: Drafting at saturation={_sat}% (explore phase). "
+                f"Consider running more research() calls first for better evidence coverage."
+            )
     return _comp.draft_answer(_ctx, question, results, instructions=instructions, model=model)
 
 # ── Tool gating — restrict tools after classification lands ───────────

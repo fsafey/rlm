@@ -410,9 +410,13 @@ class RLM:
         nudge = "Please provide a final answer to the user's question based on the information provided."
         if root_prompt:
             nudge = f'Please provide a final answer to the original question: "{root_prompt}". Base your answer on the information gathered above.'
+        # Use role=user for the nudge. Appending an assistant turn here acts as
+        # "assistant prefill" on Anthropic models, which Claude Sonnet 4.6+ no
+        # longer supports ("This model does not support assistant message prefill.
+        # The conversation must end with a user message.").
         current_prompt = message_history + [
             {
-                "role": "assistant",
+                "role": "user",
                 "content": nudge,
             }
         ]

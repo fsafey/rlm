@@ -202,6 +202,9 @@ def _run_child_rlm(
     # Build backend kwargs (same pattern as api._build_rlm_kwargs)
     if backend == "claude_cli":
         backend_kwargs: dict = {"model": child_model}
+    elif backend == "gemini":
+        # GeminiClient reads GEMINI_API_KEY from env
+        backend_kwargs = {"model_name": child_model}
     else:
         backend_kwargs = {"model_name": child_model}
         if ANTHROPIC_API_KEY:

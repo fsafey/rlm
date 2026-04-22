@@ -72,6 +72,8 @@ def test_default_cmd(mock_run: MagicMock) -> None:
     assert "--output-format" in cmd
     assert cmd[cmd.index("--output-format") + 1] == "json"
     assert "--no-session-persistence" in cmd
+    assert "--disable-slash-commands" in cmd
+    assert "--strict-mcp-config" in cmd
     assert "--tools" not in cmd  # empty tools string omitted
 
 

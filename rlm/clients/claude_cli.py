@@ -84,6 +84,8 @@ class ClaudeCLI(BaseLM):
             "--output-format",
             "json",
             "--no-session-persistence",
+            "--disable-slash-commands",
+            "--strict-mcp-config",
         ]
         if self.tools:
             cmd.extend(["--tools", self.tools])

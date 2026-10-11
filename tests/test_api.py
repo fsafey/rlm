@@ -8,11 +8,16 @@ from rlm_search.api import _extract_sources, app
 
 
 class TestSearchEndpoint:
+    @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
     def test_start_search_returns_ids(self):
         client = TestClient(app)
         with patch("rlm_search.api._executor") as mock_exec:
             mock_exec.submit = MagicMock()
-            response = client.post("/api/search", json={"query": "test question"})
+            response = client.post(
+                "/api/search",
+                json={"query": "test question"},
+                headers={"x-api-key": "test-secret-key"},
+            )
         assert response.status_code == 200
         data = response.json()
         assert "search_id" in data
@@ -71,11 +76,11 @@ class TestExtractSources:
 
 
 class TestApiKeyAuth:
-    """Test optional API key authentication."""
+    """Protected endpoints fail closed; health probes remain public."""
 
     @patch("rlm_search.api.SEARCH_API_KEY", "")
-    def test_no_auth_when_key_empty(self):
-        """When SEARCH_API_KEY is empty, endpoints work without auth."""
+    def test_health_public_when_key_empty(self):
+        """Health probes remain available without an API key."""
         client = TestClient(app)
         resp = client.get("/api/health")
         assert resp.status_code == 200
@@ -84,7 +89,7 @@ class TestApiKeyAuth:
     def test_401_without_key(self):
         """When SEARCH_API_KEY is set, requests without key get 401."""
         client = TestClient(app)
-        resp = client.get("/api/health")
+        resp = client.post("/api/search", json={"query": "test question"})
         assert resp.status_code == 401
         assert "API key" in resp.json()["detail"]
 
@@ -92,15 +97,28 @@ class TestApiKeyAuth:
     def test_401_with_wrong_key(self):
         """When SEARCH_API_KEY is set, wrong key gets 401."""
         client = TestClient(app)
-        resp = client.get("/api/health", headers={"x-api-key": "wrong-key"})
+        resp = client.post(
+            "/api/search",
+            json={"query": "test question"},
+            headers={"x-api-key": "wrong-key"},
+        )
         assert resp.status_code == 401
 
     @patch("rlm_search.api.SEARCH_API_KEY", "test-secret-key")
-    def test_success_with_correct_key(self):
-        """When SEARCH_API_KEY is set, correct key allows access."""
+    def test_health_public_when_key_configured(self):
+        """Configured authentication does not protect public health probes."""
         client = TestClient(app)
-        resp = client.get("/api/health", headers={"x-api-key": "test-secret-key"})
+        resp = client.get("/api/health")
         assert resp.status_code == 200
+
+
+class TestFailClosedAuth:
+    @patch("rlm_search.api.SEARCH_API_KEY", "")
+    @patch("rlm_search.api.CASCADE_API_KEY", "")
+    def test_search_unavailable_without_configured_key(self):
+        response = TestClient(app).post("/api/search", json={"query": "test question"})
+        assert response.status_code == 503
+        assert response.json()["detail"] == "API key not configured"
 
 
 class TestBuildSystemPrompt:

@@ -6,6 +6,7 @@ whether the model produces ```repl``` code blocks vs plain text.
 Usage: cd ~/projects/rlm && uv run python scripts/test_prefill_compliance.py
 """
 
+import importlib
 import json
 import os
 import sys
@@ -19,7 +20,7 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.expanduser("~/Project/standalone-search/.env"))
 
-from rlm_search.config import ANTHROPIC_API_KEY
+ANTHROPIC_API_KEY = importlib.import_module("rlm_search.config").ANTHROPIC_API_KEY
 
 # 20 diverse test queries across categories
 TEST_QUERIES = [
@@ -79,7 +80,9 @@ def build_test_prompt(query: str, kb_data: dict) -> list[dict]:
         parts.append(f"Strategy: {classification['strategy']}")
         setup_summary = "Pre-classification: " + " | ".join(parts)
         setup_summary += "\n\nREPL variables ready: question, classification, query_variants, filters=classification['filters']"
-        setup_summary += "\nWrite a ```repl``` block to call research() — do NOT answer in plain text."
+        setup_summary += (
+            "\nWrite a ```repl``` block to call research() — do NOT answer in plain text."
+        )
     else:
         setup_summary = "Pre-classification: skipped"
 
@@ -88,9 +91,7 @@ def build_test_prompt(query: str, kb_data: dict) -> list[dict]:
 
     # Build message history (same as RLM._setup_prompt)
     metadata = QueryMetadata(query)
-    message_history = build_rlm_system_prompt(
-        system_prompt=system_prompt, query_metadata=metadata
-    )
+    message_history = build_rlm_system_prompt(system_prompt=system_prompt, query_metadata=metadata)
 
     # Add user prompt for iteration 0
     user_msg = build_user_prompt(
@@ -111,7 +112,7 @@ def test_single_query(query: str, kb_data: dict) -> dict:
     """Test a single query and return compliance result."""
     from rlm.utils.parsing import find_code_blocks
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Query: {query[:70]}...")
 
     # Build prompt
@@ -124,6 +125,7 @@ def test_single_query(query: str, kb_data: dict) -> dict:
 
     # Call LLM
     from anthropic import Anthropic
+
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
     system = None
@@ -139,7 +141,9 @@ def test_single_query(query: str, kb_data: dict) -> dict:
         model="claude-sonnet-4-6",
         max_tokens=4096,
         messages=messages,
-        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}] if system else None,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        if system
+        else None,
     )
     llm_time = time.time() - t1
     raw_response = response.content[0].text
@@ -178,12 +182,56 @@ def main():
     # Minimal KB overview for classification
     kb_data = {
         "categories": {
-            "PT": {"name": "Prayer & Tahara", "document_count": 4938, "clusters": {"Ghusl": "How to perform ghusl?", "Wudu Ablution": "Steps of wudu?", "Salah Timing": "What are prayer times?"}, "facets": {"subtopics": [{"value": "purification", "count": 120}]}},
-            "WP": {"name": "Worship Practices", "document_count": 3912, "clusters": {"Sawm Validity & Obligation": "Is fasting valid if...", "Sawm Integrity Rulings": "What breaks the fast?", "Sawm Hardship Exemptions": "Can I skip fasting if..."}, "facets": {"subtopics": [{"value": "fasting", "count": 200}]}},
-            "FN": {"name": "Finance & Transactions", "document_count": 1891, "clusters": {"Banking Riba Operations": "Is mortgage permissible?", "Shariah Investment Screening": "How to screen investments?"}, "facets": {"subtopics": [{"value": "riba", "count": 80}]}},
-            "MF": {"name": "Marriage & Family", "document_count": 900, "clusters": {"Nikah Conditions": "Requirements for marriage", "Mutah": "Temporary marriage rules"}, "facets": {"subtopics": []}},
-            "BE": {"name": "Beliefs & Ethics", "document_count": 4100, "clusters": {"Taqlid": "Following a marja", "Tawbah": "Repentance conditions"}, "facets": {"subtopics": []}},
-            "OT": {"name": "Other Topics", "document_count": 1200, "clusters": {}, "facets": {"subtopics": []}},
+            "PT": {
+                "name": "Prayer & Tahara",
+                "document_count": 4938,
+                "clusters": {
+                    "Ghusl": "How to perform ghusl?",
+                    "Wudu Ablution": "Steps of wudu?",
+                    "Salah Timing": "What are prayer times?",
+                },
+                "facets": {"subtopics": [{"value": "purification", "count": 120}]},
+            },
+            "WP": {
+                "name": "Worship Practices",
+                "document_count": 3912,
+                "clusters": {
+                    "Sawm Validity & Obligation": "Is fasting valid if...",
+                    "Sawm Integrity Rulings": "What breaks the fast?",
+                    "Sawm Hardship Exemptions": "Can I skip fasting if...",
+                },
+                "facets": {"subtopics": [{"value": "fasting", "count": 200}]},
+            },
+            "FN": {
+                "name": "Finance & Transactions",
+                "document_count": 1891,
+                "clusters": {
+                    "Banking Riba Operations": "Is mortgage permissible?",
+                    "Shariah Investment Screening": "How to screen investments?",
+                },
+                "facets": {"subtopics": [{"value": "riba", "count": 80}]},
+            },
+            "MF": {
+                "name": "Marriage & Family",
+                "document_count": 900,
+                "clusters": {
+                    "Nikah Conditions": "Requirements for marriage",
+                    "Mutah": "Temporary marriage rules",
+                },
+                "facets": {"subtopics": []},
+            },
+            "BE": {
+                "name": "Beliefs & Ethics",
+                "document_count": 4100,
+                "clusters": {"Taqlid": "Following a marja", "Tawbah": "Repentance conditions"},
+                "facets": {"subtopics": []},
+            },
+            "OT": {
+                "name": "Other Topics",
+                "document_count": 1200,
+                "clusters": {},
+                "facets": {"subtopics": []},
+            },
         }
     }
 
@@ -195,7 +243,7 @@ def main():
 
     results = []
     for i, query in enumerate(TEST_QUERIES):
-        print(f"\n[{i+1}/{len(TEST_QUERIES)}]", end="")
+        print(f"\n[{i + 1}/{len(TEST_QUERIES)}]", end="")
         result = test_single_query(query, kb_data)
         results.append(result)
 
@@ -205,13 +253,13 @@ def main():
     with_research = sum(1 for r in results if r["has_research"])
     failed = [r for r in results if not r["has_code"]]
 
-    print(f"\n\n{'='*60}")
+    print(f"\n\n{'=' * 60}")
     print("RESULTS")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Total:       {total}")
-    print(f"With code:   {passed}/{total} ({100*passed/total:.0f}%)")
-    print(f"With research(): {with_research}/{total} ({100*with_research/total:.0f}%)")
-    print(f"Text-only:   {total-passed}/{total} ({100*(total-passed)/total:.0f}%)")
+    print(f"With code:   {passed}/{total} ({100 * passed / total:.0f}%)")
+    print(f"With research(): {with_research}/{total} ({100 * with_research / total:.0f}%)")
+    print(f"Text-only:   {total - passed}/{total} ({100 * (total - passed) / total:.0f}%)")
 
     if failed:
         print("\nFailed queries:")
@@ -225,7 +273,19 @@ def main():
     # Save results
     out_path = os.path.join(os.path.dirname(__file__), "prefill_compliance_results.json")
     with open(out_path, "w") as f:
-        json.dump({"summary": {"total": total, "passed": passed, "with_research": with_research, "avg_llm_s": avg_llm}, "results": results}, f, indent=2)
+        json.dump(
+            {
+                "summary": {
+                    "total": total,
+                    "passed": passed,
+                    "with_research": with_research,
+                    "avg_llm_s": avg_llm,
+                },
+                "results": results,
+            },
+            f,
+            indent=2,
+        )
     print(f"\nResults saved to {out_path}")
 
 

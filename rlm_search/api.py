@@ -98,6 +98,7 @@ def _check_api_key(request: Request) -> None:
     ):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
+
 def _strip_sources_section(text: str) -> str:
     """Remove ## Sources Consulted section — rendered as SourceCards in the frontend.
 

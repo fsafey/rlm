@@ -69,9 +69,7 @@ class ClaudeCLI(BaseLM):
         prompt_text = "\n\n".join(parts)
         return prompt_text, system_prompt
 
-    def _build_cmd(
-        self, system_prompt: str | None, model_override: str | None = None
-    ) -> list[str]:
+    def _build_cmd(self, system_prompt: str | None, model_override: str | None = None) -> list[str]:
         """Build the CLI command list from instance config and per-call args.
 
         The prompt is passed via stdin (not as a CLI argument) to avoid
@@ -159,21 +157,26 @@ class ClaudeCLI(BaseLM):
 
         _log.debug(
             "claude CLI call: prompt_len=%d cmd_args=%d model=%s",
-            len(prompt_text), len(cmd), model or self.model or "default",
+            len(prompt_text),
+            len(cmd),
+            model or self.model or "default",
         )
 
         try:
             result = subprocess.run(
-                cmd, input=prompt_text,
-                capture_output=True, text=True,
-                timeout=self.timeout, env=self._clean_env(),
+                cmd,
+                input=prompt_text,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                env=self._clean_env(),
             )
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as exc:
             raise RuntimeError(
                 f"claude CLI timed out after {self.timeout}s "
                 f"(prompt_len={len(prompt_text):,} chars). "
                 f"Consider increasing timeout or reducing context."
-            )
+            ) from exc
 
         if result.returncode != 0:
             # Claude Code may write errors to stdout (JSON mode) or stderr
@@ -205,13 +208,13 @@ class ClaudeCLI(BaseLM):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(input=prompt_text.encode()), timeout=self.timeout
             )
-        except TimeoutError:
+        except TimeoutError as exc:
             proc.kill()
             await proc.wait()  # Reap child to avoid zombie processes
             raise RuntimeError(
                 f"claude CLI timed out after {self.timeout}s "
                 f"(prompt_len={len(prompt_text):,} chars)."
-            )
+            ) from exc
 
         if proc.returncode != 0:
             stderr_str = stderr.decode().strip() if stderr else "[empty]"

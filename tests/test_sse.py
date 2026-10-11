@@ -21,7 +21,8 @@ class TestSSEEndpoint:
         events = []
         for block in response_text.strip().split("\n\n"):
             data_line = next(
-                (line for line in block.split("\n") if line.startswith("data:")), None,
+                (line for line in block.split("\n") if line.startswith("data:")),
+                None,
             )
             if data_line:
                 events.append(json.loads(data_line.removeprefix("data: ")))

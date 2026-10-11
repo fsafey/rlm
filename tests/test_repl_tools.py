@@ -865,7 +865,9 @@ class TestBatchFirstEvaluateResults:
         batch_calls = []
 
         def mock_llm(prompt, model=None):
-            return "[q1] RELEVANT CONFIDENCE:4\n[q2] PARTIAL CONFIDENCE:3\n[q3] OFF-TOPIC CONFIDENCE:2"
+            return (
+                "[q1] RELEVANT CONFIDENCE:4\n[q2] PARTIAL CONFIDENCE:3\n[q3] OFF-TOPIC CONFIDENCE:2"
+            )
 
         def mock_batched(prompts, model=None):
             batch_calls.append(len(prompts))
@@ -893,7 +895,9 @@ class TestBatchFirstEvaluateResults:
         ns = _make_sub_agent_ns()
 
         def mock_llm(prompt, model=None):
-            return "Here are my evaluations:\n\n[q1] RELEVANT CONFIDENCE:4\n[q2] PARTIAL CONFIDENCE:3"
+            return (
+                "Here are my evaluations:\n\n[q1] RELEVANT CONFIDENCE:4\n[q2] PARTIAL CONFIDENCE:3"
+            )
 
         ns["_ctx"].llm_query = mock_llm
 
@@ -927,7 +931,7 @@ class TestBatchFirstEvaluateResults:
             {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
             {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
         ]
-        result = ns["evaluate_results"]("test question", hits, top_n=2)
+        ns["evaluate_results"]("test question", hits, top_n=2)
 
         assert len(batch_calls) == 1, "llm_query_batched should be called as fallback"
         assert batch_calls[0] == 2
@@ -965,18 +969,20 @@ class TestCrossCallDedup:
         ns = _make_sub_agent_ns()
 
         # Mock search_multi to return controlled hits
-        hit_sets = iter([
-            # First call returns q1, q2
+        hit_sets = iter(
             [
-                {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
-                {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
-            ],
-            # Second call returns q2 (overlap), q3 (new)
-            [
-                {"id": "q2", "score": 0.75, "question": "Q2", "answer": "A2"},
-                {"id": "q3", "score": 0.6, "question": "Q3", "answer": "A3"},
-            ],
-        ])
+                # First call returns q1, q2
+                [
+                    {"id": "q1", "score": 0.9, "question": "Q1", "answer": "A1"},
+                    {"id": "q2", "score": 0.7, "question": "Q2", "answer": "A2"},
+                ],
+                # Second call returns q2 (overlap), q3 (new)
+                [
+                    {"id": "q2", "score": 0.75, "question": "Q2", "answer": "A2"},
+                    {"id": "q3", "score": 0.6, "question": "Q3", "answer": "A3"},
+                ],
+            ]
+        )
 
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
@@ -1006,13 +1012,13 @@ class TestCrossCallDedup:
 
         with patch("rlm_search.tools.api_tools.requests.post", side_effect=mock_post):
             # First research call — should evaluate q1, q2
-            r1 = ns["research"]("question 1")
+            ns["research"]("question 1")
             assert len(eval_calls) == 1
             assert "[q1]" in eval_calls[0]
             assert "[q2]" in eval_calls[0]
 
             # Second research call — should only evaluate q3 (q2 already rated)
-            r2 = ns["research"]("question 2")
+            ns["research"]("question 2")
             assert len(eval_calls) == 2
             assert "[q3]" in eval_calls[1]
             assert "[q2]" not in eval_calls[1]  # q2 was already rated
@@ -1109,9 +1115,7 @@ class TestCritiqueAnswer:
             return "PASS\nAll good."
 
         ns["_ctx"].llm_query = capture_prompt
-        ns["_ctx"].evidence.register_hit(
-            {"id": "42", "question": "Test Q", "answer": "Test A"}
-        )
+        ns["_ctx"].evidence.register_hit({"id": "42", "question": "Test Q", "answer": "Test A"})
         result = ns["critique_answer"]("question", "draft [Source: 42]")
         assert result["passed"] is True
         # Should have used evidence-grounded path (CITATION_ACCURACY check)
@@ -1221,6 +1225,7 @@ class TestResearch:
 
     def test_filters_off_topic(self, capsys):
         ns = _make_sub_agent_ns()
+
         # Content-aware mock: return consistent rating based on result ID.
         # Incremental evaluation may re-evaluate OFF-TOPIC results at each
         # checkpoint, so position-based mocks don't work reliably.
@@ -1932,17 +1937,13 @@ class TestCheckProgress:
         ctx = ns["_ctx"]
         # Setup: 2 relevant, 2 partial, top_score=0.5, 3 searches, no draft
         for i in range(4):
-            ctx.evidence.register_hit(
-                {"id": str(i), "question": "Q", "answer": "A", "score": 0.5}
-            )
+            ctx.evidence.register_hit({"id": str(i), "question": "Q", "answer": "A", "score": 0.5})
         ctx.evidence.set_rating("0", "RELEVANT", confidence=4)
         ctx.evidence.set_rating("1", "RELEVANT", confidence=4)
         ctx.evidence.set_rating("2", "PARTIAL", confidence=3)
         ctx.evidence.set_rating("3", "PARTIAL", confidence=3)
         for j in range(3):
-            ctx.evidence.log_search(
-                query=f"q_{j}", num_results=4, filters={"parent_code": "FN"}
-            )
+            ctx.evidence.log_search(query=f"q_{j}", num_results=4, filters={"parent_code": "FN"})
 
         result = ns["check_progress"]()
         # QualityGate formula:

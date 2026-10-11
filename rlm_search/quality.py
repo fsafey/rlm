@@ -178,7 +178,9 @@ class QualityGate:
             if dims:
                 # ~2.5 points per passing dimension (6 dims × 2.5 = 15 max)
                 n_passed = sum(1 for d in dims.values() if d.get("verdict") == "PASS")
-                critique_score = min(WEIGHT_CRITIQUE, int(WEIGHT_CRITIQUE * n_passed / max(len(dims), 1)))
+                critique_score = min(
+                    WEIGHT_CRITIQUE, int(WEIGHT_CRITIQUE * n_passed / max(len(dims), 1))
+                )
             else:
                 # Fallback: no structured dimensions available (binary)
                 critique_score = WEIGHT_CRITIQUE if self._last_critique["passed"] else 5

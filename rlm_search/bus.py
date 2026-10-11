@@ -29,7 +29,8 @@ class EventBus:
         self._done = False
 
     def bind_and_replay(
-        self, loop: asyncio.AbstractEventLoop,
+        self,
+        loop: asyncio.AbstractEventLoop,
     ) -> list[dict[str, Any]]:
         """Atomically bind async queue and return all historical events.
 
@@ -61,7 +62,7 @@ class EventBus:
             return None
         try:
             return await asyncio.wait_for(self._async_q.get(), timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
     def replay(self) -> list[dict[str, Any]]:

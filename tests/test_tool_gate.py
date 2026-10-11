@@ -86,7 +86,11 @@ class TestApplyGate:
         assert "critique_answer" not in ns
         assert "evaluate_results" not in ns
         assert set(removed) == {
-            "rlm_query", "browse", "reformulate", "critique_answer", "evaluate_results",
+            "rlm_query",
+            "browse",
+            "reformulate",
+            "critique_answer",
+            "evaluate_results",
         }
 
     def test_focused_keeps_core_tools(self):

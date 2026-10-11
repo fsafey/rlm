@@ -73,7 +73,8 @@ def search(
         query = query[:MAX_QUERY_LEN]
     # Query diversity guard — warn on near-duplicate queries
     prior_queries = [
-        e["query"] for e in ctx.search_log
+        e["query"]
+        for e in ctx.search_log
         if e.get("type") in ("search", "search_multi") and "query" in e
     ]
     for pq in prior_queries:

@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "platform": "linux",
+  "required_platforms": [
+    "linux"
+  ],
+  "target_branch": "main",
+  "unsupported_requirements": [],
+  "artifacts": [],
+  "repository": "fsafey/rlm",
+  "checks": [
+    {
+      "name": "python-3.11-setup",
+      "command": "UV_PROJECT_ENVIRONMENT=\"$CI_OUTPUT_DIR/venv-3.11\" uv sync --locked --python 3.11 --no-default-groups --group test\nuv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.11/bin/python\" python -c \"import sys; assert sys.version_info[:2] == (3, 11)\"",
+      "matrix": {
+        "python": "3.11"
+      }
+    },
+    {
+      "name": "python-3.11-tests",
+      "command": "uv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.11/bin/python\" python -m pytest tests/ -v --ignore=tests/repl/test_modal_repl.py --ignore=tests/clients/ --cov=rlm --cov-report=term-missing",
+      "matrix": {
+        "python": "3.11"
+      }
+    },
+    {
+      "name": "python-3.12-setup",
+      "command": "UV_PROJECT_ENVIRONMENT=\"$CI_OUTPUT_DIR/venv-3.12\" uv sync --locked --python 3.12 --no-default-groups --group test\nuv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.12/bin/python\" python -c \"import sys; assert sys.version_info[:2] == (3, 12)\"",
+      "matrix": {
+        "python": "3.12"
+      }
+    },
+    {
+      "name": "python-3.12-tests",
+      "command": "uv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.12/bin/python\" python -m pytest tests/ -v --ignore=tests/repl/test_modal_repl.py --ignore=tests/clients/ --cov=rlm --cov-report=term-missing",
+      "matrix": {
+        "python": "3.12"
+      }
+    },
+    {
+      "name": "style-setup",
+      "command": "uv pip install --python \"$CI_OUTPUT_DIR/venv-3.12/bin/python\" ruff==0.14.10 ty==0.0.1a21",
+      "matrix": {
+        "python": "3.12"
+      }
+    },
+    {
+      "name": "ruff-lint",
+      "command": "\"$CI_OUTPUT_DIR/venv-3.12/bin/ruff\" check --config=pyproject.toml ."
+    },
+    {
+      "name": "ruff-format",
+      "command": "\"$CI_OUTPUT_DIR/venv-3.12/bin/ruff\" format --check --config=pyproject.toml ."
+    },
+    {
+      "name": "ty-advisory",
+      "command": "\"$CI_OUTPUT_DIR/venv-3.12/bin/ty\" check --exit-zero --output-format=concise",
+      "advisory": true
+    }
+  ]
+}

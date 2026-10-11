@@ -49,7 +49,11 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
     if confidence == "LOW":
         strategy = classified.get("strategy", "")
         also = classified.get("also_category", "")
-        base = strategy if strategy else "Low confidence classification — search broadly without filters."
+        base = (
+            strategy
+            if strategy
+            else "Low confidence classification — search broadly without filters."
+        )
         if also:
             base += f" Also consider category {also}."
         return base
@@ -59,9 +63,7 @@ def _suggest_strategy(ctx: ToolContext, categories_explored: set) -> str:
         c.strip() for c in classified.get("clusters", "").split(",") if c.strip()
     ]
     used_clusters = {
-        e.get("filters", {}).get("cluster_label")
-        for e in ctx.search_log
-        if e.get("filters")
+        e.get("filters", {}).get("cluster_label") for e in ctx.search_log if e.get("filters")
     } - {None}
 
     unsearched = [c for c in classified_clusters if c not in used_clusters]

@@ -1,4 +1,5 @@
 """tests/test_session_manager.py"""
+
 import time
 from unittest.mock import MagicMock
 
@@ -70,6 +71,7 @@ class TestSessionManagerPrepareFollowUp:
         mock_rlm = MagicMock()
         sid = mgr.create_session(rlm=mock_rlm, bus=MagicMock())
         from rlm_search.bus import EventBus
+
         new_bus = EventBus()
         rlm, session = mgr.prepare_follow_up(sid, new_bus, search_id="s2")
         assert rlm is mock_rlm
@@ -81,11 +83,13 @@ class TestSessionManagerPrepareFollowUp:
         sid = mgr.create_session(rlm=MagicMock(), bus=MagicMock())
         mgr.get(sid).active_search_id = "s1"
         import pytest
+
         with pytest.raises(ValueError, match="busy"):
             mgr.prepare_follow_up(sid, MagicMock(), search_id="s2")
 
     def test_prepare_follow_up_raises_if_not_found(self):
         mgr = SessionManager()
         import pytest
+
         with pytest.raises(KeyError):
             mgr.prepare_follow_up("nonexistent", MagicMock(), search_id="s2")

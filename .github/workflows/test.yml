@@ -25,12 +25,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install --system -e .
-          uv pip install --system pytest pytest-asyncio pytest-cov
+          uv sync --locked --no-default-groups --group test --extra search
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v \
+          uv run --no-sync python -m pytest tests/ -v \
             --ignore=tests/repl/test_modal_repl.py \
             --ignore=tests/clients/ \
             --cov=rlm \

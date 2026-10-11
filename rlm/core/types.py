@@ -44,7 +44,7 @@ def _serialize_value(value: Any) -> Any:
 @dataclass
 class ModelUsageSummary:
     total_calls: int
-    total_input_tokens: int       # regular input only (excl. cache reads)
+    total_input_tokens: int  # regular input only (excl. cache reads)
     total_output_tokens: int
     total_cache_read_tokens: int = 0  # cache reads — priced at 10% of input rate
 

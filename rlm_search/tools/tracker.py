@@ -30,7 +30,10 @@ def _emit(ctx: Any, tool: str, phase: str, data: dict[str, Any], duration_ms: in
     """Emit tool progress — via EventBus if available, else legacy callback."""
     bus = getattr(ctx, "bus", None)
     if bus is not None:
-        bus.emit("tool_progress", {"tool": tool, "phase": phase, "data": data or {}, "duration_ms": duration_ms})
+        bus.emit(
+            "tool_progress",
+            {"tool": tool, "phase": phase, "data": data or {}, "duration_ms": duration_ms},
+        )
         return
     # Legacy path: use progress_callback
     cb = getattr(ctx, "progress_callback", None)

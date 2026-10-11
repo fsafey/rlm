@@ -159,7 +159,9 @@ def _extract_classification(results: list[dict]) -> dict:
         else:
             missing_pc += 1
     if missing_pc:
-        print(f"[classify] WARNING: {missing_pc}/{len(results)} results missing parent_code metadata")
+        print(
+            f"[classify] WARNING: {missing_pc}/{len(results)} results missing parent_code metadata"
+        )
 
     if not parent_counts:
         return {
@@ -332,10 +334,15 @@ def research(
                     # ── Script-based classification (runs once, ~5ms) ──
                     if ctx.classification is None and r["results"]:
                         ctx.classification = _extract_classification(r["results"])
-                        _emit(ctx, "research", "classified", {
-                            "category": ctx.classification["category"],
-                            "confidence": ctx.classification["confidence"],
-                        })
+                        _emit(
+                            ctx,
+                            "research",
+                            "classified",
+                            {
+                                "category": ctx.classification["category"],
+                                "confidence": ctx.classification["confidence"],
+                            },
+                        )
                 except Exception as e:
                     errors.append(str(e))
                     print(f"[research] WARNING: search failed: {e}")
@@ -725,8 +732,7 @@ def draft_answer(
                             f"ISSUES:\n{fix_details}\n\n" if fix_details else "",
                             f"CRITIQUE:\n{critique_text}\n\n",
                             f"ORIGINAL:\n{answer}\n\n",
-                            "Return ONLY the fixed answer. "
-                            "Preserve the original format.\n",
+                            "Return ONLY the fixed answer. Preserve the original format.\n",
                         ]
                     else:
                         # Substantive issues — build targeted revision prompt

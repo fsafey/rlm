@@ -11,7 +11,7 @@
   "checks": [
     {
       "name": "python-3.11-setup",
-      "command": "UV_PROJECT_ENVIRONMENT=\"$CI_OUTPUT_DIR/venv-3.11\" uv sync --locked --python 3.11 --no-default-groups --group test\nuv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.11/bin/python\" python -c \"import sys; assert sys.version_info[:2] == (3, 11)\"",
+      "command": "UV_PROJECT_ENVIRONMENT=\"$CI_OUTPUT_DIR/venv-3.11\" uv sync --locked --python 3.11 --no-default-groups --group test --extra search\nuv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.11/bin/python\" python -c \"import sys; assert sys.version_info[:2] == (3, 11)\"",
       "matrix": {
         "python": "3.11"
       }
@@ -25,7 +25,7 @@
     },
     {
       "name": "python-3.12-setup",
-      "command": "UV_PROJECT_ENVIRONMENT=\"$CI_OUTPUT_DIR/venv-3.12\" uv sync --locked --python 3.12 --no-default-groups --group test\nuv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.12/bin/python\" python -c \"import sys; assert sys.version_info[:2] == (3, 12)\"",
+      "command": "UV_PROJECT_ENVIRONMENT=\"$CI_OUTPUT_DIR/venv-3.12\" uv sync --locked --python 3.12 --no-default-groups --group test --extra search\nuv run --no-project --python \"$CI_OUTPUT_DIR/venv-3.12/bin/python\" python -c \"import sys; assert sys.version_info[:2] == (3, 12)\"",
       "matrix": {
         "python": "3.12"
       }

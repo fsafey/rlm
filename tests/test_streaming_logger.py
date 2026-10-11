@@ -1,4 +1,5 @@
 """tests/test_streaming_v2.py"""
+
 import json
 import os
 import tempfile
@@ -11,10 +12,12 @@ from rlm_search.streaming_logger import StreamingLoggerV2
 def _make_iteration(response: str = "test", code: str = "", stdout: str = "") -> RLMIteration:
     blocks = []
     if code:
-        blocks.append(CodeBlock(
-            code=code,
-            result=REPLResult(stdout=stdout, stderr="", locals={}, execution_time=0.1),
-        ))
+        blocks.append(
+            CodeBlock(
+                code=code,
+                result=REPLResult(stdout=stdout, stderr="", locals={}, execution_time=0.1),
+            )
+        )
     return RLMIteration(
         prompt=[{"role": "user", "content": "test"}],
         response=response,
@@ -79,9 +82,13 @@ class TestStreamingV2WritesJSONL:
                 log_dir=tmpdir, file_name="test", search_id="s1", query="q", bus=bus
             )
             meta = RLMMetadata(
-                root_model="m", max_depth=1, max_iterations=10,
-                backend="anthropic", backend_kwargs={},
-                environment_type="local", environment_kwargs={},
+                root_model="m",
+                max_depth=1,
+                max_iterations=10,
+                backend="anthropic",
+                backend_kwargs={},
+                environment_type="local",
+                environment_kwargs={},
             )
             logger.log_metadata(meta)
             logger.log(_make_iteration())
@@ -107,5 +114,6 @@ class TestStreamingV2Cancellation:
             import pytest
 
             from rlm_search.bus import SearchCancelled
+
             with pytest.raises(SearchCancelled):
                 logger.raise_if_cancelled()

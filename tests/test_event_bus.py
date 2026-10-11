@@ -100,6 +100,7 @@ class TestEventBusAsync:
 
     def test_emit_after_bind_pushes_to_queue(self):
         """Events emitted after bind_and_replay land in the async queue."""
+
         async def _run():
             bus = EventBus()
             bus.emit("before", {})
@@ -123,6 +124,7 @@ class TestEventBusAsync:
 
     def test_cross_thread_emit_reaches_queue(self):
         """Emit from a background thread is delivered to the async queue."""
+
         async def _run():
             bus = EventBus()
             bus.bind_and_replay(asyncio.get_running_loop())

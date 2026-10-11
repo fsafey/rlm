@@ -39,22 +39,28 @@ class StreamingLoggerV2(RLMLogger):
     def on_llm_start(self, iteration: int) -> None:
         """Emit tool_progress so the frontend shows LLM thinking phase."""
         self._llm_start_time = time.monotonic()
-        self.bus.emit("tool_progress", {
-            "tool": "_llm",
-            "phase": "start",
-            "data": {"iteration": iteration},
-            "duration_ms": 0,
-        })
+        self.bus.emit(
+            "tool_progress",
+            {
+                "tool": "_llm",
+                "phase": "start",
+                "data": {"iteration": iteration},
+                "duration_ms": 0,
+            },
+        )
 
     def on_code_executing(self, iteration: int, num_blocks: int) -> None:
         """Close the LLM node with actual call duration before tools execute."""
         duration_ms = int((time.monotonic() - self._llm_start_time) * 1000)
-        self.bus.emit("tool_progress", {
-            "tool": "_llm",
-            "phase": "end",
-            "data": {"iteration": iteration, "num_blocks": num_blocks},
-            "duration_ms": duration_ms,
-        })
+        self.bus.emit(
+            "tool_progress",
+            {
+                "tool": "_llm",
+                "phase": "end",
+                "data": {"iteration": iteration, "num_blocks": num_blocks},
+                "duration_ms": duration_ms,
+            },
+        )
 
     def log_metadata(self, metadata: RLMMetadata) -> None:
         """Emit metadata to bus + write to JSONL."""

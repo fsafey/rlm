@@ -236,7 +236,9 @@ class RLM:
                 )
                 setup_summary = getattr(environment, "setup_summary", None) if i == 0 else None
                 current_prompt = message_history + [
-                    build_user_prompt(root_prompt, i, context_count, history_count, setup_summary=setup_summary)
+                    build_user_prompt(
+                        root_prompt, i, context_count, history_count, setup_summary=setup_summary
+                    )
                 ]
 
                 iteration: RLMIteration = self._completion_turn(
@@ -257,21 +259,23 @@ class RLM:
                     consecutive_empty = 0
 
                 if consecutive_empty >= 1 and final_answer is None:
-                    message_history.append({
-                        "role": "user",
-                        "content": (
-                            "STOP. Your response contained no ```repl``` code block. "
-                            "You MUST write executable code — do NOT answer in plain text. "
-                            "The corpus has the answers; you need to search for them.\n\n"
-                            "Write a ```repl``` block NOW that calls research() to search the corpus. "
-                            "Example:\n"
-                            "```repl\n"
-                            "filters = classification['filters'] if classification else None\n"
-                            "results = research(question, filters=filters)\n"
-                            "progress = check_progress()\n"
-                            "```"
-                        ),
-                    })
+                    message_history.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "STOP. Your response contained no ```repl``` code block. "
+                                "You MUST write executable code — do NOT answer in plain text. "
+                                "The corpus has the answers; you need to search for them.\n\n"
+                                "Write a ```repl``` block NOW that calls research() to search the corpus. "
+                                "Example:\n"
+                                "```repl\n"
+                                "filters = classification['filters'] if classification else None\n"
+                                "results = research(question, filters=filters)\n"
+                                "progress = check_progress()\n"
+                                "```"
+                            ),
+                        }
+                    )
                     consecutive_empty = 0
 
                 # If logger is used, log the iteration.

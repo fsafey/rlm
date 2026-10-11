@@ -72,11 +72,7 @@ def format_evidence(
         meta = r.get("metadata", {})
         topic = meta.get("primary_topic", "")
         category = meta.get("parent_category", "")
-        tag = (
-            f" | {category} > {topic}"
-            if category and topic
-            else (f" | {topic}" if topic else "")
-        )
+        tag = f" | {category} > {topic}" if category and topic else (f" | {topic}" if topic else "")
 
         # Annotate with rating when available
         rating_tag = ""
